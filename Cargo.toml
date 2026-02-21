@@ -75,3 +75,8 @@ sigil-tools = { path = "crates/sigil-tools" }
 sigil-orchestrator = { path = "crates/sigil-orchestrator" }
 sigil-memory = { path = "crates/sigil-memory" }
 sigil-channels = { path = "crates/sigil-channels" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

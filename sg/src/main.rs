@@ -7,7 +7,10 @@ use sigil_core::{Agent, AgentConfig, Identity, SecretStore, SigilConfig};
 use sigil_memory::SqliteMemory;
 use sigil_orchestrator::{ConvoyStore, CronJob, CronSchedule, CronStore, Daemon, Familiar, MailBus, Molecule, Rig, Witness};
 use sigil_providers::OpenRouterProvider;
-use sigil_tools::{FileReadTool, FileWriteTool, ListDirTool, ShellTool, Skill};
+use sigil_tools::{
+    BeadsCreateTool, BeadsReadyTool, BeadsUpdateTool, BeadsCloseTool, BeadsShowTool, BeadsDepTool,
+    FileReadTool, FileWriteTool, GitWorktreeTool, ListDirTool, ShellTool, Skill,
+};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -364,6 +367,49 @@ fn build_tools(workdir: &PathBuf) -> Vec<Arc<dyn Tool>> {
     ]
 }
 
+/// Build the full tool set for a rig: basic tools + beads + git worktree.
+fn build_rig_tools(
+    workdir: &PathBuf,
+    beads_dir: &PathBuf,
+    prefix: &str,
+    worktree_root: Option<&PathBuf>,
+) -> Vec<Arc<dyn Tool>> {
+    let mut tools: Vec<Arc<dyn Tool>> = vec![
+        Arc::new(ShellTool::new(workdir.clone())),
+        Arc::new(FileReadTool::new(workdir.clone())),
+        Arc::new(FileWriteTool::new(workdir.clone())),
+        Arc::new(ListDirTool::new(workdir.clone())),
+    ];
+
+    // Add beads tools (each gets its own store instance).
+    if let Ok(t) = BeadsCreateTool::new(beads_dir.clone(), prefix.to_string()) {
+        tools.push(Arc::new(t));
+    }
+    if let Ok(t) = BeadsReadyTool::new(beads_dir.clone()) {
+        tools.push(Arc::new(t));
+    }
+    if let Ok(t) = BeadsUpdateTool::new(beads_dir.clone()) {
+        tools.push(Arc::new(t));
+    }
+    if let Ok(t) = BeadsCloseTool::new(beads_dir.clone()) {
+        tools.push(Arc::new(t));
+    }
+    if let Ok(t) = BeadsShowTool::new(beads_dir.clone()) {
+        tools.push(Arc::new(t));
+    }
+    if let Ok(t) = BeadsDepTool::new(beads_dir.clone()) {
+        tools.push(Arc::new(t));
+    }
+
+    // Add git worktree tool.
+    let wt_root = worktree_root
+        .cloned()
+        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join("worktrees"));
+    tools.push(Arc::new(GitWorktreeTool::new(workdir.clone(), wt_root)));
+
+    tools
+}
+
 fn open_beads_for_rig(rig_name: &str) -> Result<BeadStore> {
     let rig_dir = find_rig_dir(rig_name)?;
     let beads_dir = rig_dir.join(".beads");
@@ -406,7 +452,15 @@ async fn cmd_run(
         .and_then(|r| config.rig(r))
         .map(|r| PathBuf::from(&r.repo))
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-    let tools = build_tools(&workdir);
+    let tools = if let Some(rn) = rig_name {
+        let rig_dir = find_rig_dir(rn)?;
+        let beads_dir = rig_dir.join(".beads");
+        let prefix = config.rig(rn).map(|r| r.prefix.as_str()).unwrap_or("sg");
+        let worktree_root = config.rig(rn).and_then(|r| r.worktree_root.as_ref()).map(PathBuf::from);
+        build_rig_tools(&workdir, &beads_dir, prefix, worktree_root.as_ref())
+    } else {
+        build_tools(&workdir)
+    };
     let identity = rig_name
         .and_then(|r| find_rig_dir(r).ok())
         .map(|d| Identity::load(&d).unwrap_or_default())
@@ -810,7 +864,8 @@ async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonAction) -> Resu
 
                 let rig = Arc::new(Rig::from_config(rig_cfg, &rig_dir, default_model)?);
                 let workdir = rig.repo.clone();
-                let tools = build_tools(&workdir);
+                let beads_dir = rig_dir.join(".beads");
+                let tools = build_rig_tools(&workdir, &beads_dir, &rig_cfg.prefix, Some(&rig.worktree_root));
                 let witness = Witness::new(&rig, provider.clone(), tools.clone(), mail_bus.clone());
                 familiar.register_rig(rig.clone(), witness);
 
@@ -1154,7 +1209,9 @@ async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction) -> Result
             // Build provider.
             let provider = build_provider(&config)?;
             let workdir = PathBuf::from(&rig_cfg.repo);
-            let all_tools = build_tools(&workdir);
+            let beads_dir = rig_dir.join(".beads");
+            let worktree_root = rig_cfg.worktree_root.as_ref().map(PathBuf::from);
+            let all_tools = build_rig_tools(&workdir, &beads_dir, &rig_cfg.prefix, worktree_root.as_ref());
 
             // Filter tools by skill policy.
             let filtered_tools: Vec<Arc<dyn Tool>> = all_tools.into_iter()
