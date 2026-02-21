@@ -1,9 +1,13 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use sigil_core::traits::{LogObserver, Observer, Provider, Tool};
+use sigil_beads::BeadStore;
+use sigil_core::traits::{LogObserver, Memory, Observer, Provider, Tool};
 use sigil_core::{Agent, AgentConfig, Identity, SecretStore, SigilConfig};
+use sigil_memory::SqliteMemory;
+use sigil_orchestrator::{Daemon, Familiar, MailBus, Molecule, Rig, Witness};
 use sigil_providers::OpenRouterProvider;
 use sigil_tools::{FileReadTool, FileWriteTool, ListDirTool, ShellTool};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
@@ -11,11 +15,9 @@ use tracing::info;
 #[derive(Parser)]
 #[command(name = "sg", version, about = "Sigil — Multi-Agent Orchestration")]
 struct Cli {
-    /// Path to sigil.toml config file.
     #[arg(short, long)]
     config: Option<PathBuf>,
 
-    /// Log level (trace, debug, info, warn, error).
     #[arg(long, default_value = "info")]
     log_level: String,
 
@@ -27,58 +29,123 @@ struct Cli {
 enum Commands {
     /// Run a one-shot agent with a prompt.
     Run {
-        /// The prompt/task for the agent.
         prompt: String,
-
-        /// Rig to run in (loads rig identity files).
         #[arg(short, long)]
         rig: Option<String>,
-
-        /// Model override.
         #[arg(short, long)]
         model: Option<String>,
-
-        /// Maximum iterations.
         #[arg(long, default_value = "20")]
         max_iterations: u32,
     },
-
     /// Initialize Sigil in the current directory.
     Init,
-
     /// Manage encrypted secrets.
     Secrets {
         #[command(subcommand)]
         action: SecretsAction,
     },
-
     /// Run diagnostics.
     Doctor,
-
     /// Show system status.
     Status,
+
+    // --- Phase 2: Beads ---
+    /// Assign a task to a rig.
+    Assign {
+        subject: String,
+        #[arg(short, long)]
+        rig: String,
+        #[arg(short, long, default_value = "")]
+        description: String,
+        #[arg(short, long)]
+        priority: Option<String>,
+    },
+    /// Show unblocked (ready) work.
+    Ready {
+        #[arg(short, long)]
+        rig: Option<String>,
+    },
+    /// Show all open beads.
+    Beads {
+        #[arg(short, long)]
+        rig: Option<String>,
+        #[arg(long)]
+        all: bool,
+    },
+    /// Close a bead.
+    Close {
+        id: String,
+        #[arg(short, long, default_value = "completed")]
+        reason: String,
+    },
+
+    // --- Phase 3: Orchestrator ---
+    /// Manage the daemon.
+    Daemon {
+        #[command(subcommand)]
+        action: DaemonAction,
+    },
+
+    // --- Phase 4: Memory ---
+    /// Search collective memory.
+    Recall {
+        query: String,
+        #[arg(short, long)]
+        rig: Option<String>,
+        #[arg(short, long, default_value = "5")]
+        top_k: usize,
+    },
+    /// Store a memory.
+    Remember {
+        key: String,
+        content: String,
+        #[arg(short, long)]
+        rig: Option<String>,
+    },
+
+    // --- Phase 5: Molecules ---
+    /// Molecule workflow commands.
+    Mol {
+        #[command(subcommand)]
+        action: MolAction,
+    },
 }
 
 #[derive(Subcommand)]
 enum SecretsAction {
-    /// Set a secret value.
-    Set {
-        /// Secret name.
-        name: String,
-        /// Secret value.
-        value: String,
-    },
-    /// Get a secret value.
-    Get {
-        /// Secret name.
-        name: String,
-    },
-    /// List all secrets.
+    Set { name: String, value: String },
+    Get { name: String },
     List,
-    /// Delete a secret.
-    Delete {
-        /// Secret name.
-        name: String,
+    Delete { name: String },
+}
+
+#[derive(Subcommand)]
+enum DaemonAction {
+    /// Start the daemon (runs in foreground).
+    Start,
+    /// Show daemon status.
+    Status,
+}
+
+#[derive(Subcommand)]
+enum MolAction {
+    /// Pour (instantiate) a molecule workflow.
+    Pour {
+        template: String,
+        #[arg(short, long)]
+        rig: String,
+        /// Variables as key=value pairs.
+        #[arg(long = "var")]
+        vars: Vec<String>,
+    },
+    /// List available molecule templates.
+    List {
+        #[arg(short, long)]
+        rig: Option<String>,
+    },
+    /// Show status of a molecule (parent bead and its children).
+    Status {
+        id: String,
     },
 }
 
@@ -86,7 +153,6 @@ enum SecretsAction {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Initialize tracing.
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -96,18 +162,111 @@ async fn main() -> Result<()> {
         .init();
 
     match cli.command {
-        Commands::Run {
-            prompt,
-            rig,
-            model,
-            max_iterations,
-        } => cmd_run(&cli.config, &prompt, rig.as_deref(), model.as_deref(), max_iterations).await,
+        Commands::Run { prompt, rig, model, max_iterations } => {
+            cmd_run(&cli.config, &prompt, rig.as_deref(), model.as_deref(), max_iterations).await
+        }
         Commands::Init => cmd_init().await,
         Commands::Secrets { action } => cmd_secrets(&cli.config, action).await,
         Commands::Doctor => cmd_doctor(&cli.config).await,
         Commands::Status => cmd_status(&cli.config).await,
+        Commands::Assign { subject, rig, description, priority } => {
+            cmd_assign(&cli.config, &subject, &rig, &description, priority.as_deref()).await
+        }
+        Commands::Ready { rig } => cmd_ready(&cli.config, rig.as_deref()).await,
+        Commands::Beads { rig, all } => cmd_beads(&cli.config, rig.as_deref(), all).await,
+        Commands::Close { id, reason } => cmd_close(&cli.config, &id, &reason).await,
+        Commands::Daemon { action } => cmd_daemon(&cli.config, action).await,
+        Commands::Recall { query, rig, top_k } => {
+            cmd_recall(&cli.config, &query, rig.as_deref(), top_k).await
+        }
+        Commands::Remember { key, content, rig } => {
+            cmd_remember(&cli.config, &key, &content, rig.as_deref()).await
+        }
+        Commands::Mol { action } => cmd_mol(&cli.config, action).await,
     }
 }
+
+// === Helpers ===
+
+fn load_config(config_path: &Option<PathBuf>) -> Result<(SigilConfig, PathBuf)> {
+    if let Some(path) = config_path {
+        Ok((SigilConfig::load(path)?, path.clone()))
+    } else {
+        SigilConfig::discover()
+    }
+}
+
+fn find_rig_dir(name: &str) -> Result<PathBuf> {
+    let candidates = [
+        PathBuf::from(format!("rigs/{name}")),
+        PathBuf::from(format!("../rigs/{name}")),
+    ];
+    for c in &candidates {
+        if c.exists() { return Ok(c.clone()); }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut dir = cwd.as_path();
+        loop {
+            let candidate = dir.join("rigs").join(name);
+            if candidate.exists() { return Ok(candidate); }
+            match dir.parent() {
+                Some(p) => dir = p,
+                None => break,
+            }
+        }
+    }
+    anyhow::bail!("rig directory not found: {name}")
+}
+
+fn get_api_key(config: &SigilConfig) -> Result<String> {
+    let or_config = config.providers.openrouter.as_ref()
+        .context("no OpenRouter provider configured")?;
+    if !or_config.api_key.is_empty() {
+        return Ok(or_config.api_key.clone());
+    }
+    let store_path = config.security.secret_store.as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| config.data_dir().join("secrets"));
+    let store = SecretStore::open(&store_path)?;
+    store.get("OPENROUTER_API_KEY")
+        .context("OPENROUTER_API_KEY not set. Use `sg secrets set OPENROUTER_API_KEY <key>`")
+}
+
+fn build_provider(config: &SigilConfig) -> Result<Arc<dyn Provider>> {
+    let api_key = get_api_key(config)?;
+    let model = config.providers.openrouter.as_ref()
+        .map(|or| or.default_model.clone())
+        .unwrap_or_else(|| "minimax/minimax-m2.5".to_string());
+    Ok(Arc::new(OpenRouterProvider::new(api_key, model)))
+}
+
+fn build_tools(workdir: &PathBuf) -> Vec<Arc<dyn Tool>> {
+    vec![
+        Arc::new(ShellTool::new(workdir.clone())),
+        Arc::new(FileReadTool::new(workdir.clone())),
+        Arc::new(FileWriteTool::new(workdir.clone())),
+        Arc::new(ListDirTool::new(workdir.clone())),
+    ]
+}
+
+fn open_beads_for_rig(rig_name: &str) -> Result<BeadStore> {
+    let rig_dir = find_rig_dir(rig_name)?;
+    let beads_dir = rig_dir.join(".beads");
+    BeadStore::open(&beads_dir)
+}
+
+fn open_memory(config: &SigilConfig, rig_name: Option<&str>) -> Result<SqliteMemory> {
+    let db_path = if let Some(name) = rig_name {
+        let rig_dir = find_rig_dir(name)?;
+        rig_dir.join(".sigil").join("memory.db")
+    } else {
+        config.data_dir().join("memory.db")
+    };
+    let halflife = config.memory.temporal_decay_halflife_days;
+    SqliteMemory::open(&db_path, halflife)
+}
+
+// === Commands ===
 
 async fn cmd_run(
     config_path: &Option<PathBuf>,
@@ -116,75 +275,29 @@ async fn cmd_run(
     model_override: Option<&str>,
     max_iterations: u32,
 ) -> Result<()> {
-    let (config, _config_path) = load_config(config_path)?;
+    let (config, _) = load_config(config_path)?;
 
-    // Determine model.
     let model = model_override
         .map(String::from)
         .or_else(|| rig_name.map(|r| config.model_for_rig(r)))
         .unwrap_or_else(|| {
-            config
-                .providers
-                .openrouter
-                .as_ref()
+            config.providers.openrouter.as_ref()
                 .map(|or| or.default_model.clone())
-                .unwrap_or_else(|| "anthropic/claude-sonnet-4.6".to_string())
+                .unwrap_or_else(|| "minimax/minimax-m2.5".to_string())
         });
 
-    // Build provider.
-    let or_config = config
-        .providers
-        .openrouter
-        .as_ref()
-        .context("no OpenRouter provider configured in sigil.toml")?;
-
-    let api_key = if or_config.api_key.is_empty() {
-        // Try secret store.
-        let store_path = config
-            .security
-            .secret_store
-            .as_ref()
-            .map(|s| PathBuf::from(s))
-            .unwrap_or_else(|| config.data_dir().join("secrets"));
-        let store = SecretStore::open(&store_path)?;
-        store
-            .get("OPENROUTER_API_KEY")
-            .context("OPENROUTER_API_KEY not set. Use `sg secrets set OPENROUTER_API_KEY <key>`")?
-    } else {
-        or_config.api_key.clone()
-    };
-
-    let provider = Arc::new(OpenRouterProvider::new(api_key, model.clone()));
-
-    // Build tools.
-    let workdir = if let Some(rig_name) = rig_name {
-        config
-            .rig(rig_name)
-            .map(|r| PathBuf::from(&r.repo))
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
-    } else {
-        std::env::current_dir().unwrap_or_default()
-    };
-
-    let tools: Vec<Arc<dyn Tool>> = vec![
-        Arc::new(ShellTool::new(workdir.clone())),
-        Arc::new(FileReadTool::new(workdir.clone())),
-        Arc::new(FileWriteTool::new(workdir.clone())),
-        Arc::new(ListDirTool::new(workdir.clone())),
-    ];
-
-    // Load identity.
-    let identity = if let Some(rig_name) = rig_name {
-        let rig_dir = find_rig_dir(rig_name)?;
-        Identity::load(&rig_dir).unwrap_or_default()
-    } else {
-        Identity::default()
-    };
-
-    // Build observer.
+    let provider = build_provider(&config)?;
+    let workdir = rig_name
+        .and_then(|r| config.rig(r))
+        .map(|r| PathBuf::from(&r.repo))
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    let tools = build_tools(&workdir);
+    let identity = rig_name
+        .and_then(|r| find_rig_dir(r).ok())
+        .map(|d| Identity::load(&d).unwrap_or_default())
+        .unwrap_or_default();
     let observer: Arc<dyn Observer> = Arc::new(LogObserver);
 
-    // Build agent config.
     let agent_config = AgentConfig {
         model,
         max_iterations,
@@ -192,39 +305,29 @@ async fn cmd_run(
         ..Default::default()
     };
 
-    // Run agent.
     info!(prompt = %prompt, "starting agent");
     let agent = Agent::new(agent_config, provider, tools, observer, identity);
     let result = agent.run(prompt).await?;
-
-    // Print final output.
     println!("{result}");
-
     Ok(())
 }
 
 async fn cmd_init() -> Result<()> {
     let cwd = std::env::current_dir()?;
-
-    // Create config directory.
     let config_dir = cwd.join("config");
     std::fs::create_dir_all(&config_dir)?;
+    std::fs::create_dir_all(cwd.join("rigs"))?;
 
-    // Create rigs directory.
-    let rigs_dir = cwd.join("rigs");
-    std::fs::create_dir_all(&rigs_dir)?;
-
-    // Create default config.
     let config_path = config_dir.join("sigil.toml");
     if !config_path.exists() {
-        let default_config = r#"[sigil]
+        std::fs::write(&config_path, r#"[sigil]
 name = "my-sigil"
 data_dir = "~/.sigil"
 
 [providers.openrouter]
 api_key = "${OPENROUTER_API_KEY}"
-default_model = "anthropic/claude-sonnet-4.6"
-fallback_model = "anthropic/claude-haiku-4-5-20251001"
+default_model = "minimax/minimax-m2.5"
+fallback_model = "deepseek/deepseek-v3.2"
 
 [security]
 autonomy = "supervised"
@@ -238,44 +341,30 @@ temporal_decay_halflife_days = 30
 [heartbeat]
 enabled = false
 default_interval_minutes = 30
-"#;
-        std::fs::write(&config_path, default_config)?;
+"#)?;
         println!("Created config/sigil.toml");
-    } else {
-        println!("config/sigil.toml already exists");
     }
 
-    // Create data directory.
-    let data_dir = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".sigil");
+    let data_dir = dirs::home_dir().unwrap_or_default().join(".sigil");
     std::fs::create_dir_all(&data_dir)?;
     std::fs::create_dir_all(data_dir.join("secrets"))?;
     println!("Created ~/.sigil/");
 
     println!("\nSigil initialized. Next steps:");
-    println!("  1. Set your API key: sg secrets set OPENROUTER_API_KEY sk-or-...");
+    println!("  1. sg secrets set OPENROUTER_API_KEY sk-or-...");
     println!("  2. Add rigs to config/sigil.toml");
-    println!("  3. Create rig directories under rigs/");
-    println!("  4. Run: sg run \"hello world\"");
-
+    println!("  3. sg run \"hello world\"");
     Ok(())
 }
 
 async fn cmd_secrets(config_path: &Option<PathBuf>, action: SecretsAction) -> Result<()> {
     let store_path = if let Ok((config, _)) = load_config(config_path) {
-        config
-            .security
-            .secret_store
-            .as_ref()
+        config.security.secret_store.as_ref()
             .map(PathBuf::from)
             .unwrap_or_else(|| config.data_dir().join("secrets"))
     } else {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".sigil/secrets")
+        dirs::home_dir().unwrap_or_default().join(".sigil/secrets")
     };
-
     let store = SecretStore::open(&store_path)?;
 
     match action {
@@ -283,39 +372,27 @@ async fn cmd_secrets(config_path: &Option<PathBuf>, action: SecretsAction) -> Re
             store.set(&name, &value)?;
             println!("Secret '{name}' stored.");
         }
-        SecretsAction::Get { name } => {
-            let value = store.get(&name)?;
-            println!("{value}");
-        }
+        SecretsAction::Get { name } => println!("{}", store.get(&name)?),
         SecretsAction::List => {
             let names = store.list()?;
-            if names.is_empty() {
-                println!("No secrets stored.");
-            } else {
-                for name in names {
-                    println!("  {name}");
-                }
-            }
+            if names.is_empty() { println!("No secrets stored."); }
+            else { for n in names { println!("  {n}"); } }
         }
         SecretsAction::Delete { name } => {
             store.delete(&name)?;
             println!("Secret '{name}' deleted.");
         }
     }
-
     Ok(())
 }
 
 async fn cmd_doctor(config_path: &Option<PathBuf>) -> Result<()> {
-    println!("Sigil Doctor");
-    println!("============\n");
+    println!("Sigil Doctor\n============\n");
 
-    // Check config.
     match load_config(config_path) {
         Ok((config, path)) => {
-            println!("[OK] Config loaded from {}", path.display());
+            println!("[OK] Config: {}", path.display());
 
-            // Check OpenRouter API key.
             if let Some(ref or) = config.providers.openrouter {
                 if or.api_key.is_empty() {
                     println!("[WARN] OpenRouter API key not set");
@@ -323,72 +400,38 @@ async fn cmd_doctor(config_path: &Option<PathBuf>) -> Result<()> {
                     let provider = OpenRouterProvider::new(or.api_key.clone(), or.default_model.clone());
                     match provider.health_check().await {
                         Ok(()) => println!("[OK] OpenRouter API key valid"),
-                        Err(e) => println!("[FAIL] OpenRouter health check: {e}"),
+                        Err(e) => println!("[FAIL] OpenRouter: {e}"),
                     }
                 }
-            } else {
-                println!("[WARN] No OpenRouter provider configured");
             }
 
-            // Check rigs.
             for rig in &config.rigs {
-                let repo_path = PathBuf::from(&rig.repo);
-                if repo_path.exists() {
-                    println!("[OK] Rig '{}' repo exists: {}", rig.name, rig.repo);
-                } else {
-                    println!("[WARN] Rig '{}' repo missing: {}", rig.name, rig.repo);
-                }
+                let repo_ok = PathBuf::from(&rig.repo).exists();
+                println!("[{}] Rig '{}' repo: {}", if repo_ok { "OK" } else { "WARN" }, rig.name, rig.repo);
 
                 match find_rig_dir(&rig.name) {
-                    Ok(rig_dir) => {
-                        let has_soul = rig_dir.join("SOUL.md").exists();
-                        let has_identity = rig_dir.join("IDENTITY.md").exists();
-                        if has_soul && has_identity {
-                            println!("[OK] Rig '{}' identity files present", rig.name);
-                        } else {
-                            println!(
-                                "[WARN] Rig '{}' missing identity files (SOUL.md: {}, IDENTITY.md: {})",
-                                rig.name, has_soul, has_identity
-                            );
-                        }
+                    Ok(d) => {
+                        let soul = d.join("SOUL.md").exists();
+                        let ident = d.join("IDENTITY.md").exists();
+                        let beads = d.join(".beads").exists();
+                        println!("    Identity: SOUL={soul} IDENTITY={ident} | Beads: {beads}");
                     }
-                    Err(_) => {
-                        println!("[WARN] Rig '{}' directory not found", rig.name);
-                    }
+                    Err(_) => println!("    [WARN] Rig dir not found"),
                 }
             }
 
-            // Check secret store.
-            let store_path = config
-                .security
-                .secret_store
-                .as_ref()
+            let store_path = config.security.secret_store.as_ref()
                 .map(PathBuf::from)
                 .unwrap_or_else(|| config.data_dir().join("secrets"));
-            if store_path.exists() {
-                println!("[OK] Secret store exists: {}", store_path.display());
-            } else {
-                println!("[WARN] Secret store missing: {}", store_path.display());
-            }
+            println!("[{}] Secret store: {}", if store_path.exists() { "OK" } else { "WARN" }, store_path.display());
+
+            // Check memory DB.
+            let mem_path = config.data_dir().join("memory.db");
+            println!("[{}] Memory DB: {}", if mem_path.exists() { "OK" } else { "INFO" }, mem_path.display());
         }
         Err(e) => {
             println!("[FAIL] Config: {e}");
-            println!("       Run `sg init` to create a config.");
-        }
-    }
-
-    // Check beads_rust.
-    match tokio::process::Command::new("br")
-        .arg("--version")
-        .output()
-        .await
-    {
-        Ok(output) if output.status.success() => {
-            let version = String::from_utf8_lossy(&output.stdout);
-            println!("[OK] beads_rust: {}", version.trim());
-        }
-        _ => {
-            println!("[INFO] beads_rust not installed (needed for Phase 2)");
+            println!("       Run `sg init` to create one.");
         }
     }
 
@@ -399,60 +442,318 @@ async fn cmd_doctor(config_path: &Option<PathBuf>) -> Result<()> {
 async fn cmd_status(config_path: &Option<PathBuf>) -> Result<()> {
     let (config, _) = load_config(config_path)?;
 
-    println!("Sigil Status: {}", config.sigil.name);
-    println!("===============================\n");
+    println!("Sigil: {}\n", config.sigil.name);
 
-    println!("Rigs:");
-    for rig in &config.rigs {
-        let repo_exists = PathBuf::from(&rig.repo).exists();
-        let status = if repo_exists { "OK" } else { "MISSING" };
-        println!(
-            "  {} [{}] prefix={} workers={} repo={}",
-            rig.name, status, rig.prefix, rig.max_workers, rig.repo
+    for rig_cfg in &config.rigs {
+        let repo_ok = PathBuf::from(&rig_cfg.repo).exists();
+        print!("  {} [{}] prefix={} model={} workers={}",
+            rig_cfg.name,
+            if repo_ok { "OK" } else { "MISSING" },
+            rig_cfg.prefix,
+            rig_cfg.model.as_deref().unwrap_or("default"),
+            rig_cfg.max_workers,
         );
-    }
 
-    println!("\nDaemon: not running (Phase 3)");
-    println!("Workers: 0 active");
+        // Show bead counts.
+        if let Ok(store) = open_beads_for_rig(&rig_cfg.name) {
+            let open: Vec<_> = store.by_prefix(&rig_cfg.prefix).into_iter()
+                .filter(|b| !b.is_closed()).collect();
+            let ready = store.ready().len();
+            print!(" | beads: {} open, {} ready", open.len(), ready);
+        }
+        println!();
+    }
 
     Ok(())
 }
 
-fn load_config(config_path: &Option<PathBuf>) -> Result<(SigilConfig, PathBuf)> {
-    if let Some(path) = config_path {
-        Ok((SigilConfig::load(path)?, path.clone()))
-    } else {
-        SigilConfig::discover()
+async fn cmd_assign(
+    config_path: &Option<PathBuf>,
+    subject: &str,
+    rig_name: &str,
+    description: &str,
+    priority: Option<&str>,
+) -> Result<()> {
+    let (config, _) = load_config(config_path)?;
+    config.rig(rig_name).context(format!("rig not found: {rig_name}"))?;
+
+    let mut store = open_beads_for_rig(rig_name)?;
+    let mut bead = store.create(
+        &config.rig(rig_name).unwrap().prefix,
+        subject,
+    )?;
+
+    if !description.is_empty() || priority.is_some() {
+        bead = store.update(&bead.id.0, |b| {
+            if !description.is_empty() {
+                b.description = description.to_string();
+            }
+            if let Some(p) = priority {
+                b.priority = match p {
+                    "low" => sigil_beads::Priority::Low,
+                    "high" => sigil_beads::Priority::High,
+                    "critical" => sigil_beads::Priority::Critical,
+                    _ => sigil_beads::Priority::Normal,
+                };
+            }
+        })?;
     }
+
+    println!("Created {} [{}] {}", bead.id, bead.priority, bead.subject);
+    Ok(())
 }
 
-fn find_rig_dir(name: &str) -> Result<PathBuf> {
-    // Search order: ./rigs/<name>, ../rigs/<name>, sigil project root/rigs/<name>
-    let candidates = [
-        PathBuf::from(format!("rigs/{name}")),
-        PathBuf::from(format!("../rigs/{name}")),
-    ];
+async fn cmd_ready(config_path: &Option<PathBuf>, rig_name: Option<&str>) -> Result<()> {
+    let (config, _) = load_config(config_path)?;
 
-    for candidate in &candidates {
-        if candidate.exists() {
-            return Ok(candidate.clone());
-        }
-    }
+    let rigs: Vec<&str> = if let Some(name) = rig_name {
+        vec![name]
+    } else {
+        config.rigs.iter().map(|r| r.name.as_str()).collect()
+    };
 
-    // Try from the config file location.
-    if let Ok(cwd) = std::env::current_dir() {
-        let mut dir = cwd.as_path();
-        loop {
-            let candidate = dir.join("rigs").join(name);
-            if candidate.exists() {
-                return Ok(candidate);
-            }
-            match dir.parent() {
-                Some(parent) => dir = parent,
-                None => break,
+    let mut found = false;
+    for name in rigs {
+        if let Ok(store) = open_beads_for_rig(name) {
+            let ready = store.ready();
+            for bead in ready {
+                found = true;
+                println!("{} [{}] {} — {}",
+                    bead.id, bead.priority, bead.subject,
+                    if bead.description.is_empty() { "(no description)" } else { &bead.description }
+                );
             }
         }
     }
 
-    anyhow::bail!("rig directory not found: {name}")
+    if !found {
+        println!("No ready work.");
+    }
+    Ok(())
+}
+
+async fn cmd_beads(config_path: &Option<PathBuf>, rig_name: Option<&str>, show_all: bool) -> Result<()> {
+    let (config, _) = load_config(config_path)?;
+
+    let rigs: Vec<&str> = if let Some(name) = rig_name {
+        vec![name]
+    } else {
+        config.rigs.iter().map(|r| r.name.as_str()).collect()
+    };
+
+    for name in rigs {
+        if let Ok(store) = open_beads_for_rig(name) {
+            let beads = store.all();
+            let beads: Vec<_> = if show_all {
+                beads
+            } else {
+                beads.into_iter().filter(|b| !b.is_closed()).collect()
+            };
+
+            if beads.is_empty() { continue; }
+
+            println!("=== {} ===", name);
+            for bead in beads {
+                let assignee = bead.assignee.as_deref().unwrap_or("-");
+                let deps = if bead.depends_on.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (needs: {})", bead.depends_on.iter().map(|d| d.0.as_str()).collect::<Vec<_>>().join(", "))
+                };
+                println!("  {} [{}] {} — {} assignee={}{}", bead.id, bead.status, bead.priority, bead.subject, assignee, deps);
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn cmd_close(config_path: &Option<PathBuf>, id: &str, reason: &str) -> Result<()> {
+    let (config, _) = load_config(config_path)?;
+
+    // Determine rig from bead ID prefix.
+    let prefix = id.split('-').next().unwrap_or("");
+    let rig_name = config.rigs.iter()
+        .find(|r| r.prefix == prefix)
+        .map(|r| r.name.as_str())
+        .context(format!("no rig with prefix '{prefix}'"))?;
+
+    let mut store = open_beads_for_rig(rig_name)?;
+    let bead = store.close(id, reason)?;
+    println!("Closed {} — {}", bead.id, bead.subject);
+    Ok(())
+}
+
+async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonAction) -> Result<()> {
+    match action {
+        DaemonAction::Start => {
+            let (config, _) = load_config(config_path)?;
+            let mail_bus = Arc::new(MailBus::new());
+            let mut familiar = Familiar::new(mail_bus.clone());
+            let provider = build_provider(&config)?;
+
+            for rig_cfg in &config.rigs {
+                let rig_dir = match find_rig_dir(&rig_cfg.name) {
+                    Ok(d) => d,
+                    Err(_) => continue,
+                };
+                let default_model = config.providers.openrouter.as_ref()
+                    .map(|or| or.default_model.as_str())
+                    .unwrap_or("minimax/minimax-m2.5");
+
+                let rig = Arc::new(Rig::from_config(rig_cfg, &rig_dir, default_model)?);
+                let workdir = rig.repo.clone();
+                let tools = build_tools(&workdir);
+                let witness = Witness::new(&rig, provider.clone(), tools, mail_bus.clone());
+                familiar.register_rig(rig, witness);
+            }
+
+            println!("Sigil daemon starting...");
+            println!("Registered {} rigs", familiar.rigs.len());
+            println!("Press Ctrl+C to stop.\n");
+
+            let daemon = Daemon::new(familiar, mail_bus);
+            daemon.run().await?;
+        }
+        DaemonAction::Status => {
+            println!("Daemon status: check with `sg status`");
+            println!("(Persistent daemon with Unix socket coming in Phase 7)");
+        }
+    }
+    Ok(())
+}
+
+async fn cmd_recall(config_path: &Option<PathBuf>, query: &str, rig_name: Option<&str>, top_k: usize) -> Result<()> {
+    let (config, _) = load_config(config_path)?;
+    let memory = open_memory(&config, rig_name)?;
+
+    let results = memory.search(&sigil_core::traits::MemoryQuery::new(query, top_k)).await?;
+
+    if results.is_empty() {
+        println!("No memories found for: {query}");
+    } else {
+        for (i, entry) in results.iter().enumerate() {
+            let age = chrono::Utc::now() - entry.created_at;
+            let age_str = if age.num_days() > 0 {
+                format!("{}d ago", age.num_days())
+            } else if age.num_hours() > 0 {
+                format!("{}h ago", age.num_hours())
+            } else {
+                format!("{}m ago", age.num_minutes())
+            };
+            println!("{}. [{}] ({:.2}) {} — {}", i + 1, age_str, entry.score, entry.key, entry.content);
+        }
+    }
+    Ok(())
+}
+
+async fn cmd_remember(config_path: &Option<PathBuf>, key: &str, content: &str, rig_name: Option<&str>) -> Result<()> {
+    let (config, _) = load_config(config_path)?;
+    let memory = open_memory(&config, rig_name)?;
+
+    let id = memory.store(key, content, sigil_core::traits::MemoryCategory::Fact).await?;
+    let scope = rig_name.unwrap_or("global");
+    println!("Stored memory {id} [{scope}] {key}");
+    Ok(())
+}
+
+async fn cmd_mol(config_path: &Option<PathBuf>, action: MolAction) -> Result<()> {
+    let (config, _) = load_config(config_path)?;
+
+    match action {
+        MolAction::Pour { template, rig, vars } => {
+            let rig_cfg = config.rig(&rig).context(format!("rig not found: {rig}"))?;
+            let rig_dir = find_rig_dir(&rig)?;
+
+            // Find the molecule template.
+            let mol_path = rig_dir.join("molecules").join(format!("{template}.toml"));
+            if !mol_path.exists() {
+                anyhow::bail!("molecule template not found: {}", mol_path.display());
+            }
+
+            let molecule = Molecule::load(&mol_path)?;
+
+            // Parse vars.
+            let var_map: HashMap<String, String> = vars.iter()
+                .filter_map(|v| {
+                    let parts: Vec<&str> = v.splitn(2, '=').collect();
+                    if parts.len() == 2 { Some((parts[0].to_string(), parts[1].to_string())) }
+                    else { None }
+                })
+                .collect();
+
+            // Pour into bead store.
+            let mut store = open_beads_for_rig(&rig)?;
+            let parent_id = molecule.pour(&mut store, &rig_cfg.prefix, &var_map)?;
+
+            println!("Poured molecule '{template}' as {parent_id}");
+            println!("\nSteps:");
+            let children = store.children(&parent_id);
+            for child in children {
+                let deps = if child.depends_on.is_empty() {
+                    "ready".to_string()
+                } else {
+                    format!("needs: {}", child.depends_on.iter().map(|d| d.0.as_str()).collect::<Vec<_>>().join(", "))
+                };
+                println!("  {} [{}] {} ({})", child.id, child.status, child.subject, deps);
+            }
+        }
+
+        MolAction::List { rig } => {
+            let rigs: Vec<&str> = if let Some(ref name) = rig {
+                vec![name.as_str()]
+            } else {
+                config.rigs.iter().map(|r| r.name.as_str()).collect()
+            };
+
+            for name in rigs {
+                if let Ok(rig_dir) = find_rig_dir(name) {
+                    let mol_dir = rig_dir.join("molecules");
+                    if mol_dir.exists() {
+                        println!("=== {} ===", name);
+                        if let Ok(entries) = std::fs::read_dir(&mol_dir) {
+                            for entry in entries.flatten() {
+                                let path = entry.path();
+                                if path.extension().is_some_and(|e| e == "toml") {
+                                    if let Ok(mol) = Molecule::load(&path) {
+                                        let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+                                        println!("  {} — {} ({} steps)", stem, mol.molecule.description, mol.steps.len());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        MolAction::Status { id } => {
+            let prefix = id.split('-').next().unwrap_or("");
+            let rig_name = config.rigs.iter()
+                .find(|r| r.prefix == prefix)
+                .map(|r| r.name.as_str())
+                .context(format!("no rig with prefix '{prefix}'"))?;
+
+            let store = open_beads_for_rig(rig_name)?;
+            let parent_id = sigil_beads::BeadId::from(id.as_str());
+
+            if let Some(parent) = store.get(&id) {
+                println!("{} [{}] {}", parent.id, parent.status, parent.subject);
+                let children = store.children(&parent_id);
+                let done = children.iter().filter(|c| c.is_closed()).count();
+                println!("Progress: {}/{}\n", done, children.len());
+                for child in &children {
+                    let status_icon = match child.status {
+                        sigil_beads::BeadStatus::Done => "[x]",
+                        sigil_beads::BeadStatus::InProgress => "[~]",
+                        sigil_beads::BeadStatus::Cancelled => "[-]",
+                        _ => "[ ]",
+                    };
+                    println!("  {} {} {}", status_icon, child.id, child.subject);
+                }
+            } else {
+                println!("Bead not found: {id}");
+            }
+        }
+    }
+    Ok(())
 }

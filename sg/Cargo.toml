@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 sigil-core = { workspace = true }
+sigil-beads = { workspace = true }
 sigil-providers = { workspace = true }
 sigil-tools = { workspace = true }
 sigil-orchestrator = { workspace = true }
@@ -20,4 +21,5 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+chrono = { workspace = true }
 dirs = { workspace = true }

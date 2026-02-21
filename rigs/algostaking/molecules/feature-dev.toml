@@ -1,0 +1,36 @@
+[molecule]
+name = "feature-dev"
+description = "Feature development: {{subject}}"
+
+[vars]
+subject = { type = "string", required = true }
+
+[[steps]]
+id = "understand"
+title = "Understand the requirement"
+instructions = "Read related code, understand the problem. Summarize your findings."
+needs = []
+
+[[steps]]
+id = "plan"
+title = "Plan the implementation"
+instructions = "Design the solution approach. List files to change. Create sub-tasks if needed."
+needs = ["understand"]
+
+[[steps]]
+id = "implement"
+title = "Implement the solution"
+instructions = "Write the code in a worktree. Commit with descriptive message."
+needs = ["plan"]
+
+[[steps]]
+id = "test"
+title = "Test the implementation"
+instructions = "Run tests. Verify the change works. Check for regressions."
+needs = ["implement"]
+
+[[steps]]
+id = "review"
+title = "Self-review the code"
+instructions = "Review for anti-patterns, security issues, performance problems."
+needs = ["test"]

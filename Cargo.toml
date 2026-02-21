@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "sg",
     "crates/sigil-core",
+    "crates/sigil-beads",
     "crates/sigil-providers",
     "crates/sigil-tools",
     "crates/sigil-orchestrator",
@@ -50,6 +51,9 @@ base64 = "0.22"
 # Time
 chrono = { version = "0.4", features = ["serde"] }
 
+# SQLite
+rusqlite = { version = "0.32", features = ["bundled"] }
+
 # Dirs
 dirs = "6"
 
@@ -60,7 +64,11 @@ uuid = { version = "1", features = ["v4", "serde"] }
 tokio-stream = "0.1"
 futures = "0.3"
 
+# Test
+tempfile = "3"
+
 # Internal crates
+sigil-beads = { path = "crates/sigil-beads" }
 sigil-core = { path = "crates/sigil-core" }
 sigil-providers = { path = "crates/sigil-providers" }
 sigil-tools = { path = "crates/sigil-tools" }
