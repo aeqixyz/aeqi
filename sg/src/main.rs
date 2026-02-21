@@ -135,6 +135,26 @@ enum Commands {
         #[command(subcommand)]
         action: ConvoyAction,
     },
+
+    // --- Worker management ---
+    /// Pin work to a worker.
+    Hook {
+        worker: String,
+        bead_id: String,
+    },
+    /// Mark worker as done, trigger cleanup.
+    Done {
+        bead_id: String,
+        #[arg(short, long, default_value = "completed")]
+        reason: String,
+    },
+
+    // --- Config ---
+    /// Reload configuration.
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -149,8 +169,18 @@ enum SecretsAction {
 enum DaemonAction {
     /// Start the daemon (runs in foreground).
     Start,
+    /// Stop a running daemon.
+    Stop,
     /// Show daemon status.
     Status,
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Reload configuration (send SIGHUP to daemon).
+    Reload,
+    /// Show current config.
+    Show,
 }
 
 #[derive(Subcommand)]
@@ -265,6 +295,9 @@ async fn main() -> Result<()> {
         Commands::Cron { action } => cmd_cron(&cli.config, action).await,
         Commands::Skill { action } => cmd_skill(&cli.config, action).await,
         Commands::Convoy { action } => cmd_convoy(&cli.config, action).await,
+        Commands::Hook { worker, bead_id } => cmd_hook(&cli.config, &worker, &bead_id).await,
+        Commands::Done { bead_id, reason } => cmd_done(&cli.config, &bead_id, &reason).await,
+        Commands::Config { action } => cmd_config(&cli.config, action).await,
     }
 }
 
@@ -746,13 +779,25 @@ async fn cmd_close(config_path: &Option<PathBuf>, id: &str, reason: &str) -> Res
     Ok(())
 }
 
+fn pid_file_path(config: &SigilConfig) -> PathBuf {
+    config.data_dir().join("sg.pid")
+}
+
 async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonAction) -> Result<()> {
     match action {
         DaemonAction::Start => {
             let (config, _) = load_config(config_path)?;
+
+            // Check if already running.
+            let pid_path = pid_file_path(&config);
+            if Daemon::is_running_from_pid(&pid_path) {
+                anyhow::bail!("daemon is already running (PID file: {})", pid_path.display());
+            }
+
             let mail_bus = Arc::new(MailBus::new());
             let mut familiar = Familiar::new(mail_bus.clone());
             let provider = build_provider(&config)?;
+            let mut heartbeats = Vec::new();
 
             for rig_cfg in &config.rigs {
                 let rig_dir = match find_rig_dir(&rig_cfg.name) {
@@ -766,20 +811,97 @@ async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonAction) -> Resu
                 let rig = Arc::new(Rig::from_config(rig_cfg, &rig_dir, default_model)?);
                 let workdir = rig.repo.clone();
                 let tools = build_tools(&workdir);
-                let witness = Witness::new(&rig, provider.clone(), tools, mail_bus.clone());
-                familiar.register_rig(rig, witness);
+                let witness = Witness::new(&rig, provider.clone(), tools.clone(), mail_bus.clone());
+                familiar.register_rig(rig.clone(), witness);
+
+                // Create heartbeat if HEARTBEAT.md exists and heartbeat is enabled.
+                if config.heartbeat.enabled {
+                    if let Some(ref hb_content) = rig.identity.heartbeat {
+                        let interval = config.heartbeat.default_interval_minutes as u64 * 60;
+                        let heartbeat = sigil_orchestrator::Heartbeat::new(
+                            rig.name.clone(),
+                            interval,
+                            hb_content.clone(),
+                            provider.clone(),
+                            tools.clone(),
+                            rig.identity.clone(),
+                            rig.model.clone(),
+                            mail_bus.clone(),
+                        );
+                        heartbeats.push(heartbeat);
+                    }
+                }
             }
 
             println!("Sigil daemon starting...");
-            println!("Registered {} rigs", familiar.rigs.len());
+            println!("Registered {} rigs, {} heartbeats", familiar.rigs.len(), heartbeats.len());
+
+            // Load cron store.
+            let cron_path = config.data_dir().join("cron.json");
+            let cron_store = CronStore::open(&cron_path)?;
+            println!("Cron: {} jobs loaded", cron_store.jobs.len());
+            println!("PID file: {}", pid_path.display());
             println!("Press Ctrl+C to stop.\n");
 
-            let daemon = Daemon::new(familiar, mail_bus);
+            let mut daemon = Daemon::new(familiar, mail_bus);
+            daemon.set_pid_file(pid_path);
+            daemon.set_cron_store(cron_store);
+            for hb in heartbeats {
+                daemon.add_heartbeat(hb);
+            }
             daemon.run().await?;
         }
+
+        DaemonAction::Stop => {
+            let (config, _) = load_config(config_path)?;
+            let pid_path = pid_file_path(&config);
+
+            if !pid_path.exists() {
+                println!("No daemon running (no PID file).");
+                return Ok(());
+            }
+
+            let pid_str = std::fs::read_to_string(&pid_path)?;
+            let pid: u32 = pid_str.trim().parse().context("invalid PID file")?;
+
+            // Send SIGTERM.
+            #[cfg(unix)]
+            {
+                use std::process::Command;
+                let status = Command::new("kill").arg(pid.to_string()).status()?;
+                if status.success() {
+                    println!("Sent SIGTERM to daemon (PID {pid}).");
+                    // Wait briefly for PID file cleanup.
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    if pid_path.exists() {
+                        let _ = std::fs::remove_file(&pid_path);
+                    }
+                } else {
+                    println!("Failed to stop daemon (PID {pid}).");
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                println!("Daemon stop not supported on this platform. Remove {} manually.", pid_path.display());
+            }
+        }
+
         DaemonAction::Status => {
-            println!("Daemon status: check with `sg status`");
-            println!("(Persistent daemon with Unix socket coming in Phase 7)");
+            let (config, _) = load_config(config_path)?;
+            let pid_path = pid_file_path(&config);
+
+            if Daemon::is_running_from_pid(&pid_path) {
+                let pid = std::fs::read_to_string(&pid_path)?.trim().to_string();
+                println!("Daemon: RUNNING (PID {pid})");
+            } else {
+                println!("Daemon: NOT RUNNING");
+                if pid_path.exists() {
+                    println!("  (stale PID file: {} — run `sg daemon stop` to clean up)", pid_path.display());
+                }
+            }
+
+            // Also show rig summary.
+            cmd_status(config_path).await?;
         }
     }
     Ok(())
@@ -1122,6 +1244,117 @@ async fn cmd_convoy(config_path: &Option<PathBuf>, action: ConvoyAction) -> Resu
                 }
             } else {
                 println!("Convoy not found: {id}");
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn cmd_hook(config_path: &Option<PathBuf>, _worker: &str, bead_id: &str) -> Result<()> {
+    let (config, _) = load_config(config_path)?;
+
+    // Determine rig from bead ID prefix and mark the bead as in_progress with the worker as assignee.
+    let prefix = bead_id.split('-').next().unwrap_or("");
+    let rig_name = config.rigs.iter()
+        .find(|r| r.prefix == prefix)
+        .map(|r| r.name.as_str())
+        .context(format!("no rig with prefix '{prefix}'"))?;
+
+    let mut store = open_beads_for_rig(rig_name)?;
+    let bead = store.update(bead_id, |b| {
+        b.status = sigil_beads::BeadStatus::InProgress;
+        b.assignee = Some(_worker.to_string());
+    })?;
+
+    println!("Hooked {} to {} — {}", _worker, bead.id, bead.subject);
+    Ok(())
+}
+
+async fn cmd_done(config_path: &Option<PathBuf>, bead_id: &str, reason: &str) -> Result<()> {
+    let (config, _) = load_config(config_path)?;
+
+    let prefix = bead_id.split('-').next().unwrap_or("");
+    let rig_name = config.rigs.iter()
+        .find(|r| r.prefix == prefix)
+        .map(|r| r.name.as_str())
+        .context(format!("no rig with prefix '{prefix}'"))?;
+
+    let mut store = open_beads_for_rig(rig_name)?;
+    let bead = store.close(bead_id, reason)?;
+    println!("Done {} — {}", bead.id, bead.subject);
+
+    // Also update any convoys tracking this bead.
+    let convoy_path = config.data_dir().join("convoys.json");
+    if convoy_path.exists() {
+        let mut convoy_store = ConvoyStore::open(&convoy_path)?;
+        let completed = convoy_store.mark_bead_closed(&bead.id)?;
+        for c_id in &completed {
+            println!("Convoy {c_id} completed!");
+        }
+    }
+
+    Ok(())
+}
+
+async fn cmd_config(config_path: &Option<PathBuf>, action: ConfigAction) -> Result<()> {
+    match action {
+        ConfigAction::Show => {
+            let (config, path) = load_config(config_path)?;
+            println!("Config: {}\n", path.display());
+            println!("Name: {}", config.sigil.name);
+            println!("Data dir: {}", config.data_dir().display());
+
+            if let Some(ref or) = config.providers.openrouter {
+                println!("\n[providers.openrouter]");
+                println!("  default_model: {}", or.default_model);
+                println!("  fallback_model: {}", or.fallback_model.as_deref().unwrap_or("(none)"));
+                println!("  api_key: {}...", if or.api_key.len() > 8 { &or.api_key[..8] } else { "***" });
+            }
+
+            println!("\n[security]");
+            println!("  autonomy: {:?}", config.security.autonomy);
+            println!("  workspace_only: {}", config.security.workspace_only);
+            println!("  max_cost_per_day_usd: {}", config.security.max_cost_per_day_usd);
+
+            println!("\n[heartbeat]");
+            println!("  enabled: {}", config.heartbeat.enabled);
+            println!("  interval: {}min", config.heartbeat.default_interval_minutes);
+
+            println!("\n[[rigs]]");
+            for rig in &config.rigs {
+                println!("  {} prefix={} model={} workers={}",
+                    rig.name, rig.prefix,
+                    rig.model.as_deref().unwrap_or("default"),
+                    rig.max_workers);
+            }
+        }
+
+        ConfigAction::Reload => {
+            let (config, _) = load_config(config_path)?;
+            let pid_path = pid_file_path(&config);
+
+            if !Daemon::is_running_from_pid(&pid_path) {
+                println!("No daemon running. Config will be loaded on next `sg daemon start`.");
+                return Ok(());
+            }
+
+            // Send SIGHUP to the daemon process.
+            #[cfg(unix)]
+            {
+                let pid_str = std::fs::read_to_string(&pid_path)?;
+                let pid: u32 = pid_str.trim().parse().context("invalid PID file")?;
+
+                use std::process::Command;
+                let status = Command::new("kill").args(["-HUP", &pid.to_string()]).status()?;
+                if status.success() {
+                    println!("Sent SIGHUP to daemon (PID {pid}). Config will be reloaded.");
+                } else {
+                    println!("Failed to send SIGHUP to daemon (PID {pid}).");
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                println!("Config reload not supported on this platform. Restart the daemon.");
             }
         }
     }
