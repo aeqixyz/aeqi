@@ -1554,6 +1554,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sigil-beads",
+ "sigil-channels",
  "sigil-core",
  "sigil-memory",
  "sigil-orchestrator",

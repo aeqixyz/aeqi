@@ -15,6 +15,10 @@ pub struct SigilConfig {
     #[serde(default)]
     pub heartbeat: HeartbeatConfig,
     #[serde(default)]
+    pub familiar: FamiliarConfig,
+    #[serde(default)]
+    pub channels: ChannelsConfig,
+    #[serde(default)]
     pub rigs: Vec<RigConfig>,
 }
 
@@ -188,6 +192,42 @@ impl Default for HeartbeatConfig {
 fn default_heartbeat_interval() -> u32 { 30 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FamiliarConfig {
+    #[serde(default = "default_fa_prefix")]
+    pub prefix: String,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default = "default_fa_workers")]
+    pub max_workers: u32,
+}
+
+impl Default for FamiliarConfig {
+    fn default() -> Self {
+        Self {
+            prefix: "fa".to_string(),
+            model: None,
+            max_workers: 2,
+        }
+    }
+}
+
+fn default_fa_prefix() -> String { "fa".to_string() }
+fn default_fa_workers() -> u32 { 2 }
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ChannelsConfig {
+    #[serde(default)]
+    pub telegram: Option<TelegramChannelConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TelegramChannelConfig {
+    pub token_secret: String,
+    #[serde(default)]
+    pub allowed_chats: Vec<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RigConfig {
     pub name: String,
     pub prefix: String,
@@ -280,6 +320,13 @@ impl SigilConfig {
 
     /// Get the default model for a rig, falling back to provider default.
     pub fn model_for_rig(&self, rig_name: &str) -> String {
+        // Check familiar config first.
+        if rig_name == "familiar" {
+            if let Some(ref m) = self.familiar.model {
+                return m.clone();
+            }
+        }
+
         self.rig(rig_name)
             .and_then(|r| r.model.clone())
             .or_else(|| {

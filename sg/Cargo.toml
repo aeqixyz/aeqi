@@ -13,6 +13,7 @@ sigil-beads = { workspace = true }
 sigil-providers = { workspace = true }
 sigil-tools = { workspace = true }
 sigil-orchestrator = { workspace = true }
+sigil-channels = { workspace = true }
 sigil-memory = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }

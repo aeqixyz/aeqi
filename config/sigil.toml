@@ -27,6 +27,22 @@ chunk_overlap_tokens = 80
 enabled = true
 default_interval_minutes = 30
 
+[familiar]
+prefix = "fa"
+model = "minimax/minimax-m2.5"
+max_workers = 2
+
+[channels.telegram]
+token_secret = "TELEGRAM_BOT_TOKEN"
+allowed_chats = []
+
+[[rigs]]
+name = "sigil"
+prefix = "sg"
+repo = "/home/claudedev/sigil"
+model = "minimax/minimax-m2.5"
+max_workers = 2
+
 [[rigs]]
 name = "algostaking"
 prefix = "as"

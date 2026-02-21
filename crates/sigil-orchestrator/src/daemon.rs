@@ -6,13 +6,14 @@ use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
 use crate::cron::CronStore;
-use crate::familiar::Familiar;
 use crate::heartbeat::Heartbeat;
 use crate::mail::MailBus;
+use crate::registry::RigRegistry;
 
-/// The Daemon: background process that runs the Familiar + all Witnesses + Heartbeats + Cron.
+/// The Daemon: background process that runs the RigRegistry patrol loop,
+/// heartbeats, and cron jobs.
 pub struct Daemon {
-    pub familiar: Arc<Mutex<Familiar>>,
+    pub registry: Arc<RigRegistry>,
     pub mail_bus: Arc<MailBus>,
     pub patrol_interval_secs: u64,
     pub heartbeats: Vec<Heartbeat>,
@@ -24,9 +25,9 @@ pub struct Daemon {
 }
 
 impl Daemon {
-    pub fn new(familiar: Familiar, mail_bus: Arc<MailBus>) -> Self {
+    pub fn new(registry: Arc<RigRegistry>, mail_bus: Arc<MailBus>) -> Self {
         Self {
-            familiar: Arc::new(Mutex::new(familiar)),
+            registry,
             mail_bus,
             patrol_interval_secs: 60,
             heartbeats: Vec::new(),
@@ -129,7 +130,7 @@ impl Daemon {
             }
             match tokio::net::UnixListener::bind(sock_path) {
                 Ok(listener) => {
-                    let familiar = self.familiar.clone();
+                    let registry = self.registry.clone();
                     let mail_bus = self.mail_bus.clone();
                     let heartbeat_count = self.heartbeats.len();
                     let cron_store = self.cron_store.clone();
@@ -137,7 +138,7 @@ impl Daemon {
                     info!(path = %sock_path.display(), "IPC socket listening");
                     tokio::spawn(async move {
                         Self::socket_accept_loop(
-                            listener, familiar, mail_bus,
+                            listener, registry, mail_bus,
                             heartbeat_count, cron_store, running,
                         ).await;
                     });
@@ -155,18 +156,15 @@ impl Daemon {
         );
 
         while self.running.load(std::sync::atomic::Ordering::SeqCst) {
-            // 1. Patrol cycle (familiar + witnesses).
-            {
-                let mut familiar = self.familiar.lock().await;
-                if let Err(e) = familiar.patrol().await {
-                    warn!(error = %e, "patrol cycle failed");
-                }
+            // 1. Patrol cycle (registry patrols all witnesses).
+            if let Err(e) = self.registry.patrol_all().await {
+                warn!(error = %e, "patrol cycle failed");
+            }
 
-                // Execute any ready workers.
-                let executed = familiar.execute_all().await;
-                if executed > 0 {
-                    info!(workers = executed, "executed workers");
-                }
+            // Execute any ready workers.
+            let executed = self.registry.execute_all().await;
+            if executed > 0 {
+                info!(workers = executed, "executed workers");
             }
 
             // 2. Run due heartbeats.
@@ -175,7 +173,7 @@ impl Daemon {
                     match heartbeat.run().await {
                         Ok(result) => {
                             info!(rig = %heartbeat.rig_name, "heartbeat completed");
-                            let _ = result; // Result already logged/mailed by heartbeat.
+                            let _ = result;
                         }
                         Err(e) => {
                             warn!(rig = %heartbeat.rig_name, error = %e, "heartbeat failed");
@@ -197,20 +195,15 @@ impl Daemon {
                 for (name, rig, prompt, _isolated) in due_jobs {
                     info!(name = %name, rig = %rig, "cron job triggered");
 
-                    // Assign the cron job's prompt as a bead.
-                    {
-                        let mut familiar = self.familiar.lock().await;
-                        match familiar.assign(&rig, &format!("[cron] {name}"), &prompt).await {
-                            Ok(bead) => {
-                                info!(bead = %bead.id, "cron job created bead");
-                            }
-                            Err(e) => {
-                                warn!(name = %name, error = %e, "cron job failed to create bead");
-                            }
+                    match self.registry.assign(&rig, &format!("[cron] {name}"), &prompt).await {
+                        Ok(bead) => {
+                            info!(bead = %bead.id, "cron job created bead");
+                        }
+                        Err(e) => {
+                            warn!(name = %name, error = %e, "cron job failed to create bead");
                         }
                     }
 
-                    // Mark the job as run.
                     let mut store = cron_store.lock().await;
                     let _ = store.mark_run(&name);
                 }
@@ -223,8 +216,6 @@ impl Daemon {
             // 4. Check for config reload signal (SIGHUP).
             if self.config_reloaded.swap(false, std::sync::atomic::Ordering::SeqCst) {
                 info!("config reload requested (SIGHUP received)");
-                // The caller should re-read config and update state as needed.
-                // For now we log it; full hot-reload requires rebuilding rigs/witnesses.
             }
 
             // Sleep until next patrol (interruptible).
@@ -255,7 +246,7 @@ impl Daemon {
     #[cfg(unix)]
     async fn socket_accept_loop(
         listener: tokio::net::UnixListener,
-        familiar: Arc<Mutex<Familiar>>,
+        registry: Arc<RigRegistry>,
         mail_bus: Arc<MailBus>,
         heartbeat_count: usize,
         cron_store: Option<Arc<Mutex<CronStore>>>,
@@ -267,12 +258,12 @@ impl Daemon {
             }
             match listener.accept().await {
                 Ok((stream, _)) => {
-                    let familiar = familiar.clone();
+                    let registry = registry.clone();
                     let mail_bus = mail_bus.clone();
                     let cron_store = cron_store.clone();
                     tokio::spawn(async move {
                         if let Err(e) = Self::handle_socket_connection(
-                            stream, familiar, mail_bus,
+                            stream, registry, mail_bus,
                             heartbeat_count, cron_store,
                         ).await {
                             debug!(error = %e, "IPC connection error");
@@ -288,16 +279,10 @@ impl Daemon {
     }
 
     /// Handle a single IPC connection. Protocol: one JSON line in, one JSON line out.
-    ///
-    /// Supported commands:
-    ///   {"cmd": "status"} → rig summary, mail count, heartbeats, cron jobs
-    ///   {"cmd": "ping"} → {"ok": true, "pong": true}
-    ///   {"cmd": "mail"} → pending mail messages
-    ///   {"cmd": "rigs"} → list of registered rigs
     #[cfg(unix)]
     async fn handle_socket_connection(
         stream: tokio::net::UnixStream,
-        familiar: Arc<Mutex<Familiar>>,
+        registry: Arc<RigRegistry>,
         mail_bus: Arc<MailBus>,
         heartbeat_count: usize,
         cron_store: Option<Arc<Mutex<CronStore>>>,
@@ -315,9 +300,8 @@ impl Daemon {
                 "ping" => serde_json::json!({"ok": true, "pong": true}),
 
                 "status" => {
-                    let fam = familiar.lock().await;
-                    let rig_names: Vec<String> = fam.rigs.values().map(|r| r.name.clone()).collect();
-                    let worker_count: u32 = fam.rigs.values().map(|r| r.max_workers).sum();
+                    let rig_names = registry.rig_names().await;
+                    let worker_count = registry.total_max_workers().await;
                     let mail_count = mail_bus.pending_count();
                     let cron_count = if let Some(ref cs) = cron_store {
                         cs.lock().await.jobs.len()
@@ -337,15 +321,7 @@ impl Daemon {
                 }
 
                 "rigs" => {
-                    let fam = familiar.lock().await;
-                    let rigs: Vec<serde_json::Value> = fam.rigs.values().map(|r| {
-                        serde_json::json!({
-                            "name": r.name,
-                            "prefix": r.prefix,
-                            "model": r.model,
-                            "max_workers": r.max_workers,
-                        })
-                    }).collect();
+                    let rigs = registry.rigs_info().await;
                     serde_json::json!({"ok": true, "rigs": rigs})
                 }
 

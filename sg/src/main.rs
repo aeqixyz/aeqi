@@ -2,10 +2,12 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
 use sigil_beads::BeadStore;
-use sigil_core::traits::{LogObserver, Memory, Observer, Provider, Tool};
+use sigil_core::traits::{Channel, IncomingMessage, LogObserver, Memory, Observer, Provider, Tool};
 use sigil_core::{Agent, AgentConfig, Identity, SecretStore, SigilConfig};
 use sigil_memory::SqliteMemory;
-use sigil_orchestrator::{ConvoyStore, CronJob, CronSchedule, CronStore, Daemon, Familiar, MailBus, Molecule, Rig, Witness};
+use sigil_channels::TelegramChannel;
+use sigil_orchestrator::{ConvoyStore, CronJob, CronSchedule, CronStore, Daemon, MailBus, Molecule, Rig, RigRegistry, Witness};
+use sigil_orchestrator::tools::build_orchestration_tools;
 use sigil_providers::OpenRouterProvider;
 use sigil_tools::{
     BeadsCreateTool, BeadsReadyTool, BeadsUpdateTool, BeadsCloseTool, BeadsShowTool, BeadsDepTool,
@@ -14,7 +16,8 @@ use sigil_tools::{
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::info;
+use tokio::sync::RwLock;
+use tracing::{info, warn};
 
 #[derive(Parser)]
 #[command(name = "sg", version, about = "Sigil — Multi-Agent Orchestration")]
@@ -415,6 +418,16 @@ fn build_rig_tools(
     tools
 }
 
+/// Look up rig name from a bead prefix (e.g. "fa" → "familiar", "as" → "algostaking").
+fn rig_name_for_prefix<'a>(config: &'a SigilConfig, prefix: &str) -> Option<&'a str> {
+    if prefix == config.familiar.prefix {
+        return Some("familiar");
+    }
+    config.rigs.iter()
+        .find(|r| r.prefix == prefix)
+        .map(|r| r.name.as_str())
+}
+
 fn open_beads_for_rig(rig_name: &str) -> Result<BeadStore> {
     let rig_dir = find_rig_dir(rig_name)?;
     let beads_dir = rig_dir.join(".beads");
@@ -466,10 +479,16 @@ async fn cmd_run(
     } else {
         build_tools(&workdir)
     };
-    let identity = rig_name
-        .and_then(|r| find_rig_dir(r).ok())
-        .map(|d| Identity::load(&d).unwrap_or_default())
-        .unwrap_or_default();
+    // Default to familiar identity when no --rig is specified.
+    let identity = if let Some(rn) = rig_name {
+        find_rig_dir(rn).ok()
+            .map(|d| Identity::load(&d).unwrap_or_default())
+            .unwrap_or_default()
+    } else {
+        find_rig_dir("familiar").ok()
+            .map(|d| Identity::load(&d).unwrap_or_default())
+            .unwrap_or_default()
+    };
     let observer: Arc<dyn Observer> = Arc::new(LogObserver);
 
     let agent_config = AgentConfig {
@@ -699,6 +718,21 @@ async fn cmd_status(config_path: &Option<PathBuf>) -> Result<()> {
 
     println!("Sigil: {}\n", config.sigil.name);
 
+    // Show familiar rig status.
+    let fa_prefix = &config.familiar.prefix;
+    print!("  familiar [RIG] prefix={} model={} workers={}",
+        fa_prefix,
+        config.familiar.model.as_deref().unwrap_or("default"),
+        config.familiar.max_workers,
+    );
+    if let Ok(store) = open_beads_for_rig("familiar") {
+        let open: Vec<_> = store.by_prefix(fa_prefix).into_iter()
+            .filter(|b| !b.is_closed()).collect();
+        let ready = store.ready().len();
+        print!(" | beads: {} open, {} ready", open.len(), ready);
+    }
+    println!();
+
     for rig_cfg in &config.rigs {
         let repo_ok = PathBuf::from(&rig_cfg.repo).exists();
         print!("  {} [{}] prefix={} model={} workers={}",
@@ -730,13 +764,18 @@ async fn cmd_assign(
     priority: Option<&str>,
 ) -> Result<()> {
     let (config, _) = load_config(config_path)?;
-    config.rig(rig_name).context(format!("rig not found: {rig_name}"))?;
+    // Allow assigning to familiar or any configured rig.
+    if rig_name != "familiar" {
+        config.rig(rig_name).context(format!("rig not found: {rig_name}"))?;
+    }
 
     let mut store = open_beads_for_rig(rig_name)?;
-    let mut bead = store.create(
-        &config.rig(rig_name).unwrap().prefix,
-        subject,
-    )?;
+    let prefix = if rig_name == "familiar" {
+        config.familiar.prefix.clone()
+    } else {
+        config.rig(rig_name).unwrap().prefix.clone()
+    };
+    let mut bead = store.create(&prefix, subject)?;
 
     if !description.is_empty() || priority.is_some() {
         bead = store.update(&bead.id.0, |b| {
@@ -825,11 +864,8 @@ async fn cmd_beads(config_path: &Option<PathBuf>, rig_name: Option<&str>, show_a
 async fn cmd_close(config_path: &Option<PathBuf>, id: &str, reason: &str) -> Result<()> {
     let (config, _) = load_config(config_path)?;
 
-    // Determine rig from bead ID prefix.
     let prefix = id.split('-').next().unwrap_or("");
-    let rig_name = config.rigs.iter()
-        .find(|r| r.prefix == prefix)
-        .map(|r| r.name.as_str())
+    let rig_name = rig_name_for_prefix(&config, prefix)
         .context(format!("no rig with prefix '{prefix}'"))?;
 
     let mut store = open_beads_for_rig(rig_name)?;
@@ -854,10 +890,11 @@ async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonAction) -> Resu
             }
 
             let mail_bus = Arc::new(MailBus::new());
-            let mut familiar = Familiar::new(mail_bus.clone());
+            let registry = Arc::new(RigRegistry::new(mail_bus.clone()));
             let provider = build_provider(&config)?;
             let mut heartbeats = Vec::new();
 
+            // Register domain rigs.
             for rig_cfg in &config.rigs {
                 let rig_dir = match find_rig_dir(&rig_cfg.name) {
                     Ok(d) => d,
@@ -872,7 +909,7 @@ async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonAction) -> Resu
                 let beads_dir = rig_dir.join(".beads");
                 let tools = build_rig_tools(&workdir, &beads_dir, &rig_cfg.prefix, Some(&rig.worktree_root));
                 let witness = Witness::new(&rig, provider.clone(), tools.clone(), mail_bus.clone());
-                familiar.register_rig(rig.clone(), witness);
+                registry.register_rig(rig.clone(), witness).await;
 
                 // Create heartbeat if HEARTBEAT.md exists and heartbeat is enabled.
                 if config.heartbeat.enabled {
@@ -893,8 +930,86 @@ async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonAction) -> Resu
                 }
             }
 
+            // Build channels map for the familiar.
+            let channels: Arc<RwLock<HashMap<String, Arc<dyn sigil_core::traits::Channel>>>> =
+                Arc::new(RwLock::new(HashMap::new()));
+
+            // Wire Telegram if configured.
+            if let Some(ref tg_config) = config.channels.telegram {
+                let secret_store_path = config.security.secret_store.as_ref()
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| config.data_dir().join("secrets"));
+                match SecretStore::open(&secret_store_path)
+                    .and_then(|s| s.get(&tg_config.token_secret))
+                {
+                    Ok(token) if !token.is_empty() => {
+                        let tg = Arc::new(TelegramChannel::new(token, tg_config.allowed_chats.clone()));
+                        channels.write().await.insert("telegram".to_string(), tg.clone() as Arc<dyn sigil_core::traits::Channel>);
+
+                        // Start polling, route incoming messages as familiar beads.
+                        match Channel::start(tg.as_ref()).await {
+                            Ok(mut rx) => {
+                                let reg = registry.clone();
+                                tokio::spawn(async move {
+                                    while let Some(msg) = <tokio::sync::mpsc::Receiver<IncomingMessage>>::recv(&mut rx).await {
+                                        let subject = format!("[telegram] {}", msg.sender);
+                                        let description = format!(
+                                            "{}\n\n---\nchannel_metadata: {}",
+                                            msg.text,
+                                            serde_json::to_string(&msg.metadata).unwrap_or_default(),
+                                        );
+                                        if let Err(e) = reg.assign("familiar", &subject, &description).await {
+                                            warn!(error = %e, "failed to create bead from telegram message");
+                                        }
+                                    }
+                                });
+                                info!("Telegram channel active");
+                            }
+                            Err(e) => warn!(error = %e, "failed to start Telegram polling"),
+                        }
+                    }
+                    _ => {
+                        info!("Telegram token not found in secret store, skipping");
+                    }
+                }
+            }
+
+            // Register the Familiar as a rig.
+            let fa_rig_dir = find_rig_dir("familiar").unwrap_or_else(|_| PathBuf::from("rigs/familiar"));
+            let fa_identity = Identity::load(&fa_rig_dir).unwrap_or_default();
+            let fa_beads_dir = fa_rig_dir.join(".beads");
+            std::fs::create_dir_all(&fa_beads_dir).ok();
+            let fa_beads = sigil_beads::BeadStore::open(&fa_beads_dir)?;
+            let fa_model = config.model_for_rig("familiar");
+            let fa_prefix = config.familiar.prefix.clone();
+            let fa_workdir = find_rig_dir("sigil")
+                .map(|d| d.to_path_buf())
+                .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
+
+            let fa_rig = Arc::new(Rig {
+                name: "familiar".to_string(),
+                prefix: fa_prefix.clone(),
+                repo: fa_workdir.clone(),
+                worktree_root: dirs::home_dir().unwrap_or_default().join("worktrees"),
+                model: fa_model,
+                max_workers: config.familiar.max_workers,
+                identity: fa_identity,
+                beads: Arc::new(tokio::sync::Mutex::new(fa_beads)),
+            });
+
+            // Build familiar tools: basic + beads + orchestration.
+            let mut fa_tools: Vec<Arc<dyn sigil_core::traits::Tool>> = build_rig_tools(
+                &fa_workdir, &fa_beads_dir, &fa_prefix, None,
+            );
+            let orch_tools = build_orchestration_tools(registry.clone(), mail_bus.clone(), channels.clone());
+            fa_tools.extend(orch_tools);
+
+            let fa_witness = Witness::new(&fa_rig, provider.clone(), fa_tools, mail_bus.clone());
+            registry.register_rig(fa_rig, fa_witness).await;
+
+            let rig_count = registry.rig_count().await;
             println!("Sigil daemon starting...");
-            println!("Registered {} rigs, {} heartbeats", familiar.rigs.len(), heartbeats.len());
+            println!("Registered {} rigs (including familiar), {} heartbeats", rig_count, heartbeats.len());
 
             // Load cron store.
             let cron_path = config.data_dir().join("cron.json");
@@ -906,7 +1021,7 @@ async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonAction) -> Resu
             println!("IPC socket: {}", socket_path.display());
             println!("Press Ctrl+C to stop.\n");
 
-            let mut daemon = Daemon::new(familiar, mail_bus);
+            let mut daemon = Daemon::new(registry, mail_bus);
             daemon.set_pid_file(pid_path);
             daemon.set_socket_path(socket_path.clone());
             daemon.set_cron_store(cron_store);
@@ -1109,9 +1224,7 @@ async fn cmd_mol(config_path: &Option<PathBuf>, action: MolAction) -> Result<()>
 
         MolAction::Status { id } => {
             let prefix = id.split('-').next().unwrap_or("");
-            let rig_name = config.rigs.iter()
-                .find(|r| r.prefix == prefix)
-                .map(|r| r.name.as_str())
+            let rig_name = rig_name_for_prefix(&config, prefix)
                 .context(format!("no rig with prefix '{prefix}'"))?;
 
             let store = open_beads_for_rig(rig_name)?;
@@ -1351,11 +1464,8 @@ async fn cmd_convoy(config_path: &Option<PathBuf>, action: ConvoyAction) -> Resu
 async fn cmd_hook(config_path: &Option<PathBuf>, worker: &str, bead_id: &str) -> Result<()> {
     let (config, _) = load_config(config_path)?;
 
-    // Determine rig from bead ID prefix and mark the bead as in_progress with the worker as assignee.
     let prefix = bead_id.split('-').next().unwrap_or("");
-    let rig_name = config.rigs.iter()
-        .find(|r| r.prefix == prefix)
-        .map(|r| r.name.as_str())
+    let rig_name = rig_name_for_prefix(&config, prefix)
         .context(format!("no rig with prefix '{prefix}'"))?;
 
     let mut store = open_beads_for_rig(rig_name)?;
@@ -1372,9 +1482,7 @@ async fn cmd_done(config_path: &Option<PathBuf>, bead_id: &str, reason: &str) ->
     let (config, _) = load_config(config_path)?;
 
     let prefix = bead_id.split('-').next().unwrap_or("");
-    let rig_name = config.rigs.iter()
-        .find(|r| r.prefix == prefix)
-        .map(|r| r.name.as_str())
+    let rig_name = rig_name_for_prefix(&config, prefix)
         .context(format!("no rig with prefix '{prefix}'"))?;
 
     let mut store = open_beads_for_rig(rig_name)?;

@@ -1,23 +1,24 @@
 pub mod convoy;
 pub mod cron;
 pub mod daemon;
-pub mod familiar;
 pub mod heartbeat;
 pub mod hook;
 pub mod mail;
 pub mod molecule;
+pub mod registry;
 pub mod rig;
+pub mod tools;
 pub mod witness;
 pub mod worker;
 
 pub use convoy::{Convoy, ConvoyStore};
 pub use cron::{CronJob, CronSchedule, CronStore};
 pub use daemon::Daemon;
-pub use familiar::Familiar;
 pub use heartbeat::Heartbeat;
 pub use hook::Hook;
 pub use mail::{Mail, MailBus};
 pub use molecule::{Molecule, MoleculeStep};
+pub use registry::{RegistryStatus, RigRegistry, RigStatus};
 pub use rig::Rig;
 pub use witness::Witness;
 pub use worker::{Worker, WorkerState};
