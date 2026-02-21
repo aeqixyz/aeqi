@@ -18,6 +18,7 @@ pub struct Daemon {
     pub cron_store: Option<Arc<Mutex<CronStore>>>,
     pub pid_file: Option<PathBuf>,
     running: Arc<std::sync::atomic::AtomicBool>,
+    config_reloaded: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Daemon {
@@ -30,6 +31,7 @@ impl Daemon {
             cron_store: None,
             pid_file: None,
             running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            config_reloaded: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -92,6 +94,22 @@ impl Daemon {
                 running.store(false, std::sync::atomic::Ordering::SeqCst);
             }
         });
+
+        // Set up SIGHUP handler for config reload.
+        #[cfg(unix)]
+        {
+            let config_reloaded = self.config_reloaded.clone();
+            tokio::spawn(async move {
+                let mut signal = tokio::signal::unix::signal(
+                    tokio::signal::unix::SignalKind::hangup(),
+                ).expect("failed to register SIGHUP handler");
+                loop {
+                    signal.recv().await;
+                    info!("received SIGHUP, flagging config reload");
+                    config_reloaded.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+            });
+        }
 
         info!(
             heartbeats = self.heartbeats.len(),
@@ -163,6 +181,13 @@ impl Daemon {
                 // Cleanup completed one-shots.
                 let mut store = cron_store.lock().await;
                 let _ = store.cleanup_oneshots();
+            }
+
+            // 4. Check for config reload signal (SIGHUP).
+            if self.config_reloaded.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                info!("config reload requested (SIGHUP received)");
+                // The caller should re-read config and update state as needed.
+                // For now we log it; full hot-reload requires rebuilding rigs/witnesses.
             }
 
             // Sleep until next patrol (interruptible).
