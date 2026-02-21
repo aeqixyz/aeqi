@@ -14,7 +14,7 @@ use sigil_tools::{
     FileReadTool, FileWriteTool, GitWorktreeTool, ListDirTool, ShellTool, Skill,
 };
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
@@ -366,46 +366,46 @@ fn build_provider(config: &SigilConfig) -> Result<Arc<dyn Provider>> {
     Ok(Arc::new(OpenRouterProvider::new(api_key, model)))
 }
 
-fn build_tools(workdir: &PathBuf) -> Vec<Arc<dyn Tool>> {
+fn build_tools(workdir: &Path) -> Vec<Arc<dyn Tool>> {
     vec![
-        Arc::new(ShellTool::new(workdir.clone())),
-        Arc::new(FileReadTool::new(workdir.clone())),
-        Arc::new(FileWriteTool::new(workdir.clone())),
-        Arc::new(ListDirTool::new(workdir.clone())),
+        Arc::new(ShellTool::new(workdir.to_path_buf())),
+        Arc::new(FileReadTool::new(workdir.to_path_buf())),
+        Arc::new(FileWriteTool::new(workdir.to_path_buf())),
+        Arc::new(ListDirTool::new(workdir.to_path_buf())),
     ]
 }
 
 /// Build the full tool set for a rig: basic tools + beads + git worktree.
 fn build_rig_tools(
-    workdir: &PathBuf,
-    beads_dir: &PathBuf,
+    workdir: &Path,
+    beads_dir: &Path,
     prefix: &str,
     worktree_root: Option<&PathBuf>,
 ) -> Vec<Arc<dyn Tool>> {
     let mut tools: Vec<Arc<dyn Tool>> = vec![
-        Arc::new(ShellTool::new(workdir.clone())),
-        Arc::new(FileReadTool::new(workdir.clone())),
-        Arc::new(FileWriteTool::new(workdir.clone())),
-        Arc::new(ListDirTool::new(workdir.clone())),
+        Arc::new(ShellTool::new(workdir.to_path_buf())),
+        Arc::new(FileReadTool::new(workdir.to_path_buf())),
+        Arc::new(FileWriteTool::new(workdir.to_path_buf())),
+        Arc::new(ListDirTool::new(workdir.to_path_buf())),
     ];
 
     // Add beads tools (each gets its own store instance).
-    if let Ok(t) = BeadsCreateTool::new(beads_dir.clone(), prefix.to_string()) {
+    if let Ok(t) = BeadsCreateTool::new(beads_dir.to_path_buf(), prefix.to_string()) {
         tools.push(Arc::new(t));
     }
-    if let Ok(t) = BeadsReadyTool::new(beads_dir.clone()) {
+    if let Ok(t) = BeadsReadyTool::new(beads_dir.to_path_buf()) {
         tools.push(Arc::new(t));
     }
-    if let Ok(t) = BeadsUpdateTool::new(beads_dir.clone()) {
+    if let Ok(t) = BeadsUpdateTool::new(beads_dir.to_path_buf()) {
         tools.push(Arc::new(t));
     }
-    if let Ok(t) = BeadsCloseTool::new(beads_dir.clone()) {
+    if let Ok(t) = BeadsCloseTool::new(beads_dir.to_path_buf()) {
         tools.push(Arc::new(t));
     }
-    if let Ok(t) = BeadsShowTool::new(beads_dir.clone()) {
+    if let Ok(t) = BeadsShowTool::new(beads_dir.to_path_buf()) {
         tools.push(Arc::new(t));
     }
-    if let Ok(t) = BeadsDepTool::new(beads_dir.clone()) {
+    if let Ok(t) = BeadsDepTool::new(beads_dir.to_path_buf()) {
         tools.push(Arc::new(t));
     }
 
@@ -413,7 +413,7 @@ fn build_rig_tools(
     let wt_root = worktree_root
         .cloned()
         .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join("worktrees"));
-    tools.push(Arc::new(GitWorktreeTool::new(workdir.clone(), wt_root)));
+    tools.push(Arc::new(GitWorktreeTool::new(workdir.to_path_buf(), wt_root)));
 
     tools
 }
@@ -590,14 +590,28 @@ async fn cmd_doctor(config_path: &Option<PathBuf>, fix: bool) -> Result<()> {
             println!("[OK] Config: {}", path.display());
 
             if let Some(ref or) = config.providers.openrouter {
-                if or.api_key.is_empty() {
-                    println!("[WARN] OpenRouter API key not set");
-                    issues += 1;
+                // Try config api_key first, then fall back to secret store.
+                let api_key = if !or.api_key.is_empty() {
+                    Some(or.api_key.clone())
                 } else {
-                    let provider = OpenRouterProvider::new(or.api_key.clone(), or.default_model.clone());
-                    match provider.health_check().await {
-                        Ok(()) => println!("[OK] OpenRouter API key valid"),
-                        Err(e) => { println!("[FAIL] OpenRouter: {e}"); issues += 1; }
+                    let store_path = config.security.secret_store.as_ref()
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| config.data_dir().join("secrets"));
+                    SecretStore::open(&store_path).ok()
+                        .and_then(|s| s.get("OPENROUTER_API_KEY").ok())
+                };
+
+                match api_key {
+                    Some(key) => {
+                        let provider = OpenRouterProvider::new(key, or.default_model.clone());
+                        match provider.health_check().await {
+                            Ok(()) => println!("[OK] OpenRouter API key valid"),
+                            Err(e) => { println!("[FAIL] OpenRouter: {e}"); issues += 1; }
+                        }
+                    }
+                    None => {
+                        println!("[WARN] OpenRouter API key not set (config or secret store)");
+                        issues += 1;
                     }
                 }
             }
@@ -629,14 +643,14 @@ async fn cmd_doctor(config_path: &Option<PathBuf>, fix: bool) -> Result<()> {
                         let skill_count = if skills_dir.exists() {
                             Skill::discover(&skills_dir).map(|s| s.len()).unwrap_or(0)
                         } else { 0 };
-                        println!("    Skills: {skill_count} | Molecules: {}",
-                            d.join("molecules").exists().then(|| {
-                                std::fs::read_dir(d.join("molecules"))
-                                    .map(|e| e.filter(|e| e.as_ref().ok()
-                                        .map(|e| e.path().extension().is_some_and(|x| x == "toml"))
-                                        .unwrap_or(false)).count())
-                                    .unwrap_or(0)
-                            }).unwrap_or(0));
+                        let mol_count = if d.join("molecules").exists() {
+                            std::fs::read_dir(d.join("molecules"))
+                                .map(|e| e.filter(|e| e.as_ref().ok()
+                                    .map(|e| e.path().extension().is_some_and(|x| x == "toml"))
+                                    .unwrap_or(false)).count())
+                                .unwrap_or(0)
+                        } else { 0 };
+                        println!("    Skills: {skill_count} | Molecules: {mol_count}");
 
                         // Check memory DB
                         let mem_db = d.join(".sigil").join("memory.db");
@@ -931,8 +945,8 @@ async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonAction) -> Resu
                 registry.register_rig(rig.clone(), witness).await;
 
                 // Create heartbeat if HEARTBEAT.md exists and heartbeat is enabled.
-                if config.heartbeat.enabled {
-                    if let Some(ref hb_content) = rig.identity.heartbeat {
+                if config.heartbeat.enabled
+                    && let Some(ref hb_content) = rig.identity.heartbeat {
                         let interval = config.heartbeat.default_interval_minutes as u64 * 60;
                         let heartbeat = sigil_orchestrator::Heartbeat::new(
                             rig.name.clone(),
@@ -946,7 +960,6 @@ async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonAction) -> Resu
                         );
                         heartbeats.push(heartbeat);
                     }
-                }
             }
 
             // Build channels map for the familiar.
@@ -966,20 +979,213 @@ async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonAction) -> Resu
                         channels.write().await.insert("telegram".to_string(), tg.clone() as Arc<dyn sigil_core::traits::Channel>);
 
                         // Start polling, route incoming messages as familiar beads.
+                        // Two-phase response: instant reaction (direct LLM) + full reply (bead agent).
                         match Channel::start(tg.as_ref()).await {
                             Ok(mut rx) => {
                                 let reg = registry.clone();
+                                let tg_reply = tg.clone();
+                                let reaction_api_key = get_api_key(&config).unwrap_or_default();
+                                // Conversation history per chat_id for coherent multi-turn dialogue.
+                                // Each entry: (role, text, timestamp). Pruned at 20 messages / 2 hour TTL.
+                                let conversations: Arc<RwLock<HashMap<i64, Vec<(String, String, std::time::Instant)>>>> =
+                                    Arc::new(RwLock::new(HashMap::new()));
                                 tokio::spawn(async move {
                                     while let Some(msg) = <tokio::sync::mpsc::Receiver<IncomingMessage>>::recv(&mut rx).await {
-                                        let subject = format!("[telegram] {}", msg.sender);
-                                        let description = format!(
-                                            "{}\n\n---\nchannel_metadata: {}",
-                                            msg.text,
-                                            serde_json::to_string(&msg.metadata).unwrap_or_default(),
-                                        );
-                                        if let Err(e) = reg.assign("familiar", &subject, &description).await {
-                                            warn!(error = %e, "failed to create bead from telegram message");
-                                        }
+                                        let chat_id = msg.metadata.get("chat_id")
+                                            .and_then(|v| v.as_i64())
+                                            .unwrap_or(0);
+                                        let message_id = msg.metadata.get("message_id")
+                                            .and_then(|v| v.as_i64())
+                                            .unwrap_or(0);
+                                        // Use "Architect" as the subject sender — not the Telegram username,
+                                        // which could match a rig name and confuse routing.
+                                        let subject = format!("[telegram] Architect ({})", msg.sender);
+                                        let metadata_str = serde_json::to_string(&msg.metadata).unwrap_or_default();
+
+                                        let reg2 = reg.clone();
+                                        let tg2 = tg_reply.clone();
+                                        let react_api_key = reaction_api_key.clone();
+                                        let user_text = msg.text.clone();
+                                        let convos = conversations.clone();
+                                        tokio::spawn(async move {
+                                            // Build conversation context + record user message.
+                                            let (description, phase1_history) = {
+                                                let mut conv = convos.write().await;
+                                                let history = conv.entry(chat_id).or_insert_with(Vec::new);
+
+                                                // Prune messages older than 2 hours.
+                                                let cutoff = std::time::Instant::now() - std::time::Duration::from_secs(7200);
+                                                history.retain(|(_, _, ts)| *ts > cutoff);
+
+                                                // Build conversation context for bead description.
+                                                let ctx = if history.is_empty() {
+                                                    String::new()
+                                                } else {
+                                                    let mut s = String::from("## Conversation History\n\n");
+                                                    for (role, text, _) in history.iter() {
+                                                        s.push_str(&format!("**{}**: {}\n\n", role, text));
+                                                    }
+                                                    s
+                                                };
+
+                                                // Build Phase 1 messages (last 4 exchanges for contextual reaction).
+                                                let p1: Vec<serde_json::Value> = history.iter()
+                                                    .rev().take(4).collect::<Vec<_>>().into_iter().rev()
+                                                    .map(|(role, text, _)| {
+                                                        let api_role = if role == "User" { "user" } else { "assistant" };
+                                                        serde_json::json!({"role": api_role, "content": text})
+                                                    })
+                                                    .collect();
+
+                                                // Record user message.
+                                                history.push(("User".to_string(), user_text.clone(), std::time::Instant::now()));
+                                                while history.len() > 20 {
+                                                    history.remove(0);
+                                                }
+
+                                                // Build bead description with conversation context.
+                                                // Embed response protocol directly so it cannot be missed
+                                                // regardless of system prompt ordering.
+                                                let response_protocol = "**RESPONSE PROTOCOL**: Your output text is the Telegram reply — write it directly, in character. No completion reports. Never write \"The response has been sent\", \"I sent the reply\", or any meta-commentary. The daemon delivers your output automatically. Just your reply.";
+                                                let desc = if ctx.is_empty() {
+                                                    format!("{}\n\n---\n{}\nchannel_metadata: {}", user_text, response_protocol, metadata_str)
+                                                } else {
+                                                    format!("{}\n## Current Message\n\n{}\n\n---\n{}\nchannel_metadata: {}", ctx, user_text, response_protocol, metadata_str)
+                                                };
+
+                                                (desc, p1)
+                                            };
+
+                                            // Phase 1: Instant reaction — direct LLM call, no tools, no agent.
+                                            let react_tg = tg2.clone();
+                                            let react_chat = chat_id;
+                                            let react_mid = message_id;
+                                            let p1_user_text = user_text.clone();
+                                            tokio::spawn(async move {
+                                                info!("phase1: starting instant reaction");
+                                                let client = reqwest::Client::builder()
+                                                    .timeout(std::time::Duration::from_secs(15))
+                                                    .build()
+                                                    .unwrap();
+                                                // Build messages with conversation history for contextual reactions.
+                                                let mut messages = vec![
+                                                    serde_json::json!({"role": "system", "content": "You are Aurelia, the White Familiar — calm, intelligent, warm. React with ONE short sentence (max 15 words). Elegant and genuine. No emojis. Your immediate perception of what the Architect needs."}),
+                                                ];
+                                                messages.extend(phase1_history.into_iter());
+                                                messages.push(serde_json::json!({"role": "user", "content": p1_user_text}));
+                                                let body = serde_json::json!({
+                                                    "model": "google/gemini-2.0-flash-001",
+                                                    "messages": messages,
+                                                    "max_tokens": 80,
+                                                    "temperature": 0.7
+                                                });
+                                                info!("phase1: calling openrouter");
+                                                match client.post("https://openrouter.ai/api/v1/chat/completions")
+                                                    .header("Authorization", format!("Bearer {}", react_api_key))
+                                                    .header("Content-Type", "application/json")
+                                                    .json(&body)
+                                                    .send()
+                                                    .await
+                                                {
+                                                    Ok(resp) => {
+                                                        let resp_result: Result<serde_json::Value, reqwest::Error> = resp.json().await;
+                                                        match resp_result {
+                                                            Ok(v) => {
+                                                                let text: String = v.pointer("/choices/0/message/content")
+                                                                    .and_then(|c: &serde_json::Value| c.as_str())
+                                                                    .unwrap_or("")
+                                                                    .trim()
+                                                                    .to_string();
+                                                                if !text.is_empty() {
+                                                                    info!(reaction = %text, "instant reaction ready");
+                                                                    let out = sigil_core::traits::OutgoingMessage {
+                                                                        channel: "telegram".to_string(),
+                                                                        recipient: String::new(),
+                                                                        text: format!("_{}_", text),
+                                                                        metadata: serde_json::json!({ "chat_id": react_chat }),
+                                                                    };
+                                                                    let _ = react_tg.send(out).await;
+                                                                    // Fire = working on full response
+                                                                    if react_mid > 0 {
+                                                                        let _ = react_tg.react(react_chat, react_mid, "🔥").await;
+                                                                    }
+                                                                } else {
+                                                                    warn!("phase1: empty reaction text from LLM");
+                                                                }
+                                                            }
+                                                            Err(e) => warn!(error = %e, "phase1: failed to parse response"),
+                                                        }
+                                                    }
+                                                    Err(e) => warn!(error = %e, "phase1: request failed"),
+                                                }
+                                            });
+
+                                            // Phase 2: Full response via bead agent.
+                                            let bead_id: String = match reg2.assign("familiar", &subject, &description).await {
+                                                Ok(b) => b.id.0.clone(),
+                                                Err(e) => {
+                                                    warn!(error = %e, "failed to create bead from telegram message");
+                                                    return;
+                                                }
+                                            };
+
+                                            // Poll bead until closed (timeout 5 min).
+                                            let deadline = tokio::time::Instant::now()
+                                                + std::time::Duration::from_secs(300);
+                                            loop {
+                                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+                                                let done: Option<(bool, Option<String>)> = {
+                                                    if let Some(rig) = reg2.get_rig("familiar").await {
+                                                        let store = rig.beads.lock().await;
+                                                        store.get(&bead_id).map(|b| {
+                                                            (b.status == sigil_beads::BeadStatus::Done, b.closed_reason.clone())
+                                                        })
+                                                    } else {
+                                                        None
+                                                    }
+                                                };
+
+                                                if let Some((true, reason)) = done {
+                                                    let reply_text = reason
+                                                        .filter(|r| !r.trim().is_empty())
+                                                        .unwrap_or_else(|| "Done.".to_string());
+                                                    // Record assistant response in conversation history.
+                                                    {
+                                                        let mut conv = convos.write().await;
+                                                        if let Some(history) = conv.get_mut(&chat_id) {
+                                                            history.push(("Aurelia".to_string(), reply_text.clone(), std::time::Instant::now()));
+                                                            while history.len() > 20 {
+                                                                history.remove(0);
+                                                            }
+                                                        }
+                                                    }
+                                                    let out = sigil_core::traits::OutgoingMessage {
+                                                        channel: "telegram".to_string(),
+                                                        recipient: String::new(),
+                                                        text: reply_text,
+                                                        metadata: serde_json::json!({ "chat_id": chat_id }),
+                                                    };
+                                                    if let Err(e) = tg2.send(out).await {
+                                                        warn!(error = %e, "failed to reply on telegram");
+                                                    }
+                                                    // Done reaction
+                                                    if message_id > 0 {
+                                                        let _ = tg2.react(chat_id, message_id, "👍").await;
+                                                    }
+                                                    break;
+                                                }
+
+                                                if tokio::time::Instant::now() > deadline {
+                                                    warn!(bead = %bead_id, "telegram reply timed out");
+                                                    // Timeout reaction
+                                                    if message_id > 0 {
+                                                        let _ = tg2.react(chat_id, message_id, "😢").await;
+                                                    }
+                                                    break;
+                                                }
+                                            }
+                                        });
                                     }
                                 });
                                 info!("Telegram channel active");
@@ -1023,7 +1229,20 @@ async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonAction) -> Resu
             let orch_tools = build_orchestration_tools(registry.clone(), mail_bus.clone(), channels.clone());
             fa_tools.extend(orch_tools);
 
-            let fa_witness = Witness::new(&fa_rig, provider.clone(), fa_tools, mail_bus.clone());
+            let mut fa_witness = Witness::new(&fa_rig, provider.clone(), fa_tools, mail_bus.clone());
+
+            // Configure Claude Code execution mode for familiar workers if configured.
+            if config.familiar.execution_mode == ExecutionMode::ClaudeCode {
+                let cc_model = config.model_for_rig("familiar");
+                let cc_max_turns = config.familiar.max_turns.unwrap_or(25);
+                fa_witness.set_claude_code_mode(
+                    fa_workdir.clone(),
+                    cc_model,
+                    cc_max_turns,
+                    config.familiar.max_budget_usd,
+                );
+            }
+
             registry.register_rig(fa_rig, fa_witness).await;
 
             let rig_count = registry.rig_count().await;
@@ -1228,12 +1447,11 @@ async fn cmd_mol(config_path: &Option<PathBuf>, action: MolAction) -> Result<()>
                         if let Ok(entries) = std::fs::read_dir(&mol_dir) {
                             for entry in entries.flatten() {
                                 let path = entry.path();
-                                if path.extension().is_some_and(|e| e == "toml") {
-                                    if let Ok(mol) = Molecule::load(&path) {
+                                if path.extension().is_some_and(|e| e == "toml")
+                                    && let Ok(mol) = Molecule::load(&path) {
                                         let stem = path.file_stem().unwrap_or_default().to_string_lossy();
                                         println!("  {} — {} ({} steps)", stem, mol.molecule.description, mol.steps.len());
                                     }
-                                }
                             }
                         }
                     }
