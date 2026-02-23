@@ -9,7 +9,6 @@ use tracing::{debug, info, warn};
 use crate::checkpoint::SpiritCheckpoint;
 use crate::cost_ledger::{CostLedger, CostEntry};
 use crate::executor::{ClaudeCodeExecutor, QuestOutcome};
-use crate::gap_analysis::GapAnalyzer;
 use crate::metrics::RealmMetrics;
 use crate::whisper::{Whisper, WhisperBus, WhisperKind};
 use crate::domain::Domain;

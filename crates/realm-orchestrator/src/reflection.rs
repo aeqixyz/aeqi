@@ -40,11 +40,10 @@ struct ReflectionState {
 
 impl ReflectionState {
     fn load(path: &Path) -> Self {
-        if let Ok(content) = std::fs::read_to_string(path) {
-            if let Ok(state) = serde_json::from_str(&content) {
+        if let Ok(content) = std::fs::read_to_string(path)
+            && let Ok(state) = serde_json::from_str(&content) {
                 return state;
             }
-        }
         Self::default()
     }
 
@@ -118,23 +117,21 @@ impl Reflection {
 
         for filename in TRACKED_FILES {
             let path = self.rig_dir.join(filename);
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if !content.trim().is_empty() {
+            if let Ok(content) = std::fs::read_to_string(&path)
+                && !content.trim().is_empty() {
                     current_fingerprints.insert(filename.to_string(), fnv1a(&content));
                     file_contents.insert(filename.to_string(), content);
                 }
-            }
         }
 
         // Also read MEMORY.md even though it's not tracked for drift.
         for filename in UPDATABLE_FILES {
             if !file_contents.contains_key(*filename) {
                 let path = self.rig_dir.join(filename);
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    if !content.trim().is_empty() {
+                if let Ok(content) = std::fs::read_to_string(&path)
+                    && !content.trim().is_empty() {
                         file_contents.insert(filename.to_string(), content);
                     }
-                }
             }
         }
 

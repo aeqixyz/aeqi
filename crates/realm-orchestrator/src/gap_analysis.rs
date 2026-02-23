@@ -112,8 +112,8 @@ impl GapAnalyzer {
         let mut chars_used = prompt.len();
 
         let agents_path = self.rig_dir.join("AGENTS.md");
-        if let Ok(agents_content) = std::fs::read_to_string(&agents_path) {
-            if !agents_content.trim().is_empty() {
+        if let Ok(agents_content) = std::fs::read_to_string(&agents_path)
+            && !agents_content.trim().is_empty() {
                 let available = MAX_INPUT_CHARS.saturating_sub(chars_used);
                 let chunk = &agents_content[..agents_content.len().min(available)];
                 if !chunk.is_empty() {
@@ -121,11 +121,10 @@ impl GapAnalyzer {
                     chars_used += chunk.len();
                 }
             }
-        }
 
         let memory_path = self.rig_dir.join("MEMORY.md");
-        if let Ok(memory_content) = std::fs::read_to_string(&memory_path) {
-            if !memory_content.trim().is_empty() {
+        if let Ok(memory_content) = std::fs::read_to_string(&memory_path)
+            && !memory_content.trim().is_empty() {
                 let available = MAX_INPUT_CHARS.saturating_sub(chars_used);
                 let chunk = &memory_content[..memory_content.len().min(available)];
                 if !chunk.is_empty() {
@@ -133,7 +132,6 @@ impl GapAnalyzer {
                     chars_used += chunk.len();
                 }
             }
-        }
 
         let recent: Vec<_> = completed_quests
             .iter()

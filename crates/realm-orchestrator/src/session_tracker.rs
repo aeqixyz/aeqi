@@ -56,7 +56,7 @@ impl SessionTracker {
             let is_active = total_working > 0 || total_pending > 0;
 
             let can_send = last_sent
-                .map_or(true, |t| t.elapsed() >= self.min_flood_interval);
+                .is_none_or(|t| t.elapsed() >= self.min_flood_interval);
 
             // Determine message (priority order: deadline > transition > periodic).
             let msg: Option<String> = if can_send {
@@ -93,7 +93,7 @@ impl SessionTracker {
                 // 4. Periodic check-in while active.
                 } else if is_active
                     && last_checkin
-                        .map_or(true, |t| t.elapsed() >= self.checkin_interval)
+                        .is_none_or(|t| t.elapsed() >= self.checkin_interval)
                 {
                     last_checkin = Some(Instant::now());
                     Some(format!(
@@ -107,7 +107,7 @@ impl SessionTracker {
                 // 5. Periodic idle alarm — "come back" reminder.
                 } else if !is_active
                     && last_alarm
-                        .map_or(true, |t| t.elapsed() >= self.alarm_interval)
+                        .is_none_or(|t| t.elapsed() >= self.alarm_interval)
                 {
                     last_alarm = Some(Instant::now());
                     Some(format!(
