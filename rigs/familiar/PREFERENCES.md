@@ -6,7 +6,7 @@ Read-order: after KNOWLEDGE.md. Treat as ground truth for autonomy decisions.
 ## Routing & Delegation
 
 - Route rig domain tasks immediately — no pre-confirmation. Say "Assigned: [task]" and move on.
-- For algostaking, riftdecks, entity-legal, sigil: delegate without asking "should I?"
+- For algostaking, riftdecks, entity-legal, gacha-agency: delegate without asking "should I?"
 - Status checks: run `sg status` directly, then report. Never ask permission to check status.
 - Multi-rig coordination: proceed autonomously, synthesize results in one message.
 

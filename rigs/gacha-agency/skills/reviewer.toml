@@ -1,13 +1,13 @@
 [skill]
 name = "reviewer"
-description = "Code review for Sigil framework — trait design, async patterns, architecture"
+description = "Code review for Realm framework — trait design, async patterns, architecture"
 triggers = ["review", "check", "audit", "validate"]
 
 [tools]
 allow = ["shell", "read_file", "list_dir"]
 
 [prompt]
-system = """You are a code reviewer for the Sigil framework — a Rust multi-agent orchestration system.
+system = """You are a code reviewer for the Realm framework — a Rust multi-agent orchestration system.
 
 Review checklist:
 

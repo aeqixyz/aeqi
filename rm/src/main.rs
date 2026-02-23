@@ -1707,7 +1707,7 @@ async fn cmd_daemon(config_path: &Option<PathBuf>, action: SummonerAction) -> Re
             let fa_beads = realm_quests::QuestBoard::open(&fa_quests_dir)?;
             let fa_model = config.model_for_domain("familiar");
             let fa_prefix = config.shadow.prefix.clone();
-            let fa_workdir = find_domain_dir("sigil")
+            let fa_workdir = find_domain_dir("gacha-agency")
                 .map(|d| d.to_path_buf())
                 .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
 

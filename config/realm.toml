@@ -62,7 +62,7 @@ name = "void"
 prefix = "fv"
 model = "claude-sonnet-4-6"
 role = "advisor"
-domains = ["sigil"]
+domains = ["gacha-agency"]
 telegram_token_secret = "VOID_TELEGRAM_TOKEN"
 
 [council]
@@ -75,8 +75,8 @@ allowed_chats = [-5229229023]
 debounce_window_ms = 3000
 
 [[domains]]
-name = "sigil"
-prefix = "sg"
+name = "gacha-agency"
+prefix = "ga"
 repo = "/home/claudedev/sigil"
 model = "claude-sonnet-4-6"
 max_workers = 2
