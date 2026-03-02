@@ -1,0 +1,1262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>GACHA.AGENCY — Pull Your First Agent</title>
+<meta name="description" content="AI agent orchestration with gacha mechanics. Pull specialized agents, roll for productivity traits, fuse them into unstoppable squads.">
+<meta name="theme-color" content="#060810">
+<meta property="og:title" content="GACHA.AGENCY — Pull Your First Agent">
+<meta property="og:description" content="Gacha-powered AI agent orchestration. Pull agents, roll traits, build your agency.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://gacha.agency">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+
+:root{
+  --void:#060810;
+  --void2:#0a0e1a;
+  --void3:#0e1424;
+  --violet:#9B7BFF;
+  --violet-deep:#6D4AFF;
+  --violet-dim:rgba(155,123,255,0.12);
+  --violet-glow:rgba(155,123,255,0.35);
+  --rose:#FF6B9D;
+  --rose-dim:rgba(255,107,157,0.12);
+  --rose-glow:rgba(255,107,157,0.3);
+  --gold:#FFD700;
+  --gold-dim:rgba(255,215,0,0.12);
+  --gold-glow:rgba(255,215,0,0.35);
+  --cyan:#38BDF8;
+  --cyan-dim:rgba(56,189,248,0.1);
+  --orange:#F97316;
+  --text:#EDE9FF;
+  --text-dim:#8B82A8;
+  --text-muted:#4A4466;
+  --card-bg:rgba(12,14,26,0.85);
+  --card-border:rgba(155,123,255,0.08);
+}
+
+html{scroll-behavior:smooth;overflow-x:hidden}
+body{
+  font-family:'Inter',system-ui,sans-serif;
+  background:var(--void);
+  color:var(--text);
+  overflow-x:hidden;
+  -webkit-font-smoothing:antialiased;
+  line-height:1.6;
+}
+
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-track{background:var(--void)}
+::-webkit-scrollbar-thumb{background:var(--violet-deep);border-radius:3px}
+
+/* ═══════════════════════════════════
+   ATMOSPHERE
+   ═══════════════════════════════════ */
+.atmo{
+  position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:
+    radial-gradient(ellipse at 25% 15%, rgba(155,123,255,0.05) 0%, transparent 50%),
+    radial-gradient(ellipse at 75% 85%, rgba(255,107,157,0.03) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 50%, rgba(155,123,255,0.015) 0%, transparent 70%);
+}
+.grid-bg{
+  position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:
+    linear-gradient(rgba(155,123,255,0.012) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(155,123,255,0.012) 1px, transparent 1px);
+  background-size:80px 80px;
+  mask-image:radial-gradient(ellipse 70% 50% at 50% 50%, black 20%, transparent 80%);
+  -webkit-mask-image:radial-gradient(ellipse 70% 50% at 50% 50%, black 20%, transparent 80%);
+}
+.vignette{
+  position:fixed;inset:0;pointer-events:none;z-index:1;
+  background:radial-gradient(ellipse at center, transparent 30%, rgba(6,8,16,0.85) 100%);
+}
+.scanlines{
+  position:fixed;inset:0;pointer-events:none;z-index:9998;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.008) 2px,rgba(0,0,0,0.008) 4px);
+}
+#particles{position:fixed;inset:0;z-index:1;pointer-events:none}
+
+/* ═══════════════════════════════════
+   NAV
+   ═══════════════════════════════════ */
+nav{
+  position:fixed;top:0;left:0;right:0;z-index:100;
+  padding:.9rem 2rem;
+  display:flex;justify-content:space-between;align-items:center;
+  background:rgba(6,8,16,0.75);
+  backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
+  border-bottom:1px solid rgba(155,123,255,0.06);
+}
+.nav-brand{
+  font-family:'Orbitron',monospace;font-weight:900;font-size:1rem;
+  letter-spacing:3px;
+}
+.nav-brand .ga{
+  background:linear-gradient(135deg,var(--violet),var(--rose));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+.nav-brand .ag{color:var(--text-dim);font-weight:600}
+.nav-links{display:flex;gap:2rem;align-items:center}
+.nav-link{
+  font-family:'JetBrains Mono',monospace;font-size:.7rem;
+  color:var(--text-dim);text-decoration:none;
+  letter-spacing:1px;transition:color .3s;
+}
+.nav-link:hover{color:var(--violet)}
+.nav-cta{
+  font-family:'Orbitron',monospace;font-size:.65rem;font-weight:700;
+  padding:.55rem 1.3rem;
+  border:1px solid rgba(155,123,255,0.3);color:var(--violet);
+  background:transparent;border-radius:4px;cursor:pointer;
+  transition:all .3s;letter-spacing:1.5px;text-decoration:none;
+}
+.nav-cta:hover{
+  background:var(--violet);color:var(--void);
+  box-shadow:0 0 20px var(--violet-glow);
+}
+
+/* ═══════════════════════════════════
+   SECTIONS
+   ═══════════════════════════════════ */
+section{position:relative;z-index:10}
+
+.section-label{
+  font-family:'JetBrains Mono',monospace;font-size:.65rem;
+  letter-spacing:4px;text-transform:uppercase;
+  color:var(--rose);margin-bottom:.8rem;
+}
+.section-title{
+  font-family:'Orbitron',monospace;font-weight:900;
+  font-size:clamp(1.6rem,4vw,2.8rem);
+  text-align:center;margin-bottom:.8rem;
+  line-height:1.15;
+}
+.section-desc{
+  color:var(--text-dim);text-align:center;max-width:560px;
+  margin:0 auto 4rem;font-size:.92rem;line-height:1.7;
+}
+.glow-divider{
+  width:100px;height:2px;margin:0 auto 1.5rem;
+  background:linear-gradient(90deg,transparent,var(--violet),transparent);
+  border-radius:1px;
+}
+
+/* ═══════════════════════════════════
+   HERO
+   ═══════════════════════════════════ */
+.hero{
+  min-height:100svh;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  text-align:center;
+  padding:6rem 2rem 4rem;
+  position:relative;
+}
+.hero::before{
+  content:'';position:absolute;
+  width:1000px;height:700px;
+  top:40%;left:50%;transform:translate(-50%,-50%);
+  background:radial-gradient(ellipse, rgba(155,123,255,0.04) 0%, rgba(255,107,157,0.02) 40%, transparent 70%);
+  pointer-events:none;
+  animation:heroBloom 10s ease-in-out infinite;
+}
+@keyframes heroBloom{
+  0%,100%{opacity:.6;transform:translate(-50%,-50%) scale(1)}
+  50%{opacity:1;transform:translate(-50%,-50%) scale(1.1)}
+}
+
+.hero-badge{
+  font-family:'JetBrains Mono',monospace;font-size:.65rem;
+  letter-spacing:3px;text-transform:uppercase;
+  color:var(--rose);
+  border:1px solid rgba(255,107,157,0.2);
+  padding:.4rem 1.3rem;border-radius:20px;
+  margin-bottom:2.5rem;
+  animation:fadeInUp .8s ease-out;
+}
+.hero h1{
+  font-family:'Orbitron',monospace;font-weight:900;
+  font-size:clamp(2.4rem,7.5vw,6rem);
+  line-height:1.05;letter-spacing:-1px;
+  margin-bottom:.5rem;
+  animation:fadeInUp .8s ease-out .2s both;
+}
+.hero h1 .line1{
+  display:block;
+  background:linear-gradient(135deg,#fff 0%,var(--text) 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+.hero h1 .line2{
+  display:block;
+  background:linear-gradient(135deg,var(--violet) 0%,var(--rose) 50%,var(--orange) 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;
+  filter:drop-shadow(0 0 40px rgba(155,123,255,0.25));
+}
+.hero-sub{
+  font-size:clamp(.95rem,2.2vw,1.2rem);
+  color:var(--text-dim);
+  max-width:580px;line-height:1.7;
+  margin-top:1.5rem;
+  animation:fadeInUp .8s ease-out .4s both;
+}
+.hero-cta-group{
+  display:flex;gap:1rem;margin-top:2.5rem;flex-wrap:wrap;justify-content:center;
+  animation:fadeInUp .8s ease-out .6s both;
+}
+.btn-primary{
+  font-family:'Orbitron',monospace;font-weight:700;font-size:.85rem;
+  padding:1rem 2.5rem;
+  background:linear-gradient(135deg,var(--violet),var(--violet-deep));
+  color:#fff;border:none;border-radius:8px;
+  cursor:pointer;letter-spacing:1px;
+  transition:all .3s;text-decoration:none;
+  position:relative;overflow:hidden;
+}
+.btn-primary::after{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(135deg,transparent,rgba(255,255,255,0.15),transparent);
+  transform:translateX(-100%);transition:transform .5s;
+}
+.btn-primary:hover::after{transform:translateX(100%)}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 8px 30px var(--violet-glow)}
+.btn-secondary{
+  font-family:'JetBrains Mono',monospace;font-size:.8rem;
+  padding:1rem 2rem;
+  border:1px solid var(--text-muted);color:var(--text-dim);
+  background:transparent;border-radius:8px;cursor:pointer;
+  transition:all .3s;text-decoration:none;letter-spacing:.5px;
+}
+.btn-secondary:hover{border-color:var(--violet);color:var(--violet)}
+
+.scroll-hint{
+  position:absolute;bottom:2rem;left:50%;transform:translateX(-50%);
+  display:flex;flex-direction:column;align-items:center;gap:.5rem;
+  animation:fadeInUp 1s ease 1.2s both;
+}
+.scroll-hint span{
+  font-family:'JetBrains Mono',monospace;font-size:.55rem;
+  color:var(--text-muted);letter-spacing:2px;
+}
+.scroll-line{
+  width:1px;height:30px;
+  background:linear-gradient(180deg,var(--violet),transparent);
+  animation:scrollPulse 2s ease-in-out infinite;
+}
+@keyframes scrollPulse{
+  0%,100%{opacity:.3;height:30px}
+  50%{opacity:.8;height:40px}
+}
+
+/* ═══════════════════════════════════
+   BANNER — CHARACTER SHOWCASE
+   ═══════════════════════════════════ */
+.banner{
+  padding:8rem 2rem;
+  display:flex;flex-direction:column;align-items:center;
+  position:relative;overflow:hidden;
+}
+.banner::before{
+  content:'';position:absolute;
+  top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent 10%,rgba(155,123,255,0.08) 50%,transparent 90%);
+}
+
+.gacha-cards{
+  display:flex;
+  justify-content:center;
+  align-items:flex-end;
+  gap:clamp(1.5rem,4vw,3rem);
+  margin-bottom:4rem;
+  perspective:1200px;
+}
+
+.gacha-card{
+  width:clamp(160px,22vw,240px);
+  aspect-ratio:2/3;
+  border-radius:16px;
+  position:relative;
+  cursor:pointer;
+  transition:transform .5s cubic-bezier(.2,.8,.3,1), box-shadow .5s;
+  transform-style:preserve-3d;
+}
+.gacha-card:hover{
+  transform:translateY(-12px) scale(1.03);
+}
+.gacha-card.featured{
+  width:clamp(180px,25vw,270px);
+  transform:translateY(-10px);
+  z-index:2;
+}
+.gacha-card.featured:hover{
+  transform:translateY(-22px) scale(1.03);
+}
+
+.card-inner{
+  position:absolute;inset:0;
+  border-radius:inherit;
+  overflow:hidden;
+  background:var(--card-bg);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+}
+
+.card-frame{
+  position:absolute;inset:0;
+  border-radius:inherit;
+  z-index:4;pointer-events:none;
+}
+.card-frame::before{
+  content:'';position:absolute;inset:0;
+  border-radius:inherit;
+  padding:2px;
+  background:linear-gradient(
+    180deg,
+    var(--rarity-color) 0%,
+    rgba(255,255,255,0.06) 25%,
+    transparent 50%,
+    transparent 75%,
+    rgba(255,255,255,0.04) 100%
+  );
+  -webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);
+  -webkit-mask-composite:xor;
+  mask-composite:exclude;
+}
+.card-frame::after{
+  content:'';position:absolute;
+  top:8%;left:0;right:0;bottom:40%;
+  border-radius:inherit;
+  box-shadow:
+    inset 2px 0 16px -4px var(--rarity-color),
+    inset -2px 0 16px -4px var(--rarity-color);
+  opacity:.3;
+}
+
+.card-rarity{
+  position:absolute;top:10px;left:10px;z-index:5;
+  font-family:'Orbitron',monospace;font-size:.55rem;font-weight:800;
+  letter-spacing:2px;
+  padding:.25rem .6rem;border-radius:3px;
+  background:rgba(6,8,16,0.7);
+  border:1px solid;
+}
+
+.card-art{
+  position:absolute;top:0;left:0;right:0;height:62%;
+  z-index:1;
+  display:flex;align-items:center;justify-content:center;
+  overflow:hidden;
+}
+.card-art::before{
+  content:'';position:absolute;inset:0;
+  z-index:0;
+}
+.card-art-img{
+  position:absolute;inset:0;
+  width:100%;height:100%;
+  object-fit:cover;
+  z-index:1;
+  opacity:0;
+  transition:opacity .5s;
+}
+.card-art-img.loaded{opacity:1}
+
+.card-silhouette{
+  position:relative;z-index:1;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  gap:.5rem;
+  opacity:.4;
+}
+.card-silhouette svg{
+  width:48px;height:48px;
+  opacity:.3;
+}
+.card-silhouette span{
+  font-family:'Orbitron',monospace;
+  font-size:.5rem;font-weight:600;
+  letter-spacing:3px;
+  opacity:.5;
+}
+
+.card-shimmer{
+  position:absolute;inset:0;z-index:3;
+  background:linear-gradient(
+    105deg,
+    transparent 30%,
+    rgba(255,255,255,0.04) 45%,
+    rgba(255,255,255,0.08) 50%,
+    rgba(255,255,255,0.04) 55%,
+    transparent 70%
+  );
+  background-size:250% 100%;
+  animation:shimmer 4s ease-in-out infinite;
+  pointer-events:none;
+}
+@keyframes shimmer{
+  0%{background-position:250% center}
+  100%{background-position:-250% center}
+}
+
+.card-info{
+  position:absolute;bottom:0;left:0;right:0;height:38%;
+  z-index:5;
+  padding:1rem;
+  display:flex;flex-direction:column;justify-content:flex-end;
+  gap:.4rem;
+  background:linear-gradient(0deg, rgba(6,8,16,0.95) 0%, rgba(6,8,16,0.7) 60%, transparent 100%);
+}
+.card-name{
+  font-family:'Orbitron',monospace;font-weight:800;
+  font-size:clamp(.75rem,1.3vw,1rem);
+  letter-spacing:1px;color:#fff;
+}
+.card-class{
+  font-family:'JetBrains Mono',monospace;
+  font-size:clamp(.5rem,.8vw,.6rem);
+  color:var(--text-muted);letter-spacing:1px;
+}
+.card-stats{
+  display:flex;flex-direction:column;gap:.35rem;
+  margin-top:.4rem;
+}
+.stat-row{display:flex;align-items:center;gap:.5rem}
+.stat-label{
+  font-family:'JetBrains Mono',monospace;font-size:.45rem;
+  color:var(--text-muted);letter-spacing:1px;
+  min-width:55px;
+}
+.stat-val{
+  font-family:'JetBrains Mono',monospace;font-size:.45rem;
+  letter-spacing:1px;min-width:18px;text-align:right;
+}
+.stat-bar{
+  flex:1;height:3px;
+  background:rgba(255,255,255,0.04);
+  border-radius:2px;overflow:hidden;
+}
+.stat-fill{
+  height:100%;border-radius:2px;
+  width:0;
+  transition:width 1.5s cubic-bezier(.22,1,.36,1);
+}
+
+/* Rarity theming */
+.rarity-ssr{--rarity-color:var(--gold)}
+.rarity-ssr .card-rarity{color:var(--gold);border-color:rgba(255,215,0,0.3)}
+.rarity-ssr .card-art::before{
+  background:
+    radial-gradient(ellipse 55% 40% at 50% 40%, rgba(255,215,0,0.06) 0%, transparent 100%),
+    radial-gradient(ellipse 35% 20% at 50% 25%, rgba(255,215,0,0.04) 0%, transparent 100%);
+}
+.rarity-ssr .card-silhouette svg{fill:var(--gold)}
+.rarity-ssr .card-silhouette span{color:var(--gold)}
+.rarity-ssr .stat-fill{background:linear-gradient(90deg,var(--gold),rgba(255,215,0,0.4))}
+.rarity-ssr .stat-val{color:var(--gold)}
+.rarity-ssr .gacha-card{box-shadow:0 0 40px rgba(255,215,0,0.08), 0 0 80px rgba(255,215,0,0.03)}
+.rarity-ssr .gacha-card:hover{box-shadow:0 0 50px rgba(255,215,0,0.15), 0 0 100px rgba(255,215,0,0.05)}
+
+.rarity-sr{--rarity-color:var(--violet)}
+.rarity-sr .card-rarity{color:var(--violet);border-color:rgba(155,123,255,0.3)}
+.rarity-sr .card-art::before{
+  background:
+    radial-gradient(ellipse 55% 40% at 50% 40%, rgba(155,123,255,0.05) 0%, transparent 100%),
+    radial-gradient(ellipse 35% 20% at 50% 25%, rgba(155,123,255,0.03) 0%, transparent 100%);
+}
+.rarity-sr .card-silhouette svg{fill:var(--violet)}
+.rarity-sr .card-silhouette span{color:var(--violet)}
+.rarity-sr .stat-fill{background:linear-gradient(90deg,var(--violet),rgba(155,123,255,0.4))}
+.rarity-sr .stat-val{color:var(--violet)}
+.rarity-sr .gacha-card{box-shadow:0 0 35px rgba(155,123,255,0.08), 0 0 70px rgba(155,123,255,0.03)}
+.rarity-sr .gacha-card:hover{box-shadow:0 0 45px rgba(155,123,255,0.15), 0 0 90px rgba(155,123,255,0.05)}
+
+.rarity-a{--rarity-color:var(--cyan)}
+.rarity-a .card-rarity{color:var(--cyan);border-color:rgba(56,189,248,0.3)}
+.rarity-a .card-art::before{
+  background:
+    radial-gradient(ellipse 55% 40% at 50% 40%, rgba(56,189,248,0.05) 0%, transparent 100%),
+    radial-gradient(ellipse 35% 20% at 50% 25%, rgba(56,189,248,0.03) 0%, transparent 100%);
+}
+.rarity-a .card-silhouette svg{fill:var(--cyan)}
+.rarity-a .card-silhouette span{color:var(--cyan)}
+.rarity-a .stat-fill{background:linear-gradient(90deg,var(--cyan),rgba(56,189,248,0.4))}
+.rarity-a .stat-val{color:var(--cyan)}
+.rarity-a .gacha-card{box-shadow:0 0 35px rgba(56,189,248,0.08), 0 0 70px rgba(56,189,248,0.03)}
+.rarity-a .gacha-card:hover{box-shadow:0 0 45px rgba(56,189,248,0.15), 0 0 90px rgba(56,189,248,0.05)}
+
+.card-platform{
+  width:60%;height:6px;border-radius:50%;
+  margin:6px auto 0;filter:blur(14px);opacity:.4;
+  background:var(--rarity-color);
+}
+
+/* ═══════════════════════════════════
+   TRAITS SECTION
+   ═══════════════════════════════════ */
+.traits{
+  padding:8rem 2rem;
+  display:flex;flex-direction:column;align-items:center;
+}
+.trait-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+  gap:1.5rem;width:100%;max-width:1000px;
+}
+.trait-card{
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+  border-radius:14px;padding:2rem;
+  position:relative;overflow:hidden;
+  transition:all .4s;
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+}
+.trait-card:hover{
+  border-color:rgba(155,123,255,0.15);
+  transform:translateY(-4px);
+  box-shadow:0 12px 40px rgba(155,123,255,0.06);
+}
+.trait-card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--trait-color,var(--violet)),transparent);
+  opacity:0;transition:opacity .4s;
+}
+.trait-card:hover::before{opacity:1}
+.trait-rarity{
+  font-family:'Orbitron',monospace;font-size:.6rem;font-weight:800;
+  letter-spacing:2px;margin-bottom:1rem;
+  display:inline-block;padding:.2rem .7rem;border-radius:4px;
+}
+.trait-rarity.ssr{color:var(--gold);background:var(--gold-dim);border:1px solid rgba(255,215,0,0.15)}
+.trait-rarity.sr{color:var(--violet);background:var(--violet-dim);border:1px solid rgba(155,123,255,0.15)}
+.trait-rarity.a{color:var(--cyan);background:var(--cyan-dim);border:1px solid rgba(56,189,248,0.15)}
+.trait-name{
+  font-family:'Orbitron',monospace;font-weight:700;
+  font-size:1.05rem;margin-bottom:.6rem;color:#fff;
+}
+.trait-desc{
+  font-size:.84rem;color:var(--text-dim);line-height:1.65;margin-bottom:1.5rem;
+}
+.trait-stat-label{
+  font-family:'JetBrains Mono',monospace;font-size:.55rem;
+  color:var(--text-dim);letter-spacing:1px;display:flex;justify-content:space-between;
+  margin-bottom:.25rem;
+}
+.trait-stat-bar{
+  height:3px;background:rgba(255,255,255,0.04);border-radius:2px;
+  overflow:hidden;margin-bottom:.6rem;
+}
+.trait-stat-fill{
+  height:100%;border-radius:2px;width:0;
+  transition:width 1.5s cubic-bezier(.22,1,.36,1);
+}
+.trait-stat-fill.gold{background:linear-gradient(90deg,var(--gold),rgba(255,215,0,0.4))}
+.trait-stat-fill.violet{background:linear-gradient(90deg,var(--violet),rgba(155,123,255,0.4))}
+.trait-stat-fill.cyan{background:linear-gradient(90deg,var(--cyan),rgba(56,189,248,0.4))}
+
+/* ═══════════════════════════════════
+   HOW IT WORKS
+   ═══════════════════════════════════ */
+.how{
+  padding:8rem 2rem;
+  display:flex;flex-direction:column;align-items:center;
+}
+.steps{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+  gap:2rem;width:100%;max-width:960px;
+}
+.step{
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+  border-radius:14px;padding:2.5rem 2rem;
+  text-align:center;position:relative;
+  transition:all .4s;
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+}
+.step:hover{
+  border-color:rgba(255,107,157,0.12);
+  transform:translateY(-4px);
+  box-shadow:0 12px 40px rgba(255,107,157,0.06);
+}
+.step-number{
+  font-family:'Orbitron',monospace;font-size:2.5rem;font-weight:900;
+  background:linear-gradient(135deg,var(--violet),var(--rose));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;margin-bottom:1rem;line-height:1;
+}
+.step h3{
+  font-family:'Orbitron',monospace;font-weight:700;
+  font-size:1rem;margin-bottom:.8rem;color:#fff;letter-spacing:1.5px;
+}
+.step p{
+  font-size:.84rem;color:var(--text-dim);line-height:1.65;
+}
+
+/* ═══════════════════════════════════
+   FEATURES STRIP
+   ═══════════════════════════════════ */
+.features-strip{
+  padding:4.5rem 2rem;
+  border-top:1px solid rgba(155,123,255,0.04);
+  border-bottom:1px solid rgba(155,123,255,0.04);
+}
+.features-inner{
+  max-width:1000px;margin:0 auto;
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+  gap:2.5rem;text-align:center;
+}
+.feature-item h4{
+  font-family:'Orbitron',monospace;font-size:.7rem;
+  color:var(--violet);letter-spacing:2px;margin-bottom:.5rem;
+}
+.feature-item p{font-size:.8rem;color:var(--text-dim);line-height:1.55}
+
+/* ═══════════════════════════════════
+   CTA SECTION
+   ═══════════════════════════════════ */
+.cta-section{
+  padding:8rem 2rem;
+  display:flex;flex-direction:column;align-items:center;
+  text-align:center;
+}
+.terminal{
+  background:rgba(6,8,16,0.9);
+  border:1px solid rgba(155,123,255,0.1);
+  border-radius:14px;
+  max-width:650px;width:100%;
+  overflow:hidden;
+  box-shadow:0 25px 80px rgba(0,0,0,0.4),0 0 50px rgba(155,123,255,0.03);
+}
+.terminal-bar{
+  background:rgba(155,123,255,0.03);
+  padding:.75rem 1.2rem;
+  display:flex;align-items:center;gap:.5rem;
+  border-bottom:1px solid rgba(155,123,255,0.06);
+}
+.terminal-dot{width:9px;height:9px;border-radius:50%}
+.terminal-dot:nth-child(1){background:#ff5f56}
+.terminal-dot:nth-child(2){background:#ffbd2e}
+.terminal-dot:nth-child(3){background:#27c93f}
+.terminal-title{
+  font-family:'JetBrains Mono',monospace;font-size:.65rem;
+  color:var(--text-muted);margin-left:.8rem;letter-spacing:1px;
+}
+.terminal-body{padding:2.5rem 2rem}
+.terminal-line{
+  font-family:'JetBrains Mono',monospace;font-size:.82rem;
+  color:var(--text-dim);text-align:left;margin-bottom:.5rem;line-height:1.7;
+}
+.terminal-line .prompt{color:var(--violet)}
+.terminal-line .cmd{color:#fff}
+.terminal-line .output{color:var(--rose)}
+.terminal-line .success{color:#27c93f}
+.cursor-blink{animation:cursorBlink 1s step-end infinite}
+@keyframes cursorBlink{0%,100%{opacity:1}50%{opacity:0}}
+
+.waitlist-wrap{
+  margin-top:2rem;text-align:center;
+}
+.waitlist-form{
+  display:flex;gap:0;max-width:440px;
+  margin:0 auto;border-radius:6px;overflow:hidden;
+  border:1px solid rgba(255,255,255,0.08);
+  transition:border-color .3s;
+}
+.waitlist-form:focus-within{border-color:rgba(155,123,255,0.3)}
+.waitlist-form input{
+  flex:1;padding:.85rem 1.2rem;
+  background:rgba(255,255,255,0.03);
+  border:none;color:var(--text);
+  font-family:'JetBrains Mono',monospace;font-size:.75rem;
+  outline:none;min-width:0;letter-spacing:.02em;
+}
+.waitlist-form input::placeholder{color:var(--text-muted)}
+.waitlist-form input:focus{background:rgba(255,255,255,0.05)}
+.waitlist-form button{
+  padding:.85rem 1.8rem;
+  background:var(--violet);color:#fff;
+  font-family:'Orbitron',monospace;font-weight:700;
+  font-size:.6rem;letter-spacing:1.5px;
+  text-transform:uppercase;border:none;cursor:pointer;
+  transition:all .25s;white-space:nowrap;
+}
+.waitlist-form button:hover{
+  background:var(--violet-deep);
+  box-shadow:0 0 25px var(--violet-glow);
+}
+.waitlist-form button:active{transform:scale(.98)}
+.waitlist-success{
+  color:var(--violet);
+  font-family:'JetBrains Mono',monospace;font-size:.7rem;
+  margin-top:.8rem;text-align:center;
+  display:none;letter-spacing:.08em;
+}
+.waitlist-success.show{display:block}
+.cta-sub{
+  margin-top:1.2rem;font-size:.75rem;color:var(--text-muted);
+  font-family:'JetBrains Mono',monospace;letter-spacing:1px;
+}
+
+/* ═══════════════════════════════════
+   FOOTER
+   ═══════════════════════════════════ */
+footer{
+  padding:3rem 2rem;text-align:center;
+  border-top:1px solid rgba(155,123,255,0.04);
+}
+.footer-logo{
+  font-family:'Orbitron',monospace;font-weight:900;font-size:.85rem;
+  background:linear-gradient(135deg,var(--violet),var(--rose));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;
+  letter-spacing:2px;margin-bottom:.6rem;
+}
+.footer-text{font-size:.7rem;color:var(--text-muted);letter-spacing:1px}
+
+/* ═══════════════════════════════════
+   SCROLL REVEAL
+   ═══════════════════════════════════ */
+.reveal{opacity:0;transform:translateY(25px);transition:all .8s cubic-bezier(.22,1,.36,1)}
+.reveal.visible{opacity:1;transform:translateY(0)}
+
+/* ═══════════════════════════════════
+   ANIMATIONS
+   ═══════════════════════════════════ */
+@keyframes fadeInUp{
+  from{opacity:0;transform:translateY(20px)}
+  to{opacity:1;transform:translateY(0)}
+}
+
+/* ═══════════════════════════════════
+   FLOATING CARDS (background)
+   ═══════════════════════════════════ */
+.floating-cards{
+  position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:-1;
+}
+.float-card{
+  position:absolute;
+  width:55px;height:78px;
+  border-radius:6px;border:1px solid;
+  backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
+  animation:floatCard 8s ease-in-out infinite;
+  opacity:.08;
+}
+.float-card.ssr{border-color:var(--gold);background:rgba(255,215,0,0.03)}
+.float-card.sr{border-color:var(--violet);background:rgba(155,123,255,0.03)}
+.float-card.a{border-color:var(--cyan);background:rgba(56,189,248,0.03)}
+.float-card .rarity-tag{
+  position:absolute;top:4px;left:50%;transform:translateX(-50%);
+  font-family:'Orbitron',monospace;font-size:.35rem;font-weight:700;
+  letter-spacing:1px;
+}
+.float-card.ssr .rarity-tag{color:var(--gold)}
+.float-card.sr .rarity-tag{color:var(--violet)}
+.float-card.a .rarity-tag{color:var(--cyan)}
+@keyframes floatCard{
+  0%,100%{transform:translateY(0) rotate(var(--rot,0deg))}
+  50%{transform:translateY(-18px) rotate(calc(var(--rot,0deg) + 2deg))}
+}
+
+/* ═══════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════ */
+@media(max-width:768px){
+  nav{padding:.7rem 1.2rem}
+  .nav-links{display:none}
+  .hero{padding:5rem 1.5rem 3rem}
+  .hero-cta-group{flex-direction:column;align-items:center}
+  .btn-primary,.btn-secondary{width:100%;max-width:300px;text-align:center}
+  .banner{padding:5rem 1rem}
+  .gacha-cards{gap:1rem}
+  .gacha-card{width:clamp(110px,28vw,160px) !important}
+  .gacha-card.featured{width:clamp(125px,32vw,180px) !important}
+  .card-info{padding:.6rem}
+  .card-stats{display:none}
+  .traits,.how,.cta-section{padding:5rem 1.2rem}
+  .trait-grid,.steps{grid-template-columns:1fr}
+  .waitlist-form{flex-direction:column;max-width:300px}
+  .waitlist-form button{padding:.75rem}
+  .scroll-hint{display:none}
+}
+@media(max-width:480px){
+  .hero h1{letter-spacing:0}
+  .gacha-card{width:clamp(90px,28vw,120px) !important}
+  .gacha-card.featured{width:clamp(100px,32vw,135px) !important}
+  .features-inner{grid-template-columns:1fr 1fr}
+  .step{padding:2rem 1.5rem}
+}
+</style>
+</head>
+<body>
+
+<div class="atmo"></div>
+<div class="grid-bg"></div>
+<div class="vignette"></div>
+<div class="scanlines"></div>
+<canvas id="particles"></canvas>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-brand"><span class="ga">GACHA</span><span class="ag">.AGENCY</span></div>
+  <div class="nav-links">
+    <a href="#roster" class="nav-link">ROSTER</a>
+    <a href="#traits" class="nav-link">TRAITS</a>
+    <a href="#system" class="nav-link">SYSTEM</a>
+  </div>
+  <a href="#start" class="nav-cta">JOIN WAITLIST</a>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="floating-cards" id="floatingCards"></div>
+  <div class="hero-badge">AI Agent Orchestration Engine</div>
+  <h1>
+    <span class="line1">PULL YOUR</span>
+    <span class="line2">FIRST AGENT</span>
+  </h1>
+  <p class="hero-sub">
+    Gacha-powered agent orchestration. Pull specialized AI agents, roll for productivity traits, fuse them into unstoppable squads. Your agency awaits.
+  </p>
+  <div class="hero-cta-group">
+    <a href="#start" class="btn-primary">START YOUR AGENCY</a>
+    <a href="#roster" class="btn-secondary">View Roster ↓</a>
+  </div>
+  <div class="scroll-hint">
+    <span>SCROLL</span>
+    <div class="scroll-line"></div>
+  </div>
+</section>
+
+<!-- CHARACTER BANNER -->
+<section class="banner" id="roster">
+  <div class="reveal">
+    <span class="section-label">// FEATURED AGENTS</span>
+    <h2 class="section-title">CURRENT BANNER</h2>
+    <div class="glow-divider"></div>
+    <p class="section-desc">
+      Your first pull defines your agency. Each agent carries unique capabilities and rarity-gated traits. Choose your vanguard.
+    </p>
+  </div>
+
+  <div class="gacha-cards reveal">
+    <!-- KAEL — SR -->
+    <div class="rarity-sr">
+      <div class="gacha-card" data-agent="kael">
+        <div class="card-inner">
+          <div class="card-frame"></div>
+          <div class="card-rarity">SR</div>
+          <div class="card-art">
+            <img class="card-art-img" src="/assets/chars/kael.png" alt="" loading="lazy" onerror="this.style.display='none'">
+            <div class="card-silhouette">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 4a4 4 0 014 4 4 4 0 01-4 4 4 4 0 01-4-4 4 4 0 014-4m0 10c4.42 0 8 1.79 8 4v2H4v-2c0-2.21 3.58-4 8-4z"/></svg>
+              <span>UNREVEALED</span>
+            </div>
+          </div>
+          <div class="card-shimmer"></div>
+          <div class="card-info">
+            <div class="card-name">KAEL</div>
+            <div class="card-class">Iron Fang</div>
+            <div class="card-stats">
+              <div class="stat-row">
+                <span class="stat-label">POWER</span>
+                <div class="stat-bar"><div class="stat-fill" data-width="88%"></div></div>
+                <span class="stat-val">88</span>
+              </div>
+              <div class="stat-row">
+                <span class="stat-label">GUARD</span>
+                <div class="stat-bar"><div class="stat-fill" data-width="92%"></div></div>
+                <span class="stat-val">92</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card-platform"></div>
+    </div>
+
+    <!-- VOID — SSR (FEATURED) -->
+    <div class="rarity-ssr">
+      <div class="gacha-card featured" data-agent="void">
+        <div class="card-inner">
+          <div class="card-frame"></div>
+          <div class="card-rarity">SSR</div>
+          <div class="card-art">
+            <img class="card-art-img" src="/assets/chars/void.png" alt="" loading="lazy" onerror="this.style.display='none'">
+            <div class="card-silhouette">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 4a4 4 0 014 4 4 4 0 01-4 4 4 4 0 01-4-4 4 4 0 014-4m0 10c4.42 0 8 1.79 8 4v2H4v-2c0-2.21 3.58-4 8-4z"/></svg>
+              <span>UNREVEALED</span>
+            </div>
+          </div>
+          <div class="card-shimmer"></div>
+          <div class="card-info">
+            <div class="card-name">VOID</div>
+            <div class="card-class">Silent Architect</div>
+            <div class="card-stats">
+              <div class="stat-row">
+                <span class="stat-label">INTEL</span>
+                <div class="stat-bar"><div class="stat-fill" data-width="97%"></div></div>
+                <span class="stat-val">97</span>
+              </div>
+              <div class="stat-row">
+                <span class="stat-label">DEPTH</span>
+                <div class="stat-bar"><div class="stat-fill" data-width="95%"></div></div>
+                <span class="stat-val">95</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card-platform"></div>
+    </div>
+
+    <!-- MIRA — SR -->
+    <div class="rarity-a">
+      <div class="gacha-card" data-agent="mira">
+        <div class="card-inner">
+          <div class="card-frame"></div>
+          <div class="card-rarity">A</div>
+          <div class="card-art">
+            <img class="card-art-img" src="/assets/chars/mira.png" alt="" loading="lazy" onerror="this.style.display='none'">
+            <div class="card-silhouette">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 4a4 4 0 014 4 4 4 0 01-4 4 4 4 0 01-4-4 4 4 0 014-4m0 10c4.42 0 8 1.79 8 4v2H4v-2c0-2.21 3.58-4 8-4z"/></svg>
+              <span>UNREVEALED</span>
+            </div>
+          </div>
+          <div class="card-shimmer"></div>
+          <div class="card-info">
+            <div class="card-name">MIRA</div>
+            <div class="card-class">Dream Weaver</div>
+            <div class="card-stats">
+              <div class="stat-row">
+                <span class="stat-label">VISION</span>
+                <div class="stat-bar"><div class="stat-fill" data-width="90%"></div></div>
+                <span class="stat-val">90</span>
+              </div>
+              <div class="stat-row">
+                <span class="stat-label">SPARK</span>
+                <div class="stat-bar"><div class="stat-fill" data-width="94%"></div></div>
+                <span class="stat-val">94</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card-platform"></div>
+    </div>
+  </div>
+</section>
+
+<!-- TRAITS -->
+<section class="traits" id="traits">
+  <div class="reveal">
+    <span class="section-label">// TRAIT SYSTEM</span>
+    <h2 class="section-title">ROLL FOR<br>PRODUCTIVITY TRAITS</h2>
+    <div class="glow-divider"></div>
+    <p class="section-desc">
+      Every agent pull carries unique trait rolls. Stack synergies. Chase rarity. Build a team that compounds your output.
+    </p>
+  </div>
+
+  <div class="trait-grid">
+    <div class="trait-card reveal" style="--trait-color:var(--gold)">
+      <span class="trait-rarity ssr">SSR</span>
+      <div class="trait-name">Autonomous Executor</div>
+      <div class="trait-desc">Agents that take ownership of entire workflows. No hand-holding. They ship while you sleep.</div>
+      <div class="trait-stat-label"><span>AUTONOMY</span><span>98</span></div>
+      <div class="trait-stat-bar"><div class="trait-stat-fill gold" data-width="98%"></div></div>
+      <div class="trait-stat-label"><span>RELIABILITY</span><span>94</span></div>
+      <div class="trait-stat-bar"><div class="trait-stat-fill gold" data-width="94%"></div></div>
+    </div>
+
+    <div class="trait-card reveal" style="--trait-color:var(--violet)">
+      <span class="trait-rarity sr">SR</span>
+      <div class="trait-name">Pattern Hunter</div>
+      <div class="trait-desc">Detects recurring problems across your codebase. Refactors before tech debt compounds.</div>
+      <div class="trait-stat-label"><span>INSIGHT</span><span>88</span></div>
+      <div class="trait-stat-bar"><div class="trait-stat-fill violet" data-width="88%"></div></div>
+      <div class="trait-stat-label"><span>PRECISION</span><span>91</span></div>
+      <div class="trait-stat-bar"><div class="trait-stat-fill violet" data-width="91%"></div></div>
+    </div>
+
+    <div class="trait-card reveal" style="--trait-color:var(--cyan)">
+      <span class="trait-rarity a">A</span>
+      <div class="trait-name">Swarm Coordinator</div>
+      <div class="trait-desc">Spawns sub-agents for parallel execution. Decomposes complex quests into simultaneous strikes.</div>
+      <div class="trait-stat-label"><span>SPEED</span><span>92</span></div>
+      <div class="trait-stat-bar"><div class="trait-stat-fill cyan" data-width="92%"></div></div>
+      <div class="trait-stat-label"><span>THROUGHPUT</span><span>85</span></div>
+      <div class="trait-stat-bar"><div class="trait-stat-fill cyan" data-width="85%"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="how" id="system">
+  <div class="reveal">
+    <span class="section-label">// QUEST BOARD</span>
+    <h2 class="section-title">HOW YOUR AGENCY RUNS</h2>
+    <div class="glow-divider"></div>
+    <p class="section-desc">
+      Three steps. From pull to production. Every agent earns its place through action, not promises.
+    </p>
+  </div>
+
+  <div class="steps">
+    <div class="step reveal">
+      <div class="step-number">01</div>
+      <h3>PULL</h3>
+      <p>Draw agents from the gacha pool. Rarity determines trait ceiling. SSR agents carry legendary capabilities that reshape your entire workflow.</p>
+    </div>
+    <div class="step reveal">
+      <div class="step-number">02</div>
+      <h3>FUSE</h3>
+      <p>Combine lower-tier agents to forge higher rarity. C → B → A → S → SS. Every fusion strengthens your roster and unlocks new synergies.</p>
+    </div>
+    <div class="step reveal">
+      <div class="step-number">03</div>
+      <h3>DEPLOY</h3>
+      <p>Assign agents to quests across your domains. They execute autonomously — writing code, running tests, monitoring systems — while you direct strategy.</p>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES STRIP -->
+<div class="features-strip">
+  <div class="features-inner reveal">
+    <div class="feature-item">
+      <h4>PITY SYSTEM</h4>
+      <p>Guaranteed SSR within 50 pulls. Soft pity from 30. Your luck always improves.</p>
+    </div>
+    <div class="feature-item">
+      <h4>TRAIT STACKING</h4>
+      <p>Duplicate pulls reinforce traits. More pulls = stronger agency.</p>
+    </div>
+    <div class="feature-item">
+      <h4>RUST CORE</h4>
+      <p>Zero-overhead orchestration. Microsecond routing. Built for production.</p>
+    </div>
+    <div class="feature-item">
+      <h4>MULTI-DOMAIN</h4>
+      <p>One agency, infinite domains. Trading, legal, creative — all unified.</p>
+    </div>
+  </div>
+</div>
+
+<!-- CTA -->
+<section class="cta-section" id="start">
+  <div class="reveal">
+    <span class="section-label">// INITIALIZE</span>
+    <h2 class="section-title" style="margin-bottom:2rem">YOUR AGENCY AWAITS</h2>
+  </div>
+
+  <div class="terminal reveal">
+    <div class="terminal-bar">
+      <div class="terminal-dot"></div>
+      <div class="terminal-dot"></div>
+      <div class="terminal-dot"></div>
+      <span class="terminal-title">gacha.agency — terminal</span>
+    </div>
+    <div class="terminal-body">
+      <div class="terminal-line"><span class="prompt">$ </span><span class="cmd" id="typedCmd"></span><span class="cursor-blink" id="cmdCursor">█</span></div>
+      <div class="terminal-line" id="outputLine1" style="display:none"><span class="output">→ Initializing agent pool...</span></div>
+      <div class="terminal-line" id="outputLine2" style="display:none"><span class="output">→ Loading trait matrices...</span></div>
+      <div class="terminal-line" id="outputLine3" style="display:none"><span class="success">✓ Agency ready. Your first pull awaits.</span></div>
+      <div class="waitlist-wrap" id="waitlistWrap">
+        <div class="waitlist-form" id="waitlistForm">
+          <input type="email" id="waitlistEmail" placeholder="operator@domain.com" aria-label="Email for early access">
+          <button type="button" id="waitlistBtn">REQUEST ACCESS</button>
+        </div>
+        <div class="waitlist-success" id="waitlistSuccess">Signal received. You're on the list.</div>
+      </div>
+    </div>
+  </div>
+  <p class="cta-sub reveal">Free tier available — no credit card required</p>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-logo">GACHA.AGENCY</div>
+  <p class="footer-text">AI Agent Orchestration — Reimagined</p>
+</footer>
+
+<script>
+(function(){
+  /* ═══ PARTICLES (WLOP-style dreamy) ═══ */
+  const canvas=document.getElementById('particles');
+  const ctx=canvas.getContext('2d');
+  let w,h,particles=[];
+  function resize(){w=canvas.width=window.innerWidth;h=canvas.height=window.innerHeight}
+  window.addEventListener('resize',resize);resize();
+  class Particle{
+    constructor(){this.reset()}
+    reset(){
+      this.x=Math.random()*w;
+      this.y=Math.random()*h;
+      this.vx=(Math.random()-0.5)*0.2;
+      this.vy=(Math.random()-0.5)*0.2;
+      this.size=Math.random()*1.8+0.3;
+      this.alpha=Math.random()*0.15+0.03;
+      this.pulse=Math.random()*Math.PI*2;
+      this.pulseSpeed=0.01+Math.random()*0.02;
+      const colors=['155,123,255','255,107,157','56,189,248','255,215,0'];
+      this.color=colors[Math.floor(Math.random()*colors.length)];
+    }
+    update(){
+      this.x+=this.vx;this.y+=this.vy;
+      this.pulse+=this.pulseSpeed;
+      if(this.x<0||this.x>w||this.y<0||this.y>h)this.reset();
+    }
+    draw(){
+      const a=this.alpha*(0.5+0.5*Math.sin(this.pulse));
+      ctx.beginPath();ctx.arc(this.x,this.y,this.size,0,Math.PI*2);
+      ctx.fillStyle=`rgba(${this.color},${a})`;ctx.fill();
+    }
+  }
+  const count=Math.min(60,Math.floor(w*h/20000));
+  for(let i=0;i<count;i++)particles.push(new Particle());
+  function animate(){
+    ctx.clearRect(0,0,w,h);
+    particles.forEach(p=>{p.update();p.draw()});
+    requestAnimationFrame(animate);
+  }
+  animate();
+})();
+
+(function(){
+  /* ═══ FLOATING CARDS (background) ═══ */
+  const container=document.getElementById('floatingCards');
+  if(!container)return;
+  const items=[
+    {rarity:'ssr',top:'8%',left:'4%',rot:-10,delay:0},
+    {rarity:'sr',top:'18%',right:'6%',rot:7,delay:1.2},
+    {rarity:'a',top:'50%',left:'2%',rot:-5,delay:2},
+    {rarity:'sr',top:'60%',right:'4%',rot:12,delay:.6},
+    {rarity:'a',top:'30%',left:'10%',rot:4,delay:1.8},
+    {rarity:'ssr',top:'75%',right:'10%',rot:-8,delay:2.8},
+  ];
+  items.forEach(({rarity,top,left,right,rot,delay})=>{
+    const card=document.createElement('div');
+    card.className=`float-card ${rarity}`;
+    let pos=`top:${top};`;
+    pos+=left?`left:${left};`:`right:${right};`;
+    card.style.cssText=`${pos}--rot:${rot}deg;animation-delay:${delay}s`;
+    card.innerHTML=`<span class="rarity-tag">${rarity.toUpperCase()}</span>`;
+    container.appendChild(card);
+  });
+})();
+
+(function(){
+  /* ═══ SCROLL REVEAL ═══ */
+  const observer=new IntersectionObserver((entries)=>{
+    entries.forEach(entry=>{
+      if(entry.isIntersecting){
+        entry.target.classList.add('visible');
+        entry.target.querySelectorAll('.stat-fill,.trait-stat-fill').forEach(bar=>{
+          setTimeout(()=>{bar.style.width=bar.dataset.width},300);
+        });
+      }
+    });
+  },{threshold:0.12,rootMargin:'0px 0px -40px 0px'});
+  document.querySelectorAll('.reveal').forEach(el=>observer.observe(el));
+})();
+
+(function(){
+  /* ═══ CARD IMAGE LOADING ═══ */
+  document.querySelectorAll('.card-art-img').forEach(img=>{
+    img.addEventListener('load',()=>{
+      img.classList.add('loaded');
+      const sil=img.parentElement.querySelector('.card-silhouette');
+      if(sil)sil.style.display='none';
+    });
+  });
+})();
+
+(function(){
+  /* ═══ CARD CLICK EFFECT ═══ */
+  document.querySelectorAll('.gacha-card').forEach(card=>{
+    card.addEventListener('click',()=>{
+      card.style.animation='none';
+      void card.offsetWidth;
+      card.style.animation='cardPulse .5s ease-out';
+    });
+  });
+})();
+
+(function(){
+  /* ═══ TYPING ANIMATION ═══ */
+  const cmd='gacha init --agency emperor';
+  const el=document.getElementById('typedCmd');
+  const cursor=document.getElementById('cmdCursor');
+  const lines=['outputLine1','outputLine2','outputLine3'];
+  const wrap=document.getElementById('waitlistWrap');
+  let started=false;
+  const observer=new IntersectionObserver((entries)=>{
+    entries.forEach(entry=>{
+      if(entry.isIntersecting&&!started){
+        started=true;
+        let i=0;
+        const typeInterval=setInterval(()=>{
+          if(i<cmd.length){el.textContent+=cmd[i];i++}
+          else{
+            clearInterval(typeInterval);
+            cursor.style.display='none';
+            let lineIdx=0;
+            const showLine=setInterval(()=>{
+              if(lineIdx<lines.length){
+                document.getElementById(lines[lineIdx]).style.display='block';
+                lineIdx++;
+              }else{
+                clearInterval(showLine);
+                if(wrap)wrap.style.opacity='1';
+              }
+            },400);
+          }
+        },45);
+      }
+    });
+  },{threshold:0.3});
+  observer.observe(document.querySelector('.terminal'));
+})();
+
+(function(){
+  /* ═══ WAITLIST ═══ */
+  const btn=document.getElementById('waitlistBtn');
+  const email=document.getElementById('waitlistEmail');
+  const success=document.getElementById('waitlistSuccess');
+  const form=document.getElementById('waitlistForm');
+  function submit(){
+    const v=email.value.trim();
+    if(!v||!v.includes('@')||!v.includes('.')){
+      email.style.boxShadow='inset 0 0 12px rgba(255,107,157,0.15)';
+      setTimeout(()=>email.style.boxShadow='',1200);
+      return;
+    }
+    const wl=JSON.parse(localStorage.getItem('gacha_waitlist')||'[]');
+    if(!wl.includes(v)){wl.push(v);localStorage.setItem('gacha_waitlist',JSON.stringify(wl))}
+    form.style.display='none';
+    success.classList.add('show');
+  }
+  btn.addEventListener('click',submit);
+  email.addEventListener('keydown',e=>{if(e.key==='Enter')submit()});
+})();
+
+/* ═══ SMOOTH SCROLL ═══ */
+document.querySelectorAll('a[href^="#"]').forEach(a=>{
+  a.addEventListener('click',e=>{
+    e.preventDefault();
+    const target=document.querySelector(a.getAttribute('href'));
+    if(target)target.scrollIntoView({behavior:'smooth',block:'start'});
+  });
+});
+</script>
+
+</body>
+</html>

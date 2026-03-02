@@ -1,0 +1,3 @@
+Contact: mailto:hello@entity.legal
+Preferred-Languages: en
+Canonical: https://entity.legal/.well-known/security.txt

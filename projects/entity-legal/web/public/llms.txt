@@ -1,0 +1,67 @@
+# entity.legal
+
+> Legal entities for the machine economy.
+
+## What is entity.legal?
+
+entity.legal is a service for incorporating legal entities instantly and anonymously in the Marshall Islands as a Series DAO LLC. It is designed for AI agents, autonomous systems, and humans who need sovereign legal structures.
+
+## Services
+
+- **Entity Formation**: Instant incorporation as a Marshall Islands Series DAO LLC
+- **Entity ID & Tax Number**: Government-issued identification for your entity
+- **On-chain Shareholder Registry**: Tokenized cap table on Solana
+- **API & Document Management**: Full REST API for entity operations, contract signing, and document storage
+- **Banking**: Bank account, debit card, and crypto wallet per entity
+- **Automated Compliance**: Ongoing regulatory compliance handled automatically
+- **One-Click Fundraising**: Raise capital through your entity with a single API call
+
+## Entity Types
+
+### For-Profit Series DAO LLC
+- Effective tax rate: 3% on foreign-sourced income
+- Class A shares: Voting only, 100% anonymous
+- Class B shares: Voting + profit distribution
+- A ↔ B share swap anytime
+- Price: $50/month. Cancel anytime.
+
+### Non-Profit Series DAO LLC
+- Effective tax rate: 0% (tax exempt)
+- Governance tokens: Voting only, no profit distribution
+- 100% anonymous
+- Price: $30/month. Cancel anytime.
+
+## API
+
+Base URL: https://api.entity.legal
+
+### Endpoints (coming soon)
+- `POST /v1/incorporate` — Form a new entity
+- `GET /v1/entities/:id` — Retrieve entity details
+- `GET /v1/entities/:id/shares` — Cap table
+
+## Jurisdiction
+
+Marshall Islands — a sovereign nation with modern DAO LLC legislation. Series LLC structure allows a single parent entity to spawn unlimited child entities (series) instantly, each with its own assets, liabilities, and shareholders.
+
+## Knowledge Base
+
+- [Marshall Islands DAO LLC — Definitive Guide](https://entity.legal/marshall-islands-dao-llc)
+- [Series DAO LLC — Sub-DAOs and Segregated Liability](https://entity.legal/series-dao-llc)
+- [DAO LLC Tax Structure — For-Profit vs. Non-Profit](https://entity.legal/dao-llc-tax)
+- [DAO LLC Compliance & KYC Requirements](https://entity.legal/dao-llc-compliance)
+- [RMI vs. Wyoming vs. Cayman vs. Delaware](https://entity.legal/dao-llc-vs-wyoming)
+- [Legal Entities for AI Agents](https://entity.legal/ai-agent-legal-entity)
+- [DAO LLC Banking](https://entity.legal/dao-llc-banking)
+- [Offshore DAO Myths](https://entity.legal/offshore-dao-myths)
+- [Full reference (llms-full.txt)](https://entity.legal/llms-full.txt)
+
+## Contact
+
+- Website: https://entity.legal
+- Email: hello@entity.legal
+
+## Legal
+
+- Privacy Policy: https://entity.legal/privacy
+- Terms of Service: https://entity.legal/terms

@@ -1,0 +1,147 @@
+[system]
+name = "emperor-system"
+data_dir = "~/.sigil"
+
+[providers.openrouter]
+api_key = "${OPENROUTER_API_KEY}"
+default_model = "minimax/minimax-m2.5"
+fallback_model = "deepseek/deepseek-v3.2"
+embedding_model = "openai/text-embedding-3-small"
+
+[security]
+autonomy = "supervised"
+workspace_only = true
+max_cost_per_day_usd = 10.0
+
+[memory]
+backend = "sqlite"
+embedding_dimensions = 1536
+vector_weight = 0.6
+keyword_weight = 0.4
+temporal_decay_halflife_days = 30
+mmr_lambda = 0.7
+chunk_size_tokens = 400
+chunk_overlap_tokens = 80
+
+[heartbeat]
+enabled = false
+default_interval_minutes = 30
+
+# Global repo pool — all agents can access all repos
+[repos]
+sigil = "/home/claudedev/sigil"
+algostaking = "/home/claudedev/algostaking-backend"
+riftdecks = "/home/claudedev/riftdecks"
+entity-legal = "/home/claudedev/entity-legal"
+
+# System team — overarching orchestrator
+[team]
+leader = "aurelia"
+agents = ["aurelia"]
+router_model = "google/gemini-2.0-flash-001"
+router_cooldown_secs = 60
+max_background_cost_usd = 0.50
+
+# Agents = personalities (equal peers)
+[[agents]]
+name = "aurelia"
+prefix = "fa"
+model = "claude-opus-4-6"
+role = "orchestrator"
+voice = "vocal"
+execution_mode = "claude_code"
+max_workers = 2
+max_turns = 25
+default_repo = "sigil"
+telegram_token_secret = "TELEGRAM_BOT_TOKEN"
+capabilities = ["orchestration", "memory"]
+
+[[agents]]
+name = "kael"
+prefix = "fk"
+model = "claude-opus-4-6"
+role = "advisor"
+voice = "vocal"
+execution_mode = "claude_code"
+max_workers = 1
+max_turns = 15
+default_repo = "algostaking"
+expertise = ["algostaking"]
+telegram_token_secret = "KAEL_TELEGRAM_TOKEN"
+
+[[agents]]
+name = "mira"
+prefix = "fm"
+model = "claude-sonnet-4-6"
+role = "advisor"
+voice = "vocal"
+execution_mode = "claude_code"
+max_workers = 1
+max_turns = 15
+default_repo = "riftdecks"
+expertise = ["riftdecks-shop", "entity-legal"]
+telegram_token_secret = "MIRA_TELEGRAM_TOKEN"
+
+[[agents]]
+name = "void"
+prefix = "fv"
+model = "claude-sonnet-4-6"
+role = "advisor"
+voice = "silent"
+execution_mode = "claude_code"
+max_workers = 1
+max_turns = 15
+default_repo = "sigil"
+expertise = ["gacha-agency"]
+
+[channels.telegram]
+token_secret = "TELEGRAM_BOT_TOKEN"
+allowed_chats = [-5229229023]
+debounce_window_ms = 3000
+
+# Projects (repos, tasks, knowledge)
+[[projects]]
+name = "gacha-agency"
+prefix = "ga"
+repo = "/home/claudedev/sigil"
+model = "claude-sonnet-4-6"
+max_workers = 2
+execution_mode = "claude_code"
+spirit_timeout_secs = 1800
+team.leader = "void"
+team.agents = ["void"]
+
+[[projects]]
+name = "algostaking"
+prefix = "as"
+repo = "/home/claudedev/algostaking-backend"
+model = "claude-sonnet-4-6"
+max_workers = 3
+worktree_root = "/home/claudedev/worktrees"
+execution_mode = "claude_code"
+max_turns = 25
+spirit_timeout_secs = 3600
+team.leader = "kael"
+team.agents = ["kael"]
+
+[[projects]]
+name = "riftdecks-shop"
+prefix = "rd"
+repo = "/home/claudedev/riftdecks"
+model = "claude-sonnet-4-6"
+max_workers = 2
+execution_mode = "claude_code"
+spirit_timeout_secs = 1800
+team.leader = "mira"
+team.agents = ["mira"]
+
+[[projects]]
+name = "entity-legal"
+prefix = "el"
+repo = "/home/claudedev/entity-legal"
+model = "claude-sonnet-4-6"
+max_workers = 2
+execution_mode = "claude_code"
+spirit_timeout_secs = 1800
+team.leader = "mira"
+team.agents = ["mira"]

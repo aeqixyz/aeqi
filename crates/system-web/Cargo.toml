@@ -1,0 +1,30 @@
+[package]
+name = "system-web"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+system-core = { workspace = true }
+system-tenants = { path = "../system-tenants" }
+system-companions = { workspace = true }
+system-orchestrator = { workspace = true }
+system-tasks = { workspace = true }
+system-providers = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+futures = { workspace = true }
+axum = { version = "0.8", features = ["ws"] }
+axum-extra = { version = "0.10", features = ["typed-header"] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+jsonwebtoken = "9"
+rusqlite = { workspace = true }
+reqwest = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

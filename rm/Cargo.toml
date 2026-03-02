@@ -8,13 +8,16 @@ name = "rm"
 path = "src/main.rs"
 
 [dependencies]
-realm-core = { workspace = true }
-realm-quests = { workspace = true }
-realm-providers = { workspace = true }
-realm-tools = { workspace = true }
-realm-orchestrator = { workspace = true }
-realm-gates = { workspace = true }
-realm-memory = { workspace = true }
+system-core = { workspace = true }
+system-tasks = { workspace = true }
+system-providers = { workspace = true }
+system-tools = { workspace = true }
+system-orchestrator = { workspace = true }
+system-gates = { workspace = true }
+system-memory = { workspace = true }
+system-companions = { workspace = true }
+system-tenants = { workspace = true }
+system-web = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
@@ -25,3 +28,4 @@ tracing-subscriber = { workspace = true }
 chrono = { workspace = true }
 dirs = { workspace = true }
 reqwest = { workspace = true }
+toml = { workspace = true }

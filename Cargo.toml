@@ -2,14 +2,16 @@
 resolver = "2"
 members = [
     "rm",
-    "crates/realm-core",
-    "crates/realm-quests",
-    "crates/realm-providers",
-    "crates/realm-tools",
-    "crates/realm-orchestrator",
-    "crates/realm-memory",
-    "crates/realm-gates",
-    "crates/realm-companions",
+    "crates/system-core",
+    "crates/system-tasks",
+    "crates/system-providers",
+    "crates/system-tools",
+    "crates/system-orchestrator",
+    "crates/system-memory",
+    "crates/system-gates",
+    "crates/system-companions",
+    "crates/system-tenants",
+    "crates/system-web",
 ]
 
 [workspace.package]
@@ -49,6 +51,17 @@ chacha20poly1305 = "0.10"
 rand = "0.9"
 base64 = "0.22"
 sha2 = "0.10"
+hmac = "0.12"
+argon2 = "0.5"
+
+# TOTP
+totp-rs = { version = "5", features = ["qr"] }
+
+# Email
+lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "builder", "hostname", "smtp-transport"] }
+
+# Hex encoding
+hex = "0.4"
 
 # Time
 chrono = { version = "0.4", features = ["serde"] }
@@ -70,14 +83,16 @@ futures = "0.3"
 tempfile = "3"
 
 # Internal crates
-realm-quests = { path = "crates/realm-quests" }
-realm-core = { path = "crates/realm-core" }
-realm-providers = { path = "crates/realm-providers" }
-realm-tools = { path = "crates/realm-tools" }
-realm-orchestrator = { path = "crates/realm-orchestrator" }
-realm-memory = { path = "crates/realm-memory" }
-realm-gates = { path = "crates/realm-gates" }
-realm-companions = { path = "crates/realm-companions" }
+system-tasks = { path = "crates/system-tasks" }
+system-core = { path = "crates/system-core" }
+system-providers = { path = "crates/system-providers" }
+system-tools = { path = "crates/system-tools" }
+system-orchestrator = { path = "crates/system-orchestrator" }
+system-memory = { path = "crates/system-memory" }
+system-gates = { path = "crates/system-gates" }
+system-companions = { path = "crates/system-companions" }
+system-tenants = { path = "crates/system-tenants" }
+system-web = { path = "crates/system-web" }
 
 [profile.release]
 lto = true

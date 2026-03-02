@@ -1,4 +1,15 @@
-/target/
+**/target/
 *.swp
 *.swo
 .DS_Store
+
+# Runtime state
+.sigil/checkpoints/
+projects/*/.sigil/
+agents/*/.sigil/
+*.db
+*.db-wal
+*.db-shm
+
+# Local config (commit platform.example.toml instead)
+config/platform.toml

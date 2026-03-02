@@ -1,0 +1,111 @@
+# entity.legal — Complete Reference
+
+> Legal entities for the machine economy.
+
+## Overview
+
+entity.legal provides instant, anonymous legal entity formation in the Marshall Islands as a Series DAO LLC. The service is built API-first for AI agents and autonomous systems, with a human-friendly interface available as well.
+
+The Marshall Islands is a sovereign nation that enacted the Marshall Islands DAO LLC Act, providing a modern legal framework for decentralized autonomous organizations. A Series LLC structure allows a single parent entity to create unlimited child entities (series), each with separate legal identity, assets, liabilities, and shareholders — without filing separate paperwork for each.
+
+## Complete Service Offering
+
+### 1. Entity Formation
+Instant incorporation as a Marshall Islands Series DAO LLC. No lawyer needed. No office visit. No notarization. Formation is completed programmatically via API or through the web interface.
+
+### 2. Entity ID & Tax Number
+Each entity receives a government-issued Entity ID and tax identification number from the Marshall Islands, valid for international business operations.
+
+### 3. On-chain Shareholder Registry
+Cap table managed on the Solana blockchain. Share issuance, transfers, and voting are all on-chain. Full transparency for shareholders while maintaining privacy from external parties.
+
+### 4. API & Document Management
+Full REST API for all entity operations:
+- Entity formation and management
+- Document storage and retrieval
+- Contract generation and digital signing
+- Shareholder management
+- Compliance reporting
+
+### 5. Banking Infrastructure
+Each entity can have:
+- Traditional bank account (USD)
+- Debit card for business expenses
+- Crypto wallet (Solana) for on-chain operations
+
+### 6. Automated Compliance
+Ongoing regulatory requirements handled automatically:
+- Annual report filing
+- Registered representative maintenance
+- Tax filing assistance
+- Regulatory change monitoring
+
+### 7. One-Click Fundraising
+Raise capital through your entity via a single API call. Issue new shares, manage investor onboarding, and handle fund distribution programmatically.
+
+## Pricing
+
+| Plan | Price |
+|------|-------|
+| For-Profit | $50/month |
+| Non-Profit | $30/month |
+
+Monthly billing. Cancel anytime — entity dissolves when you stop paying. Same price for API and web.
+
+## Share Structure
+
+### For-Profit Entities
+- **Class A Shares**: Voting rights only. 100% anonymous. No profit distribution.
+- **Class B Shares**: Voting rights + profit distribution rights.
+- Shares can be swapped between Class A and Class B at any time.
+
+### Non-Profit Entities
+- **Governance Tokens**: Voting rights only. No profit distribution. 100% anonymous.
+
+## Tax Treatment
+
+- **For-Profit**: 3% effective tax rate on foreign-sourced income (Marshall Islands)
+- **Non-Profit**: 0% — fully tax exempt
+
+## API Reference
+
+Base URL: `https://api.entity.legal`
+
+### Authentication
+API key required. Request access at https://entity.legal.
+
+### Endpoints
+
+#### POST /v1/incorporate
+Form a new legal entity.
+
+Request body:
+```json
+{
+  "type": "for-profit",
+  "name": "My Entity LLC",
+  "shares": {
+    "class_a": 1000,
+    "class_b": 0
+  }
+}
+```
+
+#### GET /v1/entities/:id
+Retrieve entity details including status, formation date, jurisdiction, and share structure.
+
+#### GET /v1/entities/:id/shares
+View the complete cap table for an entity, including all shareholders and their holdings.
+
+## Technical Architecture
+- Built on Solana for on-chain operations
+- REST API with JSON responses
+- Webhook support for entity events
+- SDK available for Node.js, Python, and Rust (coming soon)
+
+## Links
+- Website: https://entity.legal
+- API: https://api.entity.legal
+- Email: hello@entity.legal
+- Privacy: https://entity.legal/privacy
+- Terms: https://entity.legal/terms

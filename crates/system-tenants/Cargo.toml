@@ -1,0 +1,33 @@
+[package]
+name = "system-tenants"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+system-core = { workspace = true }
+system-tasks = { workspace = true }
+system-orchestrator = { workspace = true }
+system-memory = { workspace = true }
+system-companions = { workspace = true }
+system-providers = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+rusqlite = { workspace = true }
+rand = { workspace = true }
+jsonwebtoken = "9"
+argon2 = { workspace = true }
+totp-rs = { workspace = true }
+hex = { workspace = true }
+reqwest = { workspace = true }
+sha2 = { workspace = true }
+hmac = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
