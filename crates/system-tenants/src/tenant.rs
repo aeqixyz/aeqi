@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
 
 use system_companions::CompanionStore;
 use system_orchestrator::{ProjectRegistry, ConversationStore, CostLedger, DispatchBus};
@@ -39,6 +40,11 @@ pub struct TenantMeta {
     pub email: Option<String>,
     pub tier: String,
     pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub active_project: Option<String>,
+    /// External path to read project dirs from instead of data_dir/projects/.
+    #[serde(default)]
+    pub projects_source: Option<String>,
 }
 
 /// A loaded tenant with all subsystems initialized.
@@ -49,6 +55,8 @@ pub struct Tenant {
     pub tier: TierConfig,
     pub tier_name: String,
     pub data_dir: PathBuf,
+    /// External projects source dir (overrides data_dir/projects/ for scanning).
+    pub projects_source: Option<PathBuf>,
     pub registry: Arc<ProjectRegistry>,
     pub dispatch_bus: Arc<DispatchBus>,
     pub cost_ledger: Arc<CostLedger>,
@@ -56,9 +64,16 @@ pub struct Tenant {
     pub conversation_store: Arc<ConversationStore>,
     pub last_active: AtomicU64,
     pub created_at: DateTime<Utc>,
+    pub active_project: RwLock<Option<String>>,
 }
 
 impl Tenant {
+    /// The directory to read project subdirs from.
+    /// Returns `projects_source` if set, otherwise `data_dir/projects`.
+    pub fn projects_dir(&self) -> PathBuf {
+        self.projects_source.clone().unwrap_or_else(|| self.data_dir.join("projects"))
+    }
+
     /// Update last_active timestamp to now.
     pub fn touch(&self) {
         let now = std::time::SystemTime::now()
@@ -82,5 +97,42 @@ impl Tenant {
     pub fn can_afford(&self) -> bool {
         let (spent, _, _) = self.cost_ledger.budget_status();
         spent < self.tier.max_cost_per_day_usd
+    }
+
+    /// The team leader (familiar companion). None if no companions yet.
+    pub fn leader(&self) -> Option<String> {
+        self.companion_store.get_familiar().ok().flatten().map(|c| c.name)
+    }
+
+    /// The team (rostered squad). Falls back to just the leader if no roster set.
+    pub fn team(&self) -> Vec<String> {
+        if let Ok(roster) = self.companion_store.get_roster()
+            && !roster.is_empty()
+        {
+            return roster.into_iter().map(|c| c.name).collect();
+        }
+        self.leader().into_iter().collect()
+    }
+
+    /// Leader name for dispatch routing. "system" fallback for fresh tenants.
+    pub fn leader_or_default(&self) -> String {
+        self.leader().unwrap_or_else(|| "system".to_string())
+    }
+
+    /// Get the currently active project name.
+    pub async fn active_project(&self) -> Option<String> {
+        self.active_project.read().await.clone()
+    }
+
+    /// Set the active project and persist to tenant.toml.
+    pub async fn set_active_project(&self, name: Option<String>) -> anyhow::Result<()> {
+        *self.active_project.write().await = name.clone();
+        // Persist: read current meta, update, write back
+        let meta_path = self.data_dir.join("tenant.toml");
+        let content = std::fs::read_to_string(&meta_path)?;
+        let mut meta: TenantMeta = toml::from_str(&content)?;
+        meta.active_project = name;
+        std::fs::write(&meta_path, toml::to_string_pretty(&meta)?)?;
+        Ok(())
     }
 }

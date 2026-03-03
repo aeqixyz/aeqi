@@ -2,6 +2,14 @@
 
 Inherits from `projects/shared/WORKFLOW.md` for code standards, R→D→R pipeline, and escalation.
 
+## Build & Deploy
+
+- Build: `cargo build --release` (7MB binary, LTO + strip)
+- Test: `cargo test`
+- Lint: `cargo clippy`
+- Deploy: merge to `master` → post-merge hook builds + deploys
+- Service: `gacha-agency.service` on port 3100
+
 ## System-Specific Workflow
 
 Standard worktree workflow applies (same as all projects).

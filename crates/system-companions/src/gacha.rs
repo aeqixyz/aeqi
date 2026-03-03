@@ -3,7 +3,7 @@ use chrono::Utc;
 
 use crate::anime;
 use crate::companion::{
-    Aesthetic, Archetype, Companion, DereType, PersonaStatus, Rarity, Region,
+    Aesthetic, Archetype, Companion, DereType, PersonaStatus, PortraitStatus, Rarity, Region,
 };
 use crate::names;
 
@@ -178,6 +178,7 @@ impl GachaEngine {
             personality_seed,
             anime_inspirations,
             persona_status: PersonaStatus::Pending,
+            portrait_status: PortraitStatus::Pending,
             title,
             last_name,
         }

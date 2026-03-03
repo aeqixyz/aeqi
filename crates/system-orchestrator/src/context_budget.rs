@@ -7,6 +7,7 @@ use tracing::debug;
 pub struct ContextBudget {
     pub max_shared_workflow: usize,
     pub max_persona: usize,
+    pub max_evolution: usize,
     pub max_agents: usize,
     pub max_knowledge: usize,
     pub max_preferences: usize,
@@ -21,6 +22,7 @@ impl Default for ContextBudget {
         Self {
             max_shared_workflow: 2000,
             max_persona: 4000,
+            max_evolution: 2000,
             max_agents: 8000,
             max_knowledge: 12000,
             max_preferences: 4000,
@@ -38,6 +40,7 @@ impl ContextBudget {
         Self {
             max_shared_workflow: cfg.max_shared_workflow,
             max_persona: cfg.max_persona,
+            max_evolution: 2000, // Controlled by LifecycleConfig.evolution_budget at construction time.
             max_agents: cfg.max_agents,
             max_knowledge: cfg.max_knowledge,
             max_preferences: cfg.max_preferences,
@@ -132,6 +135,13 @@ impl ContextBudget {
         if let Some(ref ident) = identity.identity {
             // Identity is kept small by convention; no separate budget.
             parts.push(format!("# Identity\n\n{ident}"));
+        }
+        if let Some(ref evolution) = identity.evolution {
+            // Evolution patches share persona budget slot (2000 chars default).
+            parts.push(format!(
+                "# Evolution\n\n{}",
+                Self::truncate(evolution, self.max_evolution)
+            ));
         }
         if let Some(ref operational) = identity.operational {
             parts.push(format!(

@@ -53,6 +53,44 @@ impl Project {
         })
     }
 
+    /// Create a lightweight project from a tenant's on-disk project directory.
+    ///
+    /// Unlike `from_config()`, this doesn't require execution fields (model, max_workers, etc.)
+    /// — it's used for web API visibility, not daemon-driven execution.
+    pub fn from_tenant_dir(
+        name: String,
+        prefix: String,
+        repo: Option<&str>,
+        project_dir: &std::path::Path,
+    ) -> Result<Self> {
+        let project_identity = Identity::load_from_dir(project_dir).unwrap_or_default();
+
+        // .tasks/ first, fallback .quests/ for compat.
+        let tasks_dir = {
+            let tasks = project_dir.join(".tasks");
+            if tasks.exists() {
+                tasks
+            } else {
+                let quests = project_dir.join(".quests");
+                if quests.exists() { quests } else { tasks }
+            }
+        };
+        let task_board = TaskBoard::open(&tasks_dir)?;
+
+        Ok(Self {
+            name,
+            prefix,
+            repo: repo.map(PathBuf::from).unwrap_or_default(),
+            worktree_root: PathBuf::new(),
+            model: String::new(),
+            max_workers: 0,
+            worker_timeout_secs: 0,
+            project_identity,
+            tasks: Arc::new(Mutex::new(task_board)),
+            task_notify: Arc::new(Notify::new()),
+        })
+    }
+
     /// Create a task in this project's store.
     pub async fn create_task(&self, subject: &str) -> Result<system_tasks::Task> {
         let mut store = self.tasks.lock().await;

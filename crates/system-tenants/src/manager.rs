@@ -8,6 +8,7 @@ use tracing::{info, warn, debug};
 
 use crate::auth::{self, SessionToken, LoginResult};
 use crate::config::PlatformConfig;
+use crate::project_meta::TenantProjectMeta;
 use crate::provision;
 use crate::storage;
 use crate::tenant::{Tenant, TenantId};
@@ -647,10 +648,79 @@ impl TenantManager {
         let conversation_store = Arc::new(ConversationStore::open(&data_dir.join("conversations.db"))?);
         let registry = Arc::new(ProjectRegistry::new(dispatch_bus.clone(), "system".to_string()));
 
+        // Resolve projects_source from tenant meta.
+        let projects_source: Option<PathBuf> = crate::storage::load_tenant_meta(data_dir)
+            .ok()
+            .and_then(|m| m.projects_source)
+            .map(PathBuf::from);
+
+        // Scan project directories for project.toml metadata.
+        // If projects_source is set, scan that first (primary), then also scan
+        // data_dir/projects for tenant-only projects (e.g. chat/).
+        let mut dirs_to_scan: Vec<PathBuf> = Vec::new();
+        if let Some(ref src) = projects_source {
+            dirs_to_scan.push(src.clone());
+            // Also scan local tenant projects dir for tenant-only projects.
+            let local = data_dir.join("projects");
+            if local.is_dir() {
+                dirs_to_scan.push(local);
+            }
+        } else {
+            dirs_to_scan.push(data_dir.join("projects"));
+        }
+
+        let mut registered_names = std::collections::HashSet::new();
+        for projects_dir in &dirs_to_scan {
+            if !projects_dir.is_dir() {
+                continue;
+            }
+            if let Ok(entries) = std::fs::read_dir(projects_dir) {
+                for entry in entries.flatten() {
+                    let project_toml = entry.path().join("project.toml");
+                    if !project_toml.exists() {
+                        continue; // Skip dirs without project.toml (e.g. chat/)
+                    }
+                    match std::fs::read_to_string(&project_toml)
+                        .map_err(anyhow::Error::from)
+                        .and_then(|s| toml::from_str::<TenantProjectMeta>(&s).map_err(Into::into))
+                    {
+                        Ok(meta) => {
+                            // Skip if already registered (source dir wins over local).
+                            if !registered_names.insert(meta.name.clone()) {
+                                continue;
+                            }
+                            match system_orchestrator::Project::from_tenant_dir(
+                                meta.name.clone(),
+                                meta.prefix.clone(),
+                                meta.repo.as_deref(),
+                                &entry.path(),
+                            ) {
+                                Ok(project) => {
+                                    registry.register_project_only(Arc::new(project)).await;
+                                    debug!(project = %meta.name, dir = %projects_dir.display(), "loaded tenant project");
+                                }
+                                Err(e) => {
+                                    warn!(path = %entry.path().display(), error = %e, "failed to load tenant project");
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            warn!(path = %project_toml.display(), error = %e, "failed to parse project.toml");
+                        }
+                    }
+                }
+            }
+        }
+
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
+
+        // Load active_project from tenant.toml metadata.
+        let active_project = crate::storage::load_tenant_meta(data_dir)
+            .ok()
+            .and_then(|m| m.active_project);
 
         Ok(Tenant {
             id: tenant_id.clone(),
@@ -659,6 +729,7 @@ impl TenantManager {
             tier: tier.clone(),
             tier_name: tier_name.to_string(),
             data_dir: data_dir.to_path_buf(),
+            projects_source,
             registry,
             dispatch_bus,
             cost_ledger,
@@ -666,6 +737,7 @@ impl TenantManager {
             conversation_store,
             last_active: std::sync::atomic::AtomicU64::new(now),
             created_at: chrono::Utc::now(),
+            active_project: tokio::sync::RwLock::new(active_project),
         })
     }
 }

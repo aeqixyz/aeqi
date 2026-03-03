@@ -19,7 +19,13 @@
 
 ## Entity-Legal Context
 
-- Legal entity formation product
-- Target: entrepreneurs, creators, small business owners
-- Key UX: reduce intimidation of legal process, guide-like experience
-- Opportunity: make boring legal paperwork feel empowering
+- Web3-native legal entity formation: Marshall Islands DAO LLC + Solana on-chain cap tables
+- Domain: entity.legal (LIVE — landing page + SEO articles hosted)
+- Stack: Next.js 16, React 19, Tailwind, Framer Motion, Redis waitlist
+- Source: `/home/claudedev/sigil/projects/entity-legal/web/` (inside sigil, not a separate repo)
+- Hosting: nginx static export on Hetzner 5.9.83.245, Let's Encrypt SSL
+- DNS: Porkbun, automated via `scripts/porkbun-deploy.sh`
+- 10+ SEO article pages live (DAO LLC banking, compliance, tax, Marshall Islands, etc.)
+- Entity types: DAO LLC, Non-Profit DAO, Series DAO LLC, Traditional LLC
+- Target: DeFi founders, DAO operators, Web3 startups
+- Status: Landing + SEO live. Backend services (formation flow, Solana integration) not started yet.

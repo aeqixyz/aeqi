@@ -6,7 +6,7 @@ use system_core::traits::{Channel, LogObserver, Memory, Observer, Provider, Tool
 use system_core::{Agent, AgentConfig, ExecutionMode, Identity, SecretStore, SystemConfig};
 use system_memory::SqliteMemory;
 use system_gates::TelegramChannel;
-use system_orchestrator::{OperationStore, ScheduledJob, ScheduleStore, Daemon, DispatchBus, Pipeline, Project, ProjectRegistry, Supervisor, AgentRouter, Council, EmotionalState, ConversationStore};
+use system_orchestrator::{OperationStore, ScheduledJob, ScheduleStore, Daemon, DispatchBus, Pipeline, Project, ProjectRegistry, Supervisor, AgentRouter, EmotionalState, ConversationStore, LifecycleEngine};
 use system_orchestrator::schedule::CronSchedule;
 use system_orchestrator::tools::build_orchestration_tools;
 use system_providers::{OpenRouterEmbedder, OpenRouterProvider};
@@ -187,6 +187,16 @@ enum Commands {
         #[command(subcommand)]
         action: ConfigAction,
     },
+
+    /// Seed tenant projects from system.toml definitions.
+    SeedProjects {
+        /// Tenant UUID to seed projects into.
+        #[arg(short, long)]
+        tenant: String,
+        /// Path to platform.toml config.
+        #[arg(short, long)]
+        platform_config: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -365,6 +375,9 @@ async fn main() -> Result<()> {
         Commands::Done { task_id, reason } => cmd_done(&cli.config, &task_id, &reason).await,
         Commands::Team { project } => cmd_team(&cli.config, project.as_deref()).await,
         Commands::Config { action } => cmd_config(&cli.config, action).await,
+        Commands::SeedProjects { tenant, platform_config } => {
+            cmd_seed_projects(&cli.config, &tenant, &platform_config).await
+        }
     }
 }
 
@@ -1158,13 +1171,12 @@ async fn cmd_doctor(config_path: &Option<PathBuf>, fix: bool) -> Result<()> {
 
                 match find_project_dir(&pcfg.name) {
                     Ok(d) => {
-                        let soul = d.join("SOUL.md").exists();
-                        let ident = d.join("IDENTITY.md").exists();
+                        let agents_md = d.join("AGENTS.md").exists();
+                        let knowledge_md = d.join("KNOWLEDGE.md").exists();
                         let quests_dir = d.join(".tasks");
                         let has_tasks = quests_dir.exists();
-                        if !soul { issues += 1; }
-                        if !ident { issues += 1; }
-                        println!("    Identity: SOUL={soul} IDENTITY={ident} | Tasks: {has_tasks}");
+                        if !agents_md { issues += 1; }
+                        println!("    Project files: AGENTS.md={agents_md} KNOWLEDGE.md={knowledge_md} | Tasks: {has_tasks}");
 
                         // --fix: create missing .tasks dir
                         if fix && !has_tasks {
@@ -1195,6 +1207,25 @@ async fn cmd_doctor(config_path: &Option<PathBuf>, fix: bool) -> Result<()> {
                     }
                     Err(_) => {
                         println!("    [WARN] Project dir not found");
+                        issues += 1;
+                    }
+                }
+            }
+
+            // Check agent identity files.
+            for agent_cfg in &config.agents {
+                match find_agent_dir(&agent_cfg.name) {
+                    Ok(d) => {
+                        let has_persona = d.join("PERSONA.md").exists() || d.join("SOUL.md").exists();
+                        let has_identity = d.join("IDENTITY.md").exists();
+                        if !has_persona { issues += 1; }
+                        if !has_identity { issues += 1; }
+                        println!("[{}] Agent '{}': PERSONA/SOUL={has_persona} IDENTITY={has_identity}",
+                            if has_persona && has_identity { "OK" } else { "WARN" },
+                            agent_cfg.name);
+                    }
+                    Err(_) => {
+                        println!("[WARN] Agent dir not found for '{}'", agent_cfg.name);
                         issues += 1;
                     }
                 }
@@ -1741,9 +1772,6 @@ async fn cmd_daemon(config_path: &Option<PathBuf>, action: SummonerAction) -> Re
                 AgentRouter::new(classifier_api_key.clone(), config.team.router_cooldown_secs)
             ));
 
-            // Build chamber for visible debate mode.
-            let _chamber = Arc::new(Council::new());
-
             // Pre-create quest notify so the completion listener and familiar project share it.
             let fa_quest_notify: Arc<tokio::sync::Notify> = Arc::new(tokio::sync::Notify::new());
 
@@ -1904,7 +1932,18 @@ async fn cmd_daemon(config_path: &Option<PathBuf>, action: SummonerAction) -> Re
                                                             }
                                                             map.remove(&qid);
                                                         }
-                                                        Some((system_tasks::TaskStatus::Cancelled, _)) => {
+                                                        Some((system_tasks::TaskStatus::Cancelled, reason)) => {
+                                                            let fail_msg = reason.unwrap_or_else(|| "Task cancelled.".to_string());
+                                                            let out = system_core::traits::OutgoingMessage {
+                                                                channel: "telegram".to_string(),
+                                                                recipient: String::new(),
+                                                                text: format!("Failed: {}", fail_msg),
+                                                                metadata: serde_json::json!({ "chat_id": chat_id }),
+                                                            };
+                                                            let _ = tg_deliver.send(out).await;
+                                                            if message_id > 0 {
+                                                                let _ = tg_deliver.react(chat_id, message_id, "❌").await;
+                                                            }
                                                             map.remove(&qid);
                                                         }
                                                         _ => {
@@ -2548,12 +2587,128 @@ async fn cmd_daemon(config_path: &Option<PathBuf>, action: SummonerAction) -> Re
             println!("Cron: {} jobs loaded", fate_store.jobs.len());
             println!("PID file: {}", pid_path.display());
             println!("IPC socket: {}", socket_path.display());
+
+            // Build lifecycle engine if enabled.
+            let lifecycle_engine = if config.lifecycle.enabled {
+                use system_orchestrator::lifecycle::{LifecycleProcess, ProcessKind, ScanProject};
+
+                let lifecycle_model = config.lifecycle.model.clone().unwrap_or_else(|| {
+                    config.providers.openrouter.as_ref()
+                        .map(|or| or.default_model.clone())
+                        .unwrap_or_else(|| "minimax/MiniMax-M1".to_string())
+                });
+                let mut engine = LifecycleEngine::new();
+                engine.cost_ledger = Some(registry.cost_ledger.clone());
+                let mut lifecycle_process_count = 0u32;
+
+                for agent_cfg in &config.agents {
+                    let agent_dir = match find_agent_dir(&agent_cfg.name) {
+                        Ok(d) => d,
+                        Err(_) => continue,
+                    };
+
+                    // Derive bond level from emotional state.
+                    let emo_path = EmotionalState::path_for_agent(&agent_dir);
+                    let emo = EmotionalState::load(&emo_path, &agent_cfg.name);
+                    let bond = system_orchestrator::lifecycle::interaction_count_to_bond_level(emo.interaction_count);
+                    engine.set_bond_level(&agent_cfg.name, bond);
+                    engine.agent_dirs.insert(agent_cfg.name.clone(), agent_dir.clone());
+
+                    // Process 1: MemoryConsolidation (bond 0, always active).
+                    let mem_interval = config.lifecycle.memory_reflection_interval_hours as u64 * 3600;
+                    let memory: Option<Arc<dyn system_core::traits::Memory>> =
+                        open_memory(&config, Some(&agent_cfg.name)).ok().map(|m| Arc::new(m) as _);
+                    engine.add_process(LifecycleProcess::new(
+                        agent_cfg.name.clone(), agent_dir.clone(), provider.clone(),
+                        lifecycle_model.clone(),
+                        ProcessKind::MemoryConsolidation { memory },
+                        mem_interval,
+                    ));
+                    lifecycle_process_count += 1;
+
+                    // Process 2: Evolution (bond 3).
+                    let evo_interval = config.lifecycle.evolution_interval_hours as u64 * 3600;
+                    engine.add_process(LifecycleProcess::new(
+                        agent_cfg.name.clone(), agent_dir.clone(), provider.clone(),
+                        lifecycle_model.clone(),
+                        ProcessKind::Evolution,
+                        evo_interval,
+                    ));
+                    lifecycle_process_count += 1;
+
+                    // Process 3: ProactiveScan (bond 5) — per-project.
+                    let scan_interval = config.lifecycle.proactive_scan_interval_hours as u64 * 3600;
+                    let mut scan_projects = Vec::new();
+                    for project_cfg in &config.projects {
+                        let project_team = config.project_team(&project_cfg.name);
+                        if project_team.effective_agents().contains(&agent_cfg.name)
+                            && let Ok(project_dir) = find_project_dir(&project_cfg.name)
+                        {
+                            scan_projects.push(ScanProject {
+                                name: project_cfg.name.clone(),
+                                prefix: project_cfg.prefix.clone(),
+                                project_dir,
+                                repo_path: Some(config.resolve_repo(&project_cfg.repo)),
+                            });
+                        }
+                    }
+                    engine.add_process(LifecycleProcess::new(
+                        agent_cfg.name.clone(), agent_dir.clone(), provider.clone(),
+                        lifecycle_model.clone(),
+                        ProcessKind::ProactiveScan {
+                            projects: scan_projects,
+                            project_knowledge: HashMap::new(),
+                            registry: registry.clone(),
+                            dispatch_bus: dispatch_bus.clone(),
+                            system_leader: leader_name.clone(),
+                            cross_project: false,
+                        },
+                        scan_interval,
+                    ));
+                    lifecycle_process_count += 1;
+
+                    // Process 4: Cross-project ideation (bond 8) — merged CreativeIdeation.
+                    let idea_interval = config.lifecycle.creative_ideation_interval_hours as u64 * 3600;
+                    let mut project_knowledge = HashMap::new();
+                    for project_cfg in &config.projects {
+                        if let Ok(project_dir) = find_project_dir(&project_cfg.name) {
+                            let knowledge = std::fs::read_to_string(project_dir.join("KNOWLEDGE.md")).unwrap_or_default();
+                            if !knowledge.trim().is_empty() {
+                                project_knowledge.insert(project_cfg.name.clone(), knowledge);
+                            }
+                        }
+                    }
+                    engine.add_process(LifecycleProcess::new(
+                        agent_cfg.name.clone(), agent_dir.clone(), provider.clone(),
+                        lifecycle_model.clone(),
+                        ProcessKind::ProactiveScan {
+                            projects: Vec::new(),
+                            project_knowledge,
+                            registry: registry.clone(),
+                            dispatch_bus: dispatch_bus.clone(),
+                            system_leader: leader_name.clone(),
+                            cross_project: true,
+                        },
+                        idea_interval,
+                    ));
+                    lifecycle_process_count += 1;
+                }
+
+                println!("Lifecycle: {} agents, {} processes (model: {})", config.agents.len(), lifecycle_process_count, lifecycle_model);
+                Some(engine)
+            } else {
+                None
+            };
+
             println!("Press Ctrl+C to stop.\n");
 
             let mut daemon = Daemon::new(registry, dispatch_bus);
             daemon.set_pid_file(pid_path);
             daemon.set_socket_path(socket_path.clone());
             daemon.set_fate_store(fate_store);
+            if let Some(engine) = lifecycle_engine {
+                daemon.set_lifecycle(engine);
+            }
             for hb in pulses {
                 daemon.add_pulse(hb);
             }
@@ -3192,5 +3347,84 @@ async fn cmd_config(config_path: &Option<PathBuf>, action: ConfigAction) -> Resu
             }
         }
     }
+    Ok(())
+}
+
+async fn cmd_seed_projects(config_path: &Option<PathBuf>, tenant_id: &str, platform_config_path: &Path) -> Result<()> {
+    use system_tenants::{PlatformConfig, TenantProjectMeta};
+
+    let platform = PlatformConfig::load(platform_config_path)?;
+    let (sys_config, config_dir) = load_config(config_path)?;
+    // config_dir is the config file path (e.g. config/system.toml).
+    // Project dirs live at the repo root, which is config_dir's grandparent.
+    let config_base = config_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .unwrap_or(Path::new("."));
+
+    let tenant_dir = platform.base_dir().join(tenant_id);
+    if !tenant_dir.exists() {
+        anyhow::bail!("tenant directory not found: {}", tenant_dir.display());
+    }
+
+    let projects_dir = tenant_dir.join("projects");
+    std::fs::create_dir_all(&projects_dir)?;
+
+    let mut seeded = Vec::new();
+
+    for project_config in &sys_config.projects {
+        let project_dir = projects_dir.join(&project_config.name);
+        let project_toml = project_dir.join("project.toml");
+
+        // Create project directory structure.
+        std::fs::create_dir_all(project_dir.join(".tasks"))?;
+
+        // Write project.toml (always overwrite to pick up config changes).
+        let meta = TenantProjectMeta {
+            name: project_config.name.clone(),
+            prefix: project_config.prefix.clone(),
+            description: None,
+            repo: Some(project_config.repo.clone()),
+        };
+        std::fs::write(&project_toml, toml::to_string_pretty(&meta)?)?;
+
+        // Copy KNOWLEDGE.md from system project dir if it exists and tenant doesn't have one.
+        let knowledge_dest = project_dir.join("KNOWLEDGE.md");
+        if !knowledge_dest.exists() {
+            let source = config_base.join("projects").join(&project_config.name).join("KNOWLEDGE.md");
+            if source.exists() {
+                std::fs::copy(&source, &knowledge_dest)?;
+            }
+        }
+
+        // Copy AGENTS.md from system project dir if it exists and tenant doesn't have one.
+        let agents_dest = project_dir.join("AGENTS.md");
+        if !agents_dest.exists() {
+            let source = config_base.join("projects").join(&project_config.name).join("AGENTS.md");
+            if source.exists() {
+                std::fs::copy(&source, &agents_dest)?;
+            }
+        }
+
+        seeded.push(project_config.name.clone());
+        println!("  seeded: {}", project_config.name);
+    }
+
+    // Regenerate chat/KNOWLEDGE.md with real project list.
+    let chat_dir = projects_dir.join("chat");
+    if chat_dir.exists() {
+        let mut knowledge = String::from("# Chat Knowledge\n\n## Available Projects\n");
+        for project_config in &sys_config.projects {
+            knowledge.push_str(&format!(
+                "- **{}** (prefix: `{}`): repo at `{}`\n",
+                project_config.name, project_config.prefix, project_config.repo,
+            ));
+        }
+        knowledge.push_str("\n## Your Role\nYou are a companion in the user's agency. Help them navigate their projects,\nanswer questions, and assist with tasks.\n");
+        std::fs::write(chat_dir.join("KNOWLEDGE.md"), &knowledge)?;
+        println!("  updated: chat/KNOWLEDGE.md");
+    }
+
+    println!("\nSeeded {} projects for tenant {}", seeded.len(), tenant_id);
     Ok(())
 }

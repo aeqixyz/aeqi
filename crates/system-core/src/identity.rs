@@ -19,6 +19,8 @@ pub struct Identity {
     pub agents: Option<String>,
     /// Periodic check instructions (HEARTBEAT.md — from project dir).
     pub heartbeat: Option<String>,
+    /// Accumulated evolution patches (EVOLUTION.md — from agent dir, written by lifecycle engine).
+    pub evolution: Option<String>,
     /// Persistent memories (MEMORY.md — from agent dir).
     pub memory: Option<String>,
     /// Operational knowledge and learnings (KNOWLEDGE.md — from project dir).
@@ -44,6 +46,7 @@ impl Identity {
                 .or(load_optional(agent_dir, "SOUL.md")?),
             identity: load_optional(agent_dir, "IDENTITY.md")?,
             operational: load_optional(agent_dir, "OPERATIONAL.md")?,
+            evolution: load_optional(agent_dir, "EVOLUTION.md")?,
             preferences: load_optional(agent_dir, "PREFERENCES.md")?,
             memory: load_optional(agent_dir, "MEMORY.md")?,
             // Project context
@@ -95,6 +98,7 @@ impl Identity {
                 .or(load_optional(dir, "SOUL.md")?),
             identity: load_optional(dir, "IDENTITY.md")?,
             operational: load_optional(dir, "OPERATIONAL.md")?,
+            evolution: load_optional(dir, "EVOLUTION.md")?,
             agents: load_optional(dir, "AGENTS.md")?,
             heartbeat: load_optional(dir, "HEARTBEAT.md")?,
             memory: load_optional(dir, "MEMORY.md")?,
@@ -124,6 +128,10 @@ impl Identity {
 
         if let Some(ref identity) = self.identity {
             parts.push(format!("# Identity\n\n{identity}"));
+        }
+
+        if let Some(ref evolution) = self.evolution {
+            parts.push(format!("# Evolution\n\n{evolution}"));
         }
 
         if let Some(ref operational) = self.operational {

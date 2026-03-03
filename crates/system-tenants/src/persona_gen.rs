@@ -235,6 +235,7 @@ mod tests {
                 },
             ],
             persona_status: system_companions::PersonaStatus::Pending,
+            portrait_status: system_companions::PortraitStatus::Pending,
             title: Some("The Unbroken Shield".to_string()),
             last_name: Some("Fuyutsuki".to_string()),
         };

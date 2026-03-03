@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::{info, warn};
 
 /// A single cost entry from a worker execution.
@@ -51,7 +52,8 @@ impl DailyCache {
 /// Tracks spending across projects and enforces budget caps.
 pub struct CostLedger {
     entries: Mutex<Vec<CostEntry>>,
-    daily_budget_usd: f64,
+    /// Stored as AtomicU64 (f64 bits) so it can be updated via &self on config reload.
+    daily_budget_usd: AtomicU64,
     persist_path: Option<PathBuf>,
     project_budgets: Mutex<HashMap<String, f64>>,
     cache: Mutex<DailyCache>,
@@ -61,7 +63,7 @@ impl CostLedger {
     pub fn new(daily_budget_usd: f64) -> Self {
         Self {
             entries: Mutex::new(Vec::new()),
-            daily_budget_usd,
+            daily_budget_usd: AtomicU64::new(daily_budget_usd.to_bits()),
             persist_path: None,
             project_budgets: Mutex::new(HashMap::new()),
             cache: Mutex::new(DailyCache::new()),
@@ -71,11 +73,15 @@ impl CostLedger {
     pub fn with_persistence(daily_budget_usd: f64, path: PathBuf) -> Self {
         Self {
             entries: Mutex::new(Vec::new()),
-            daily_budget_usd,
+            daily_budget_usd: AtomicU64::new(daily_budget_usd.to_bits()),
             persist_path: Some(path),
             project_budgets: Mutex::new(HashMap::new()),
             cache: Mutex::new(DailyCache::new()),
         }
+    }
+
+    fn daily_budget(&self) -> f64 {
+        f64::from_bits(self.daily_budget_usd.load(Ordering::Relaxed))
     }
 
     /// Rebuild the daily cache from entries.
@@ -140,11 +146,11 @@ impl CostLedger {
 
         // Check global budget.
         let (global_spent, project_sums) = self.cached_sums(&entries);
-        if global_spent > self.daily_budget_usd {
+        if global_spent > self.daily_budget() {
             warn!(
                 spent = global_spent,
-                budget = self.daily_budget_usd,
-                overage = global_spent - self.daily_budget_usd,
+                budget = self.daily_budget(),
+                overage = global_spent - self.daily_budget(),
                 "DAILY BUDGET EXCEEDED"
             );
         }
@@ -171,8 +177,8 @@ impl CostLedger {
     pub fn budget_status(&self) -> (f64, f64, f64) {
         let entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
         let (spent, _) = self.cached_sums(&entries);
-        let remaining = (self.daily_budget_usd - spent).max(0.0);
-        (spent, self.daily_budget_usd, remaining)
+        let remaining = (self.daily_budget() - spent).max(0.0);
+        (spent, self.daily_budget(), remaining)
     }
 
     /// Total spend for a project in the last 24 hours. O(1) when cache is warm.
@@ -208,6 +214,12 @@ impl CostLedger {
         spent < budget
     }
 
+    /// Update the global daily budget cap (e.g. on config reload).
+    pub fn set_daily_budget(&self, budget_usd: f64) {
+        self.daily_budget_usd.store(budget_usd.to_bits(), Ordering::Relaxed);
+        info!(budget_usd, "global daily budget updated");
+    }
+
     /// Set the daily budget cap for a specific project.
     pub fn set_project_budget(&self, project: &str, budget_usd: f64) {
         let mut budgets = self.project_budgets.lock().unwrap_or_else(|e| e.into_inner());
@@ -241,7 +253,7 @@ impl CostLedger {
     pub fn project_budget_status(&self, project: &str) -> (f64, f64, f64) {
         let spent = self.project_spend(project, 24);
         let budgets = self.project_budgets.lock().unwrap_or_else(|e| e.into_inner());
-        let budget = budgets.get(project).copied().unwrap_or(self.daily_budget_usd);
+        let budget = budgets.get(project).copied().unwrap_or(self.daily_budget());
         let remaining = (budget - spent).max(0.0);
         (spent, budget, remaining)
     }
@@ -258,7 +270,7 @@ impl CostLedger {
         let mut result = HashMap::new();
         for project in all_projects {
             let spent = project_sums.get(&project).copied().unwrap_or(0.0);
-            let budget = budgets.get(&project).copied().unwrap_or(self.daily_budget_usd);
+            let budget = budgets.get(&project).copied().unwrap_or(self.daily_budget());
             let remaining = (budget - spent).max(0.0);
             result.insert(project, (spent, budget, remaining));
         }

@@ -2,6 +2,16 @@
 
 Inherits from `projects/shared/WORKFLOW.md` for git workflow, code standards, R→D→R pipeline, and escalation.
 
+## Build & Deploy
+
+- Build: `npm run build`
+- Dev: `npm run dev`
+- Deploy: merge to `master` → post-merge hook (next build + systemctl restart)
+- Service: `riftdecks.service` (port 3200 internal)
+- Infrastructure: Next.js at https://riftdecks.shop, Redis localhost:6379
+- Analytics: Plausible at https://analytics.riftdecks.shop (port 8000)
+- **WARNING: Stripe is LIVE** — test purchases charge real money
+
 ## RiftDecks-Specific Workflow
 
 1. Work in worktrees: `git worktree add ~/worktrees/riftdecks-shop/feat/<name> -b feat/<name>`

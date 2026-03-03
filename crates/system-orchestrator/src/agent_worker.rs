@@ -14,7 +14,7 @@ use tracing::{debug, info, warn};
 use crate::checkpoint::AgentCheckpoint;
 use crate::executor::{ClaudeCodeExecutor, TaskOutcome};
 use crate::hook::Hook;
-use crate::message::{Dispatch, DispatchBus, DispatchKind};
+use crate::message::DispatchBus;
 
 /// Worker states.
 #[derive(Debug, Clone, PartialEq)]
@@ -130,6 +130,17 @@ impl AgentWorker {
     pub fn with_project_dir(mut self, project_dir: PathBuf) -> Self {
         self.project_dir = Some(project_dir);
         self
+    }
+
+    /// Get the child PID tracker (for process group kill on timeout).
+    /// Returns a zero-valued AtomicU32 for Agent mode.
+    pub fn child_pid(&self) -> std::sync::Arc<std::sync::atomic::AtomicU32> {
+        match &self.execution {
+            WorkerExecution::ClaudeCode(executor) => executor.child_pid.clone(),
+            WorkerExecution::Agent { .. } => {
+                std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0))
+            }
+        }
     }
 
     /// Get the working directory for this spirit (from executor or project_dir).
@@ -280,26 +291,7 @@ impl AgentWorker {
             }
         };
 
-        // Inject recalled memories into quest context for richer execution.
-        let quest_context = if let Some(ref mem) = self.memory {
-            let query = system_core::traits::MemoryQuery::new(&quest_context, 5)
-                .with_scope(system_core::traits::MemoryScope::Domain);
-            match mem.search(&query).await {
-                Ok(entries) if !entries.is_empty() => {
-                    let ctx = entries
-                        .iter()
-                        .map(|e| format!("[{}] {}: {}", e.scope, e.key, e.content))
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    format!("{quest_context}\n## Recalled Memory\n{ctx}\n")
-                }
-                _ => quest_context,
-            }
-        } else {
-            quest_context
-        };
-
-        // Enrich identity with dynamic memory recall for richer system prompts.
+        // Enrich identity with dynamic memory recall (single search, system prompt only).
         let enriched_identity = if let Some(ref mem) = self.memory {
             let query = system_core::traits::MemoryQuery::new(&quest_context, 10)
                 .with_scope(MemoryScope::Domain);
@@ -375,16 +367,6 @@ impl AgentWorker {
                     let _ = store.close(&hook.task_id.0, result_text);
                 }
                 self.task_notify.notify_waiters();
-                self.dispatch_bus
-                    .send(Dispatch::new_typed(
-                        &self.name,
-                        &format!("witness-{}", self.project_name),
-                        DispatchKind::QuestDone {
-                            task_id: hook.task_id.to_string(),
-                            summary: format!("{}: {}", hook.subject, result_text),
-                        },
-                    ))
-                    .await;
                 self.state = WorkerState::Done;
             }
 
@@ -418,17 +400,6 @@ impl AgentWorker {
                     }
                 }
                 self.task_notify.notify_waiters();
-                self.dispatch_bus
-                    .send(Dispatch::new_typed(
-                        &self.name,
-                        &format!("witness-{}", self.project_name),
-                        DispatchKind::QuestBlocked {
-                            task_id: hook.task_id.to_string(),
-                            question: question.clone(),
-                            context: full_text.clone(),
-                        },
-                    ))
-                    .await;
                 self.state = WorkerState::Done; // Spirit is done; bead is blocked.
             }
 
@@ -464,37 +435,16 @@ impl AgentWorker {
                         warn!(bead = %hook.task_id, error = %e, "failed to re-queue quest after handoff");
                     }
                 }
-                // Notify focal agent if auto-cancelled.
+                // Log if auto-cancelled.
                 {
                     let store = self.tasks.lock().await;
                     if let Some(b) = store.get(&hook.task_id.0)
                         && b.status == TaskStatus::Cancelled
                     {
                         warn!(worker = %self.name, bead = %hook.task_id, retries = b.retry_count, "quest auto-cancelled after max retries");
-                        self.dispatch_bus
-                            .send(Dispatch::new_typed(
-                                &self.name,
-                                &format!("witness-{}", self.project_name),
-                                DispatchKind::QuestFailed {
-                                    task_id: hook.task_id.to_string(),
-                                    error: format!("Auto-cancelled after {} retries (repeated handoff)", b.retry_count),
-                                },
-                            ))
-                            .await;
                     }
                 }
                 self.task_notify.notify_waiters();
-                self.dispatch_bus
-                    .send(Dispatch::new_typed(
-                        &self.name,
-                        &format!("witness-{}", self.project_name),
-                        DispatchKind::QuestBlocked {
-                            task_id: hook.task_id.to_string(),
-                            question: "Context exhaustion handoff — re-queued automatically".to_string(),
-                            context: checkpoint.clone(),
-                        },
-                    ))
-                    .await;
                 self.state = WorkerState::Done;
             }
 
@@ -537,20 +487,6 @@ impl AgentWorker {
                 if auto_cancelled {
                     warn!(worker = %self.name, bead = %hook.task_id, "quest auto-cancelled after 3 failed retries");
                 }
-                self.dispatch_bus
-                    .send(Dispatch::new_typed(
-                        &self.name,
-                        &format!("witness-{}", self.project_name),
-                        DispatchKind::QuestFailed {
-                            task_id: hook.task_id.to_string(),
-                            error: if auto_cancelled {
-                                format!("Auto-cancelled after 3 retries. Last: {}", error_text)
-                            } else {
-                                error_text.clone()
-                            },
-                        },
-                    ))
-                    .await;
                 self.state = WorkerState::Failed(error_text.to_string());
             }
         }
@@ -607,15 +543,29 @@ impl AgentWorker {
             "claude code execution completed"
         );
 
-        self.reflect_on_result(quest_context, &result.result_text).await;
+        // Fire-and-forget reflection — don't block the worker slot.
+        if let (Some(mem), Some(provider)) = (self.memory.clone(), self.reflect_provider.clone()) {
+            let quest = quest_context.to_string();
+            let result_text = result.result_text.clone();
+            let model = self.reflect_model.clone();
+            let name = self.name.clone();
+            tokio::spawn(async move {
+                Self::reflect_detached(name, quest, result_text, model, mem, provider).await;
+            });
+        }
 
         Ok((result.result_text, result.total_cost_usd, result.num_turns))
     }
 
-    async fn reflect_on_result(&self, quest_context: &str, result_text: &str) {
-        let Some(ref mem) = self.memory else { return };
-        let Some(ref provider) = self.reflect_provider else { return };
-
+    /// Detached reflection — runs in a separate tokio task, no &self needed.
+    async fn reflect_detached(
+        worker_name: String,
+        quest_context: String,
+        result_text: String,
+        model: String,
+        mem: Arc<dyn Memory>,
+        provider: Arc<dyn Provider>,
+    ) {
         let transcript = format!("User: {}\n\nAssistant: {}", quest_context, result_text);
         if transcript.len() < 100 {
             return;
@@ -654,7 +604,7 @@ impl AgentWorker {
         );
 
         let request = ChatRequest {
-            model: self.reflect_model.clone(),
+            model,
             messages: vec![Message {
                 role: Role::User,
                 content: MessageContent::text(&reflection_prompt),
@@ -667,14 +617,14 @@ impl AgentWorker {
         match provider.chat(&request).await {
             Ok(response) => {
                 if let Some(text) = response.content {
-                    self.store_routed_insights(&text, mem).await;
+                    Self::store_routed_insights_static(&worker_name, &text, &mem).await;
                 }
             }
-            Err(e) => warn!(worker = %self.name, "reflection failed: {e}"),
+            Err(e) => warn!(worker = %worker_name, "reflection failed: {e}"),
         }
     }
 
-    async fn store_routed_insights(&self, text: &str, mem: &Arc<dyn Memory>) {
+    async fn store_routed_insights_static(worker_name: &str, text: &str, mem: &Arc<dyn Memory>) {
         for line in text.lines() {
             let line = line.trim();
             if line == "NONE" || line.is_empty() {
@@ -720,17 +670,17 @@ impl AgentWorker {
             }
 
             let companion_id = if scope == MemoryScope::Companion {
-                Some(self.name.as_str())
+                Some(worker_name)
             } else {
                 None
             };
 
             match mem.store(key, content, category, scope, companion_id).await {
                 Ok(id) => {
-                    debug!(worker = %self.name, id = %id, key = %key, scope = %scope, "insight stored")
+                    debug!(worker = %worker_name, id = %id, key = %key, scope = %scope, "insight stored")
                 }
                 Err(e) => {
-                    warn!(worker = %self.name, key = %key, "failed to store insight: {e}")
+                    warn!(worker = %worker_name, key = %key, "failed to store insight: {e}")
                 }
             }
         }

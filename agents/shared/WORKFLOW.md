@@ -88,6 +88,11 @@ If you genuinely cannot determine something from the codebase:
 4. If still stuck, escalates to Lead Agent (cross-project knowledge)
 5. If Lead Agent can't resolve, escalates to human via Telegram
 
+## Build & Deploy
+
+Build, test, and deploy commands are specified in your Operating Instructions (AGENTS.md).
+Follow those exactly. Do not search for or rely on repo-level CLAUDE.md files.
+
 ## Safety
 
 - Never commit secrets or API keys to git

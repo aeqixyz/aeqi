@@ -10,6 +10,7 @@ use crate::heartbeat::Heartbeat;
 use crate::reflection::Reflection;
 use crate::session_tracker::SessionTracker;
 use crate::message::DispatchBus;
+use crate::lifecycle::LifecycleEngine;
 use crate::registry::ProjectRegistry;
 
 /// The Daemon: background process that runs the ProjectRegistry patrol loop,
@@ -20,6 +21,7 @@ pub struct Daemon {
     pub patrol_interval_secs: u64,
     pub pulses: Vec<Heartbeat>,
     pub reflections: Vec<Reflection>,
+    pub lifecycle: Option<LifecycleEngine>,
     pub fate_store: Option<Arc<Mutex<ScheduleStore>>>,
     pub pid_file: Option<PathBuf>,
     pub socket_path: Option<PathBuf>,
@@ -37,6 +39,7 @@ impl Daemon {
             patrol_interval_secs: 30,
             pulses: Vec::new(),
             reflections: Vec::new(),
+            lifecycle: None,
             fate_store: None,
             pid_file: None,
             socket_path: None,
@@ -75,6 +78,11 @@ impl Daemon {
             notify.notify_waiters();
             info!("session tracker stopped");
         }
+    }
+
+    /// Set the lifecycle engine for autonomous agent processes.
+    pub fn set_lifecycle(&mut self, engine: LifecycleEngine) {
+        self.lifecycle = Some(engine);
     }
 
     /// Set the cron store for scheduled jobs.
@@ -150,6 +158,22 @@ impl Daemon {
                     info!("received SIGHUP, flagging config reload");
                     config_reloaded.store(true, std::sync::atomic::Ordering::SeqCst);
                 }
+            });
+        }
+
+        // Set up SIGTERM handler for graceful shutdown (e.g. `rm daemon stop`, Docker, systemd).
+        #[cfg(unix)]
+        {
+            let running = self.running.clone();
+            let shutdown_notify = self.shutdown_notify.clone();
+            tokio::spawn(async move {
+                let mut signal = tokio::signal::unix::signal(
+                    tokio::signal::unix::SignalKind::terminate(),
+                ).expect("failed to register SIGTERM handler");
+                signal.recv().await;
+                info!("received SIGTERM, shutting down...");
+                running.store(false, std::sync::atomic::Ordering::SeqCst);
+                shutdown_notify.notify_waiters();
             });
         }
 
@@ -235,7 +259,19 @@ impl Daemon {
                 }
             }
 
-            // 4. Run due cron jobs.
+            // 4. Run due lifecycle processes (autonomous agent evolution).
+            if let Some(ref mut lifecycle) = self.lifecycle {
+                for result in lifecycle.tick().await {
+                    if let Some(ref err) = result.error {
+                        warn!(agent=%result.agent, process=%result.process, error=%err, "lifecycle failed");
+                    } else {
+                        info!(agent=%result.agent, process=%result.process, summary=%result.summary,
+                            cost_usd=%result.cost_usd, "lifecycle completed");
+                    }
+                }
+            }
+
+            // 5. Run due cron jobs.
             if let Some(ref fate_store) = self.fate_store {
                 let due_jobs = {
                     let store = fate_store.lock().await;
@@ -266,12 +302,19 @@ impl Daemon {
                 let _ = store.cleanup_oneshots();
             }
 
-            // 5. Check for config reload signal (SIGHUP).
+            // 6. Check for config reload signal (SIGHUP).
             if self.config_reloaded.swap(false, std::sync::atomic::Ordering::SeqCst) {
                 info!("config reload requested (SIGHUP received)");
                 match system_core::config::SystemConfig::discover() {
-                    Ok((_new_config, _path)) => {
-                        info!("config reloaded successfully via SIGHUP");
+                    Ok((new_config, path)) => {
+                        // Apply runtime-safe fields from the reloaded config.
+                        self.registry.cost_ledger.set_daily_budget(new_config.security.max_cost_per_day_usd);
+                        for pcfg in &new_config.projects {
+                            if let Some(budget) = pcfg.max_cost_per_day_usd {
+                                self.registry.cost_ledger.set_project_budget(&pcfg.name, budget);
+                            }
+                        }
+                        info!(path = %path.display(), "config reloaded and applied via SIGHUP");
                     }
                     Err(e) => {
                         warn!(error = %e, "failed to reload config, keeping current");
@@ -279,7 +322,7 @@ impl Daemon {
                 }
             }
 
-            // 6. Periodic persistence: save whisper bus + cost ledger every patrol.
+            // 7. Periodic persistence: save whisper bus + cost ledger every patrol.
             if let Err(e) = self.dispatch_bus.save().await {
                 warn!(error = %e, "failed to save whisper bus");
             }
@@ -287,13 +330,13 @@ impl Daemon {
                 warn!(error = %e, "failed to save cost ledger");
             }
 
-            // 7. Update daily cost gauge.
+            // 8. Update daily cost gauge.
             let (spent, _, _) = self.registry.cost_ledger.budget_status();
             self.registry.metrics.daily_cost_usd.set(spent);
             let pending_whispers = self.dispatch_bus.pending_count();
             self.registry.metrics.whisper_queue_depth.set(pending_whispers as f64);
 
-            // 8. Prune old cost entries (older than 7 days) every cycle.
+            // 9. Prune old cost entries (older than 7 days) every cycle.
             self.registry.cost_ledger.prune_old();
 
             tokio::select! {

@@ -19,10 +19,10 @@ pub mod context_budget;
 pub mod metrics;
 pub mod template;
 pub mod checkpoint;
-pub mod gap_analysis;
 pub mod session_tracker;
 pub mod conversation_store;
 pub mod emotional_state;
+pub mod lifecycle;
 
 pub use operation::{Operation, OperationStore};
 pub use schedule::{ScheduledJob, ScheduleStore};
@@ -47,3 +47,4 @@ pub use checkpoint::AgentCheckpoint;
 pub use session_tracker::SessionTracker;
 pub use conversation_store::ConversationStore;
 pub use emotional_state::EmotionalState;
+pub use lifecycle::LifecycleEngine;

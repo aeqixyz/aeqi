@@ -121,6 +121,7 @@ pub struct CompanionInfo {
     pub is_familiar: bool,
     pub anime_inspirations: Vec<AnimeInspirationInfo>,
     pub persona_status: String,
+    pub portrait_status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -173,6 +174,8 @@ pub struct ChatHistoryEntry {
 pub struct HistoryQuery {
     #[serde(default = "default_limit")]
     pub limit: usize,
+    #[serde(default)]
+    pub offset: usize,
 }
 
 fn default_limit() -> usize { 50 }
@@ -310,7 +313,7 @@ pub struct ProjectInfo {
     pub total_missions: u32,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct TeamInfo {
     pub leader: String,
     pub agents: Vec<String>,
@@ -390,6 +393,21 @@ pub struct TaskQueryParams {
     pub assignee: Option<String>,
 }
 
+#[derive(Serialize)]
+pub struct ActiveProjectResponse {
+    pub active_project: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct SetActiveProjectRequest {
+    pub name: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct DeleteProjectResponse {
+    pub deleted: bool,
+}
+
 // --- Helpers ---
 impl CompanionInfo {
     pub fn from_companion(c: &system_companions::Companion) -> Self {
@@ -409,6 +427,7 @@ impl CompanionInfo {
                 genre: format!("{:?}", a.genre),
             }).collect(),
             persona_status: format!("{:?}", c.persona_status),
+            portrait_status: format!("{:?}", c.portrait_status),
             title: c.title.clone(),
             last_name: c.last_name.clone(),
         }

@@ -10,7 +10,7 @@ pub async fn history(
 ) -> Result<Json<Vec<ChatHistoryEntry>>, (StatusCode, String)> {
     let messages = tenant
         .conversation_store
-        .recent(0, params.limit)
+        .recent_with_offset(0, params.limit, params.offset)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 

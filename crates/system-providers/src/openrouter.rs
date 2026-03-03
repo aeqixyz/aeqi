@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use base64::Engine as _;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use system_core::traits::{
@@ -33,6 +34,94 @@ impl OpenRouterProvider {
     pub fn default_model(&self) -> &str {
         &self.default_model
     }
+
+    /// Generate an image via OpenRouter using `modalities: ["image"]`.
+    /// Returns raw PNG bytes decoded from the base64 response.
+    pub async fn generate_image(&self, prompt: &str, model: &str) -> Result<Vec<u8>> {
+        let api_request = ApiRequest {
+            model: model.to_string(),
+            messages: vec![ApiMessage {
+                role: "user".to_string(),
+                content: Some(serde_json::Value::String(prompt.to_string())),
+                tool_calls: None,
+                tool_call_id: None,
+            }],
+            tools: vec![],
+            max_tokens: 4096,
+            temperature: 1.0,
+            provider: Some(ProviderRouting {
+                allow_fallbacks: Some(false),
+            }),
+            modalities: Some(vec!["image".to_string(), "text".to_string()]),
+        };
+
+        debug!(
+            provider = "openrouter",
+            model = model,
+            "sending image generation request"
+        );
+
+        let response = self
+            .client
+            .post(OPENROUTER_API_URL)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("HTTP-Referer", "https://gacha.agency")
+            .header("X-Title", "Gacha Agency")
+            .json(&api_request)
+            .send()
+            .await
+            .context("failed to send image generation request to OpenRouter")?;
+
+        let status = response.status();
+        let body = response.text().await.context("failed to read image response body")?;
+
+        if !status.is_success() {
+            if let Ok(err) = serde_json::from_str::<ApiError>(&body) {
+                anyhow::bail!(
+                    "OpenRouter image API error ({}): {}",
+                    err.error.code.unwrap_or_default(),
+                    err.error.message
+                );
+            }
+            anyhow::bail!("OpenRouter image API error ({}): {}", status, body);
+        }
+
+        let api_response: ApiResponse =
+            serde_json::from_str(&body).context("failed to parse OpenRouter image response")?;
+
+        let choice = api_response
+            .choices
+            .into_iter()
+            .next()
+            .context("no choices in image response")?;
+
+        // Images come in the `images` array as data URLs.
+        let data_url = if let Some(images) = choice.message.images {
+            images
+                .into_iter()
+                .next()
+                .map(|img| img.image_url.url)
+                .context("images array is empty")?
+        } else if let Some(content) = choice.message.content {
+            // Fallback: some models return base64 directly in content.
+            content
+        } else {
+            anyhow::bail!("no images or content in image response");
+        };
+
+        // Strip data URL prefix if present.
+        let b64_data = data_url
+            .strip_prefix("data:image/png;base64,")
+            .or_else(|| data_url.strip_prefix("data:image/jpeg;base64,"))
+            .or_else(|| data_url.strip_prefix("data:image/webp;base64,"))
+            .unwrap_or(&data_url);
+
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(b64_data)
+            .context("failed to decode base64 image data")?;
+
+        Ok(bytes)
+    }
 }
 
 // --- OpenRouter API types ---
@@ -48,6 +137,9 @@ struct ApiRequest {
     /// OpenRouter provider routing options.
     #[serde(skip_serializing_if = "Option::is_none")]
     provider: Option<ProviderRouting>,
+    /// Output modalities (e.g. `["image"]` for image generation).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    modalities: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -113,6 +205,18 @@ struct ApiChoiceMessage {
     content: Option<String>,
     #[serde(default)]
     tool_calls: Option<Vec<ApiToolCall>>,
+    #[serde(default)]
+    images: Option<Vec<ApiImage>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiImage {
+    image_url: ApiImageUrl,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiImageUrl {
+    url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -282,6 +386,7 @@ impl Provider for OpenRouterProvider {
             provider: Some(ProviderRouting {
                 allow_fallbacks: Some(false),
             }),
+            modalities: None,
         };
 
         debug!(

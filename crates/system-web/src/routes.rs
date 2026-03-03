@@ -40,6 +40,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/companions", get(crate::api_companion::list_companions))
         .route("/api/companions/{name}", get(crate::api_companion::get_companion))
         .route("/api/companions/familiar", post(crate::api_companion::set_familiar).get(crate::api_companion::get_familiar))
+        .route("/api/companions/backfill-portraits", post(crate::api_companion::backfill_portraits))
+        .route("/api/companions/{name}/portrait", get(crate::api_companion::get_portrait))
         .route("/api/companions/{name}/relationships", get(crate::api_companion::get_relationships))
         // Party
         .route("/api/party", get(crate::api_party::get_party))
@@ -65,8 +67,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/stripe/webhook", post(crate::api_stripe::webhook))
         .route("/api/stripe/portal", post(crate::api_stripe::portal))
         // Projects
+        .route("/api/active-project", get(crate::api_project::get_active_project).put(crate::api_project::set_active_project))
         .route("/api/projects", get(crate::api_project::list_projects))
-        .route("/api/projects/{name}", get(crate::api_project::get_project))
+        .route("/api/projects/{name}", get(crate::api_project::get_project).delete(crate::api_project::delete_project))
         .route("/api/projects/{name}/missions", get(crate::api_project::list_missions).post(crate::api_project::create_mission))
         .route("/api/projects/{name}/missions/{id}", get(crate::api_project::get_mission))
         .route("/api/projects/{name}/tasks", get(crate::api_project::list_tasks).post(crate::api_project::create_task))

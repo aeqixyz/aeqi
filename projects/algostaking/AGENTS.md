@@ -23,7 +23,24 @@ Extends shared standards:
 - Fill deduplication must be present
 - Paper/live routing must be correct
 
+## Build & Deploy
+
+- Build: `cargo build --release`
+- Lint: `cargo clippy --workspace`
+- Test: `cargo test`
+- Deploy: merge to `dev` → post-merge hook builds + deploys all 12 services
+- Manual deploy: copy binary to `/usr/local/bin/`, restart systemd services
+- Service management: `algostaking start|stop|restart|status|health dev|prod [service]`
+- Systemd: `/etc/systemd/system/algostaking-*`
+
 ## Available Skills
+
+Skills are located at the project skills directory. Read the relevant skill file
+before starting work on that area:
+- `skills/pipelines/` — Data, strategy, trading, gateway pipeline semantics
+- `skills/services/` — Per-service implementation guides (12 services)
+- `skills/crates/` — Shared crate APIs (types, zmq_transport, keys, ports, metrics)
+- `skills/infrastructure/` — Database, systemd, nginx, monitoring, secrets
 
 ### R→D→R Archetypes (project-specific overrides)
 - **researcher**: HFT codebase exploration — pipeline mapping, ZMQ topology, FlatBuffer schemas
@@ -38,6 +55,9 @@ Extends shared standards:
 - **log-analyzer**: Parse service logs for patterns and anomalies
 - **metrics-query**: Query Prometheus (PromQL against :9090 dev, :9091 prod)
 - **db-inspector**: PostgreSQL/TimescaleDB health, schema, chunks, slow queries
+
+### Subagents
+Specialized subagent configs for spawning sub-workers are in `subagents/`.
 
 ## Critical Rules
 

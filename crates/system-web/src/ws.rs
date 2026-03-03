@@ -6,6 +6,8 @@ use std::sync::Arc;
 use tracing::{info, warn, debug};
 
 use system_core::Identity;
+use system_core::config::{PeerAgentConfig, AgentRole, AgentVoice, ExecutionMode};
+use system_orchestrator::AgentRouter;
 use system_tenants::Tenant;
 use crate::AppState;
 use crate::types::{WsClientMessage, WsServerMessage};
@@ -69,6 +71,11 @@ async fn handle_ws(socket: WebSocket, tenant: Arc<Tenant>, state: Arc<AppState>)
         .filter(|n| **n != leader_name)
         .cloned()
         .collect();
+
+    // Create agent router for advisor filtering (if OpenRouter key available).
+    let mut router = state.platform.providers.openrouter.as_ref().map(|or| {
+        AgentRouter::new(or.api_key.clone(), 30)
+    });
 
     info!(tenant = %tenant.id, leader = %leader_name, squad = ?squad_names, "websocket connected");
 
@@ -149,8 +156,30 @@ async fn handle_ws(socket: WebSocket, tenant: Arc<Tenant>, state: Arc<AppState>)
                 // Build leader's identity context.
                 let agent_dir = tenant.data_dir.join("agents").join(&leader_name);
                 let project_dir = tenant.data_dir.join("projects/chat");
-                let identity = Identity::load(&agent_dir, Some(&project_dir))
+                let mut identity = Identity::load(&agent_dir, Some(&project_dir))
                     .unwrap_or_default();
+
+                // Inject active project knowledge into companion context.
+                if let Some(ref active_project) = tenant.active_project().await {
+                    let active_dir = tenant.projects_dir().join(active_project);
+                    let knowledge_path = active_dir.join("KNOWLEDGE.md");
+                    let agents_path = active_dir.join("AGENTS.md");
+                    let mut extra = String::new();
+                    if let Ok(k) = std::fs::read_to_string(&knowledge_path) {
+                        if !k.trim().is_empty() {
+                            extra.push_str(&format!("\n\n## Active Project: {active_project}\n\n{k}"));
+                        }
+                    }
+                    if let Ok(a) = std::fs::read_to_string(&agents_path) {
+                        if !a.trim().is_empty() {
+                            extra.push_str(&format!("\n\n## Project Operating Instructions\n\n{a}"));
+                        }
+                    }
+                    if !extra.is_empty() {
+                        let existing = identity.knowledge.unwrap_or_default();
+                        identity.knowledge = Some(format!("{existing}{extra}"));
+                    }
+                }
 
                 // Build leader's relationship context with squad.
                 let leader_rel_ctx = {
@@ -190,7 +219,7 @@ async fn handle_ws(socket: WebSocket, tenant: Arc<Tenant>, state: Arc<AppState>)
                 let enriched_history = format!("{history}{leader_rel_ctx}");
                 let response = execute_chat(
                     &identity, &enriched_history, &content,
-                    &tenant.tier.model, &state.platform, 2048,
+                    &tenant.tier.model, &state.platform, 1024,
                 ).await;
 
                 let mut total_tokens: u32 = 0;
@@ -201,6 +230,12 @@ async fn handle_ws(socket: WebSocket, tenant: Arc<Tenant>, state: Arc<AppState>)
 
                         // Record leader response.
                         let _ = tenant.conversation_store.record(0, &leader_name, &text).await;
+
+                        // Award bond XP to leader (25 per message).
+                        if let Ok(Some(mut comp)) = tenant.companion_store.get_companion_by_name(&leader_name) {
+                            comp.add_bond_xp(25);
+                            let _ = tenant.companion_store.save_companion(&comp);
+                        }
 
                         // Send leader response.
                         let _ = sender.send(Message::Text(
@@ -266,9 +301,56 @@ async fn handle_ws(socket: WebSocket, tenant: Arc<Tenant>, state: Arc<AppState>)
                     ctx_map
                 };
 
+                // Route to relevant advisors (or skip all if no router).
+                let routed_advisors: Vec<String> = if !advisors.is_empty() {
+                    if let Some(ref mut router) = router {
+                        let peer_configs: Vec<_> = advisors.iter().filter_map(|name| {
+                            tenant.companion_store.get_companion_by_name(name).ok().flatten().map(|comp| {
+                                PeerAgentConfig {
+                                    name: name.clone(),
+                                    prefix: "cmp".to_string(),
+                                    model: None,
+                                    role: AgentRole::Advisor,
+                                    voice: AgentVoice::Vocal,
+                                    execution_mode: ExecutionMode::Agent,
+                                    max_workers: 1,
+                                    max_turns: None,
+                                    max_budget_usd: None,
+                                    default_repo: None,
+                                    expertise: archetype_expertise(&comp.archetype),
+                                    capabilities: vec![],
+                                    telegram_token_secret: None,
+                                }
+                            })
+                        }).collect();
+
+                        let peer_refs: Vec<&PeerAgentConfig> = peer_configs.iter().collect();
+                        match router.classify(&content, &peer_refs, 0).await {
+                            Ok(decision) => {
+                                debug!(
+                                    category = %decision.category,
+                                    advisors = ?decision.advisors,
+                                    ms = decision.classify_ms,
+                                    "router classified"
+                                );
+                                decision.advisors
+                            }
+                            Err(e) => {
+                                debug!(error = %e, "router classification failed, skipping advisors");
+                                vec![]
+                            }
+                        }
+                    } else {
+                        // No router available — leader-only.
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                };
+
                 // Squad advisor loop — parallel.
-                if !advisors.is_empty() {
-                    let advisor_futures: Vec<_> = advisors.iter().map(|advisor_name| {
+                if !routed_advisors.is_empty() {
+                    let advisor_futures: Vec<_> = routed_advisors.iter().map(|advisor_name| {
                         let advisor_name = advisor_name.clone();
                         let tenant = tenant.clone();
                         let state = state.clone();
@@ -280,8 +362,20 @@ async fn handle_ws(socket: WebSocket, tenant: Arc<Tenant>, state: Arc<AppState>)
                         async move {
                             let agent_dir = tenant.data_dir.join("agents").join(&advisor_name);
                             let project_dir = tenant.data_dir.join("projects/chat");
-                            let identity = Identity::load(&agent_dir, Some(&project_dir))
+                            let mut identity = Identity::load(&agent_dir, Some(&project_dir))
                                 .unwrap_or_default();
+
+                            // Inject active project knowledge for advisors too.
+                            if let Some(ref active_project) = tenant.active_project().await {
+                                let active_dir = tenant.projects_dir().join(active_project);
+                                let knowledge_path = active_dir.join("KNOWLEDGE.md");
+                                if let Ok(k) = std::fs::read_to_string(&knowledge_path) {
+                                    if !k.trim().is_empty() {
+                                        let existing = identity.knowledge.unwrap_or_default();
+                                        identity.knowledge = Some(format!("{existing}\n\n## Active Project: {active_project}\n\n{k}"));
+                                    }
+                                }
+                            }
 
                             let result = execute_advisor_chat(
                                 &identity, &content, &leader_name, &leader_response,
@@ -299,6 +393,12 @@ async fn handle_ws(socket: WebSocket, tenant: Arc<Tenant>, state: Arc<AppState>)
                             Ok((text, token_count)) => {
                                 total_tokens += token_count;
                                 debug!(advisor = %advisor_name, tokens = token_count, "advisor responded");
+
+                                // Award bond XP to advisor (10 per interaction).
+                                if let Ok(Some(mut comp)) = tenant.companion_store.get_companion_by_name(&advisor_name) {
+                                    comp.add_bond_xp(10);
+                                    let _ = tenant.companion_store.save_companion(&comp);
+                                }
 
                                 let _ = sender.send(Message::Text(
                                     serde_json::to_string(&WsServerMessage::AdvisorMessage {
@@ -350,7 +450,22 @@ You are a fictional character in a gacha companion app. You are NOT an AI assist
 - Deredere: cheerfully helpful, no shame
 - Genki: bouncy and enthusiastic about EVERYTHING
 
-**Keep responses natural length.** 2-5 sentences for casual chat. Longer only if explaining something technical. Never write essays or walls of text.\n\n";
+**HARD LIMIT: Never exceed 4 sentences.** If you need to explain something technical, use bullet points, not paragraphs. 2-5 sentences for casual chat, shorter is better. Never write essays or walls of text.\n\n";
+
+/// Map companion archetypes to domain expertise keywords for the router classifier.
+fn archetype_expertise(archetype: &system_companions::Archetype) -> Vec<String> {
+    use system_companions::Archetype;
+    match archetype {
+        Archetype::Guardian => vec!["security", "protection", "stability", "infrastructure"],
+        Archetype::Strategist => vec!["planning", "architecture", "systems", "strategy"],
+        Archetype::Trickster => vec!["creative", "unconventional", "humor", "lateral-thinking"],
+        Archetype::Healer => vec!["support", "maintenance", "debugging", "wellness"],
+        Archetype::Muse => vec!["design", "creativity", "aesthetics", "UX"],
+        Archetype::Librarian => vec!["research", "analysis", "data", "documentation"],
+        Archetype::Builder => vec!["implementation", "shipping", "coding", "velocity"],
+        Archetype::Archivist => vec!["memory", "history", "patterns", "knowledge"],
+    }.into_iter().map(String::from).collect()
+}
 
 /// Execute a chat completion via the configured provider (no tools, pure conversation).
 /// Returns (response_text, total_token_count).
@@ -471,7 +586,7 @@ async fn execute_advisor_chat(
         model: model.to_string(),
         messages,
         tools: vec![],
-        max_tokens: 512,
+        max_tokens: 256,
         temperature: 0.7,
     };
 

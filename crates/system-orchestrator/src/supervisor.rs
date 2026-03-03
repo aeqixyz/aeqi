@@ -19,6 +19,10 @@ use crate::agent_worker::AgentWorker;
 /// Each attempt spawns a new worker to try to answer the blocker question.
 const MAX_PROJECT_RESOLUTION_ATTEMPTS: u32 = 1;
 
+/// Max task description size in chars. Descriptions grow from escalation/checkpoint
+/// injection — cap them to prevent bloated prompts on retries.
+const MAX_DESCRIPTION_CHARS: usize = 8000;
+
 /// Label prefix for tracking escalation depth on beads.
 const ESCALATION_LABEL_PREFIX: &str = "escalation:";
 
@@ -27,6 +31,8 @@ struct TrackedWorker {
     handle: tokio::task::JoinHandle<()>,
     task_id: String,
     started_at: std::time::Instant,
+    /// PID of the Claude Code child process (for process group kill on timeout).
+    child_pid: std::sync::Arc<std::sync::atomic::AtomicU32>,
 }
 
 /// Supervisor: per-rig supervisor. Runs patrol cycles, manages workers,
@@ -211,6 +217,29 @@ impl Supervisor {
             if let Err(e) = store.reload() {
                 warn!(project = %self.project_name, error = %e, "failed to reload beads from disk");
             }
+
+            // Reset orphaned InProgress tasks (e.g. from daemon restart or worker panic).
+            // On first patrol after restart, running_tasks is empty so all InProgress reset.
+            let running_ids: std::collections::HashSet<&str> = self.running_tasks
+                .iter()
+                .map(|t| t.task_id.as_str())
+                .collect();
+            let orphaned: Vec<String> = store.all()
+                .iter()
+                .filter(|t| t.status == TaskStatus::InProgress && !running_ids.contains(t.id.0.as_str()))
+                .map(|t| t.id.0.clone())
+                .collect();
+            for id in orphaned {
+                warn!(
+                    project = %self.project_name,
+                    task = %id,
+                    "resetting orphaned InProgress task to Pending"
+                );
+                let _ = store.update(&id, |t| {
+                    t.status = TaskStatus::Pending;
+                    t.assignee = None;
+                });
+            }
         }
 
         // 1. Reap completed tasks + detect timed-out spirits.
@@ -221,6 +250,9 @@ impl Supervisor {
                 return false;
             }
             if t.started_at.elapsed() > timeout {
+                // Kill the entire process group first, then abort the tokio task.
+                let pid = t.child_pid.load(std::sync::atomic::Ordering::Relaxed);
+                ClaudeCodeExecutor::kill_process_group(pid);
                 t.handle.abort();
                 timed_out.push(t.task_id.clone());
                 return false;
@@ -345,6 +377,7 @@ impl Supervisor {
                             b.description.push_str(&format!(
                                 "\n\n---\n{checkpoint_ctx}"
                             ));
+                            Self::cap_description(&mut b.description);
                         });
                         info!(
                             project = %self.project_name,
@@ -368,6 +401,7 @@ impl Supervisor {
 
             worker.assign(&bead);
 
+            let child_pid_tracker = worker.child_pid();
             let task_id = bead.id.0.clone();
 
             // Fire-and-forget: worker handles its own bead updates + mail notifications.
@@ -380,6 +414,7 @@ impl Supervisor {
             }
             let emo_state = self.emotional_state.clone();
             let emo_path = self.emotional_state_path.clone();
+            let tasks_for_err = self.tasks.clone();
             let handle = tokio::spawn(async move {
                 let start = std::time::Instant::now();
                 match worker.execute().await {
@@ -435,9 +470,18 @@ impl Supervisor {
                     Err(e) => {
                         warn!(
                             project = %project_name_task,
+                            task = %quest_id_task,
                             error = %e,
-                            "worker execution error"
+                            "worker execution error — resetting task to Pending"
                         );
+                        // Reset task to Pending so patrol picks it up again.
+                        {
+                            let mut store = tasks_for_err.lock().await;
+                            let _ = store.update(&quest_id_task, |b| {
+                                b.status = TaskStatus::Pending;
+                                b.assignee = None;
+                            });
+                        }
                         if let Some(ref m) = metrics {
                             m.tasks_failed.inc();
                         }
@@ -446,7 +490,7 @@ impl Supervisor {
                             let mut state = emo.lock().await;
                             state.record_negative();
                             if let Some(ref path) = emo_path {
-                                let _  = state.save(path);
+                                let _ = state.save(path);
                             }
                         }
                     }
@@ -456,6 +500,7 @@ impl Supervisor {
                 handle,
                 task_id,
                 started_at: std::time::Instant::now(),
+                child_pid: child_pid_tracker,
             });
         }
 
@@ -563,6 +608,7 @@ impl Supervisor {
                  If you genuinely cannot determine the answer, respond with BLOCKED: again.\n\n\
                  **Blocker question:**\n{blocker_context}\n"
             ));
+            Self::cap_description(&mut b.description);
 
             // Track escalation depth.
             b.labels.retain(|l| !l.starts_with(ESCALATION_LABEL_PREFIX));
@@ -657,6 +703,7 @@ impl Supervisor {
                 "\n\n---\n## Resolution (from Focal Agent)\n\n{answer}\n\n\
                  **Now proceed with the original task using this answer.**\n"
             ));
+            Self::cap_description(&mut b.description);
             b.status = TaskStatus::Pending;
             b.assignee = None;
             // Remove escalation labels — fresh start with the answer.
@@ -664,6 +711,22 @@ impl Supervisor {
                 !l.starts_with(ESCALATION_LABEL_PREFIX) && l != "escalated" && l != "escalated-system"
             });
         });
+    }
+
+    /// Cap a task description to MAX_DESCRIPTION_CHARS, keeping the most recent content.
+    fn cap_description(desc: &mut String) {
+        if desc.len() <= MAX_DESCRIPTION_CHARS {
+            return;
+        }
+        // Keep the tail (most recent context is appended at the end).
+        let excess = desc.len() - MAX_DESCRIPTION_CHARS + 60;
+        let cut = desc[excess..].find('\n').map(|i| i + excess).unwrap_or(excess);
+        let truncated = format!(
+            "[... {} chars of earlier context truncated]\n{}",
+            cut,
+            &desc[cut..]
+        );
+        *desc = truncated;
     }
 
     /// Get escalation depth from bead labels.
@@ -698,9 +761,11 @@ impl Supervisor {
             q.closed_reason = Some("Cancelled by user".to_string());
         });
 
-        // Abort the running task if one exists for this quest.
+        // Kill process group + abort the running task if one exists for this quest.
         self.running_tasks.retain(|t| {
             if t.task_id == task_id {
+                let pid = t.child_pid.load(std::sync::atomic::Ordering::Relaxed);
+                ClaudeCodeExecutor::kill_process_group(pid);
                 t.handle.abort();
                 info!(task_id, "cancelled running worker task");
                 false

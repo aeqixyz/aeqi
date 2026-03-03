@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Instant;
 use tokio::process::Command;
 use tracing::{debug, info, warn};
@@ -99,12 +101,18 @@ Remaining: Wire the buffer into the summoner's message dispatch loop in rm/src/m
 The integration point is around line 1168 where rx.recv() is called.
 ```
 
+### Context
+All project context is provided in your system prompt. Do not search for CLAUDE.md.
+Project skills are available at the skills/ directory referenced in your operating instructions.
+Read relevant skills before starting specialized work.
+
 ### Sub-Agents
 You have full access to Claude Code's Task tool for spawning sub-agents. Use them freely:
 - Explore agents for parallel codebase research
 - Bash agents for running tests and builds
 - general-purpose agents for complex multi-step investigations
 Each worker IS an orchestrator — swarm when the task is complex.
+Subagent specs are at the subagents/ directory referenced in your operating instructions.
 
 ### Checkpoints
 Previous attempts on this quest (if any) are listed under the Previous Attempts section.
@@ -113,14 +121,14 @@ If you see file paths, commits, or branches from previous attempts, verify their
 current state before building on them.
 
 ### Git Workflow
-Follow the project's CLAUDE.md for git workflow (worktrees, branches, commits).
+Follow the git workflow specified in your operating instructions (worktrees, branches, commits).
 "#;
 
 /// Spawns Claude Code CLI instances for bead execution.
 ///
 /// Each execution is ephemeral: no session persistence, no interactive mode.
-/// The worker's identity is injected via `--append-system-prompt` and the
-/// repo's CLAUDE.md is auto-discovered from the working directory.
+/// The worker's identity is injected via `--append-system-prompt` from the
+/// sigil identity system. Repos have minimal CLAUDE.md (build commands only).
 ///
 /// NO tool restrictions — workers get full Claude Code access including
 /// Edit, Grep, Glob, Task (sub-agents), Bash, Read, Write, and everything else.
@@ -133,6 +141,9 @@ pub struct ClaudeCodeExecutor {
     max_turns: u32,
     /// Max budget in USD per execution (None = unlimited).
     max_budget_usd: Option<f64>,
+    /// PID of the currently running child process (0 = none). Shared with supervisor
+    /// so it can kill the process group on timeout.
+    pub child_pid: Arc<AtomicU32>,
 }
 
 impl ClaudeCodeExecutor {
@@ -147,6 +158,7 @@ impl ClaudeCodeExecutor {
             model,
             max_turns,
             max_budget_usd,
+            child_pid: Arc::new(AtomicU32::new(0)),
         }
     }
 
@@ -227,6 +239,17 @@ impl ClaudeCodeExecutor {
         cmd.env_remove("CLAUDECODE");
         cmd.env_remove("CLAUDE_CODE");
 
+        // Create a new process group so we can kill the entire tree on timeout.
+        #[cfg(unix)]
+        unsafe {
+            cmd.pre_exec(|| {
+                // setsid() creates a new session + process group.
+                unsafe extern "C" { fn setsid() -> i32; }
+                let _ = setsid();
+                Ok(())
+            });
+        }
+
         debug!(
             workdir = %self.workdir.display(),
             model = %self.model,
@@ -235,17 +258,29 @@ impl ClaudeCodeExecutor {
         );
 
         let timeout_secs = (self.max_turns as u64 * 300).max(1800);
+
+        // Spawn child and track its PID for process group kill.
+        let child = cmd.spawn()
+            .context("failed to spawn claude CLI — is it installed?")?;
+        let pid = child.id().unwrap_or(0) as u32;
+        self.child_pid.store(pid, Ordering::Relaxed);
+
         let output = tokio::time::timeout(
             std::time::Duration::from_secs(timeout_secs),
-            cmd.output(),
+            child.wait_with_output(),
         )
         .await
-        .map_err(|_| anyhow::anyhow!(
-            "claude code timed out after {}s (max_turns={})",
-            timeout_secs, self.max_turns,
-        ))?
-        .context("failed to spawn claude CLI — is it installed?")?;
+        .map_err(|_| {
+            // Timeout — kill the process group.
+            Self::kill_process_group(pid);
+            anyhow::anyhow!(
+                "claude code timed out after {}s (max_turns={})",
+                timeout_secs, self.max_turns,
+            )
+        })?
+        .context("failed to wait on claude CLI")?;
 
+        self.child_pid.store(0, Ordering::Relaxed);
         let duration_ms = start.elapsed().as_millis() as u64;
 
         if !output.status.success() {
@@ -265,6 +300,20 @@ impl ClaudeCodeExecutor {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         Self::parse_json_output(&stdout, duration_ms)
+    }
+
+    /// Kill an entire process group by PID. Used on timeout to clean up
+    /// Claude Code and any sub-processes it spawned.
+    pub fn kill_process_group(pid: u32) {
+        if pid == 0 { return; }
+        #[cfg(unix)]
+        {
+            // kill(-pid, SIGKILL) sends SIGKILL to the entire process group.
+            unsafe extern "C" { fn kill(pid: i32, sig: i32) -> i32; }
+            const SIGKILL: i32 = 9;
+            unsafe { kill(-(pid as i32), SIGKILL); }
+            info!(pid, "killed process group");
+        }
     }
 
     /// Parse the `--output-format json` response from Claude Code.

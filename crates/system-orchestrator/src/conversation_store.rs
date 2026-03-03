@@ -83,17 +83,23 @@ impl ConversationStore {
         Ok(())
     }
 
-    /// Get recent messages for a chat (most recent `limit` messages).
+    /// Get recent messages for a chat (most recent `limit` messages, with optional offset for pagination).
     pub async fn recent(&self, chat_id: i64, limit: usize) -> Result<Vec<ConversationMessage>> {
+        self.recent_with_offset(chat_id, limit, 0).await
+    }
+
+    /// Get messages for a chat with offset-based pagination.
+    /// Offset 0 = most recent, offset N = skip N newest messages.
+    pub async fn recent_with_offset(&self, chat_id: i64, limit: usize, offset: usize) -> Result<Vec<ConversationMessage>> {
         let db = self.db.lock().await;
         let mut stmt = db.prepare(
             "SELECT chat_id, role, content, timestamp FROM conversations \
              WHERE chat_id = ?1 AND summarized = 0 \
-             ORDER BY id DESC LIMIT ?2",
+             ORDER BY id DESC LIMIT ?2 OFFSET ?3",
         )?;
 
         let rows = stmt
-            .query_map(params![chat_id, limit as i64], |row| {
+            .query_map(params![chat_id, limit as i64, offset as i64], |row| {
                 Ok(ConversationMessage {
                     chat_id: row.get(0)?,
                     role: row.get(1)?,

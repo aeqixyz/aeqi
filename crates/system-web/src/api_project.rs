@@ -41,19 +41,24 @@ fn mission_to_info(m: &system_tasks::Mission, tasks: &[&system_tasks::Task]) -> 
     }
 }
 
+fn tenant_team(tenant: &system_tenants::Tenant) -> Option<TeamInfo> {
+    let leader = tenant.leader()?;
+    let mut agents = tenant.team();
+    agents.retain(|a| a != &leader);
+    Some(TeamInfo { leader, agents })
+}
+
 // GET /api/projects
 pub async fn list_projects(
     AuthTenant(tenant): AuthTenant,
     State(_state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<ProjectInfo>>, (StatusCode, String)> {
+    let team = tenant_team(&tenant);
     let summaries = tenant.registry.list_project_summaries().await;
     let infos: Vec<ProjectInfo> = summaries.into_iter().map(|s| ProjectInfo {
         name: s.name,
         prefix: s.prefix,
-        team: s.team.map(|t| TeamInfo {
-            leader: t.leader,
-            agents: t.agents,
-        }),
+        team: team.clone(),
         open_tasks: s.open_tasks,
         total_tasks: s.total_tasks,
         active_missions: s.active_missions,
@@ -83,7 +88,7 @@ pub async fn get_project(
     Ok(Json(ProjectInfo {
         name: project.name.clone(),
         prefix: project.prefix.clone(),
-        team: None, // Team info requires scout access, kept simple for single-project endpoint
+        team: tenant_team(&tenant),
         open_tasks,
         total_tasks,
         active_missions,
@@ -231,6 +236,57 @@ pub async fn update_task(
     }).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(task_to_info(&task)))
+}
+
+// GET /api/active-project
+pub async fn get_active_project(
+    AuthTenant(tenant): AuthTenant,
+) -> Result<Json<ActiveProjectResponse>, (StatusCode, String)> {
+    let active = tenant.active_project().await;
+    Ok(Json(ActiveProjectResponse { active_project: active }))
+}
+
+// PUT /api/active-project
+pub async fn set_active_project(
+    AuthTenant(tenant): AuthTenant,
+    Json(req): Json<SetActiveProjectRequest>,
+) -> Result<Json<ActiveProjectResponse>, (StatusCode, String)> {
+    // Validate project exists if setting one
+    if let Some(ref name) = req.name {
+        tenant.registry.get_project(name).await
+            .ok_or_else(|| (StatusCode::NOT_FOUND, format!("project not found: {name}")))?;
+    }
+    tenant.set_active_project(req.name.clone()).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(ActiveProjectResponse { active_project: req.name }))
+}
+
+// DELETE /api/projects/{name}
+pub async fn delete_project(
+    AuthTenant(tenant): AuthTenant,
+    Path(name): Path<String>,
+) -> Result<Json<DeleteProjectResponse>, (StatusCode, String)> {
+    // Check project exists
+    tenant.registry.get_project(&name).await
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("project not found: {name}")))?;
+
+    // Remove from registry
+    tenant.registry.remove_project(&name).await;
+
+    // Clear active_project if it was this one
+    if tenant.active_project().await.as_deref() == Some(&name) {
+        let _ = tenant.set_active_project(None).await;
+    }
+
+    // Remove project directory from disk — but only if it's under data_dir (tenant-owned).
+    // If projects_source is set and the project lives there, skip physical deletion.
+    let local_project_dir = tenant.data_dir.join("projects").join(&name);
+    if local_project_dir.is_dir() {
+        std::fs::remove_dir_all(&local_project_dir)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to remove project dir: {e}")))?;
+    }
+
+    Ok(Json(DeleteProjectResponse { deleted: true }))
 }
 
 // POST /api/projects/{name}/missions

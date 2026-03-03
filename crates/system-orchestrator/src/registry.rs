@@ -48,6 +48,20 @@ impl ProjectRegistry {
         self.raid_store = Some(store);
     }
 
+    /// Register a project without creating a Supervisor.
+    /// Used for tenant-scoped projects that need web API visibility
+    /// but don't run daemon-driven execution.
+    pub async fn register_project_only(&self, project: Arc<Project>) {
+        let name = project.name.clone();
+        self.metrics.ensure_project(&name);
+        self.projects.write().await.insert(name, project);
+    }
+
+    /// Remove a project from the registry (in-memory only).
+    pub async fn remove_project(&self, name: &str) -> bool {
+        self.projects.write().await.remove(name).is_some()
+    }
+
     pub async fn register_project(&self, project: Arc<Project>, mut scout: Supervisor) {
         let name = project.name.clone();
         // Inject cost ledger + metrics into the scout.

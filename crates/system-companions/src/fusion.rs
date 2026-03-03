@@ -1,7 +1,7 @@
 use rand::Rng;
 use chrono::Utc;
 
-use crate::companion::{Companion, PersonaStatus, Rarity};
+use crate::companion::{Companion, PersonaStatus, PortraitStatus, Rarity};
 use crate::names;
 
 #[derive(Debug)]
@@ -125,6 +125,7 @@ pub fn fuse(a: &Companion, b: &Companion) -> Result<Companion, FusionError> {
         personality_seed,
         anime_inspirations,
         persona_status: PersonaStatus::Pending,
+        portrait_status: PortraitStatus::Pending,
         title,
         last_name,
     };
@@ -260,6 +261,7 @@ pub fn fuse_multi(companions: &[&Companion]) -> Result<Companion, FusionError> {
         personality_seed,
         anime_inspirations,
         persona_status: PersonaStatus::Pending,
+        portrait_status: PortraitStatus::Pending,
         title,
         last_name,
     };

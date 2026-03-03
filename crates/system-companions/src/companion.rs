@@ -14,6 +14,16 @@ pub enum PersonaStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PortraitStatus {
+    #[default]
+    Pending,
+    Generating,
+    Complete,
+    Failed,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Archetype {
@@ -339,6 +349,8 @@ pub struct Companion {
     pub anime_inspirations: Vec<AnimeInspiration>,
     #[serde(default)]
     pub persona_status: PersonaStatus,
+    #[serde(default)]
+    pub portrait_status: PortraitStatus,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]

@@ -70,6 +70,23 @@ pub async fn pull(
                 );
             }
         });
+
+        // Spawn async portrait generation in background.
+        let data_dir2 = tenant.data_dir.clone();
+        let companion_clone2 = companion.clone();
+        let platform2 = state.platform.clone();
+        let store2 = tenant.companion_store.clone();
+        tokio::spawn(async move {
+            if let Err(e) = provision::materialize_companion_portrait(
+                &data_dir2, &companion_clone2, &platform2, &store2,
+            ).await {
+                tracing::warn!(
+                    companion = %companion_clone2.name,
+                    error = %e,
+                    "async portrait generation failed"
+                );
+            }
+        });
     }
 
     Ok(Json(PullResponse {
@@ -126,6 +143,23 @@ pub async fn pull10(
                         companion = %companion_clone.name,
                         error = %e,
                         "async persona generation failed"
+                    );
+                }
+            });
+
+            // Spawn async portrait generation.
+            let data_dir2 = tenant.data_dir.clone();
+            let companion_clone2 = companion.clone();
+            let platform2 = state.platform.clone();
+            let store2 = tenant.companion_store.clone();
+            tokio::spawn(async move {
+                if let Err(e) = provision::materialize_companion_portrait(
+                    &data_dir2, &companion_clone2, &platform2, &store2,
+                ).await {
+                    tracing::warn!(
+                        companion = %companion_clone2.name,
+                        error = %e,
+                        "async portrait generation failed"
                     );
                 }
             });
@@ -202,6 +236,23 @@ pub async fn fuse(
                 companion = %result_clone.name,
                 error = %e,
                 "async persona generation failed for fused companion"
+            );
+        }
+    });
+
+    // Spawn async portrait generation for fused companion.
+    let data_dir2 = tenant.data_dir.clone();
+    let result_clone2 = result.clone();
+    let platform2 = state.platform.clone();
+    let store2 = tenant.companion_store.clone();
+    tokio::spawn(async move {
+        if let Err(e) = provision::materialize_companion_portrait(
+            &data_dir2, &result_clone2, &platform2, &store2,
+        ).await {
+            tracing::warn!(
+                companion = %result_clone2.name,
+                error = %e,
+                "async portrait generation failed for fused companion"
             );
         }
     });

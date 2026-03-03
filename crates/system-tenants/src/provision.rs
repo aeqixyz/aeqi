@@ -24,6 +24,8 @@ pub fn provision_tenant(
         email: None,
         tier: tier.to_string(),
         created_at: chrono::Utc::now(),
+        active_project: None,
+        projects_source: None,
     };
     let meta_toml = toml::to_string_pretty(&meta)?;
     std::fs::write(data_dir.join("tenant.toml"), meta_toml)?;
@@ -48,6 +50,26 @@ pub fn provision_tenant(
         std::fs::write(
             data_dir.join("projects/chat/AGENTS.md"),
             "# Chat Project\n\nYou are a conversational companion. Respond in character with personality.\n",
+        )?;
+    }
+
+    // Write chat project KNOWLEDGE.md so agents know about available projects.
+    let knowledge_template = template_dir.join("projects/chat/KNOWLEDGE.md");
+    if knowledge_template.exists() {
+        std::fs::copy(&knowledge_template, data_dir.join("projects/chat/KNOWLEDGE.md"))?;
+    } else {
+        std::fs::write(
+            data_dir.join("projects/chat/KNOWLEDGE.md"),
+            "# Chat Knowledge\n\n\
+            ## Available Projects\n\
+            - entity-legal: Legal entity formation and compliance\n\
+            - algostaking: HFT trading system (Rust microservices)\n\
+            - riftdecks-shop: TCG marketplace (Next.js)\n\
+            - gacha-agency: Agent orchestration framework (Rust)\n\n\
+            ## Your Role\n\
+            You are a companion in the user's agency. Help them navigate their projects,\n\
+            answer questions, and assist with tasks. If they mention a project, acknowledge\n\
+            it exists and help them work on it.\n",
         )?;
     }
 
@@ -106,6 +128,65 @@ pub fn materialize_companion(
 
     info!(companion = %companion.name, dir = %agent_dir.display(), "companion materialized (sync)");
     Ok(agent_dir)
+}
+
+/// Async portrait generation — calls image generation API to produce portrait.png.
+/// Writes the image to the companion's agent directory and updates portrait_status.
+pub async fn materialize_companion_portrait(
+    data_dir: &Path,
+    companion: &system_companions::Companion,
+    platform: &crate::config::PlatformConfig,
+    companion_store: &system_companions::CompanionStore,
+) -> Result<()> {
+    let agent_dir = data_dir.join("agents").join(&companion.name);
+    std::fs::create_dir_all(&agent_dir)?;
+
+    // Update status to generating.
+    if let Ok(Some(mut c)) = companion_store.get_companion(&companion.id) {
+        c.portrait_status = system_companions::PortraitStatus::Generating;
+        let _ = companion_store.save_companion(&c);
+    }
+
+    // Build provider — use OpenRouter (same as persona gen).
+    let provider = if let Some(ref openrouter) = platform.providers.openrouter {
+        system_providers::OpenRouterProvider::new(
+            openrouter.api_key.clone(),
+            "openai/gpt-5-image".to_string(),
+        )
+    } else {
+        // Update status to failed.
+        if let Ok(Some(mut c)) = companion_store.get_companion(&companion.id) {
+            c.portrait_status = system_companions::PortraitStatus::Failed;
+            let _ = companion_store.save_companion(&c);
+        }
+        anyhow::bail!("no OpenRouter provider configured for portrait generation");
+    };
+
+    let model = "openai/gpt-5-image";
+
+    match crate::portrait_gen::generate_portrait(companion, &provider, model).await {
+        Ok(bytes) => {
+            // Write portrait image.
+            std::fs::write(agent_dir.join("portrait.png"), &bytes)?;
+
+            // Update status to complete.
+            if let Ok(Some(mut c)) = companion_store.get_companion(&companion.id) {
+                c.portrait_status = system_companions::PortraitStatus::Complete;
+                companion_store.save_companion(&c)?;
+            }
+
+            info!(companion = %companion.name, bytes = bytes.len(), "portrait written (async)");
+            Ok(())
+        }
+        Err(e) => {
+            // Update status to failed.
+            if let Ok(Some(mut c)) = companion_store.get_companion(&companion.id) {
+                c.portrait_status = system_companions::PortraitStatus::Failed;
+                let _ = companion_store.save_companion(&c);
+            }
+            Err(e)
+        }
+    }
 }
 
 /// Async persona generation — calls LLM to generate PERSONA.md.
