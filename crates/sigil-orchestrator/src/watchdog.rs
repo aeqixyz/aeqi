@@ -39,18 +39,35 @@ pub struct WatchdogCondition {
     pub budget_threshold: Option<f64>,
 }
 
-fn default_count_threshold() -> u32 { 3 }
-fn default_window_secs() -> u64 { 3600 }
+fn default_count_threshold() -> u32 {
+    3
+}
+fn default_window_secs() -> u64 {
+    3600
+}
 
 /// Action to take when a watchdog rule fires.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WatchdogAction {
-    CreateTask { project: String, subject: String, description: String },
-    SendDispatch { to: String, message: String },
-    Escalate { message: String },
-    PauseProject { project: String },
-    RunCommand { command: String },
+    CreateTask {
+        project: String,
+        subject: String,
+        description: String,
+    },
+    SendDispatch {
+        to: String,
+        message: String,
+    },
+    Escalate {
+        message: String,
+    },
+    PauseProject {
+        project: String,
+    },
+    RunCommand {
+        command: String,
+    },
 }
 
 /// A complete watchdog rule: condition + action + cooldown.
@@ -65,8 +82,12 @@ pub struct WatchdogRule {
     pub enabled: bool,
 }
 
-fn default_cooldown() -> u64 { 3600 }
-fn default_enabled() -> bool { true }
+fn default_cooldown() -> u64 {
+    3600
+}
+fn default_enabled() -> bool {
+    true
+}
 
 /// Engine that evaluates watchdog rules against audit events.
 pub struct WatchdogEngine {
@@ -76,12 +97,19 @@ pub struct WatchdogEngine {
 
 impl WatchdogEngine {
     pub fn new(rules: Vec<WatchdogRule>) -> Self {
-        Self { rules, last_fired: HashMap::new() }
+        Self {
+            rules,
+            last_fired: HashMap::new(),
+        }
     }
 
     /// Evaluate all rules against the audit log. Returns names of fired rules
     /// and their actions.
-    pub fn evaluate(&mut self, audit_log: &AuditLog, budget_pct: Option<f64>) -> Vec<(String, WatchdogAction)> {
+    pub fn evaluate(
+        &mut self,
+        audit_log: &AuditLog,
+        budget_pct: Option<f64>,
+    ) -> Vec<(String, WatchdogAction)> {
         let mut fired = Vec::new();
         let now = Utc::now();
 
@@ -108,7 +136,12 @@ impl WatchdogEngine {
         fired
     }
 
-    fn check_condition(&self, condition: &WatchdogCondition, audit_log: &AuditLog, budget_pct: Option<f64>) -> bool {
+    fn check_condition(
+        &self,
+        condition: &WatchdogCondition,
+        audit_log: &AuditLog,
+        budget_pct: Option<f64>,
+    ) -> bool {
         // Budget threshold check (doesn't need audit trail).
         if condition.event == WatchdogEvent::BudgetThresholdReached {
             if let (Some(threshold), Some(pct)) = (condition.budget_threshold, budget_pct) {
@@ -119,9 +152,9 @@ impl WatchdogEngine {
 
         // Map watchdog event to decision type for audit query.
         let decision_type = match condition.event {
-            WatchdogEvent::TaskCompleted => DecisionType::TaskAssigned, // Use TaskAssigned + filter done
-            WatchdogEvent::TaskFailed => DecisionType::TaskRetried,
-            WatchdogEvent::TaskBlocked => DecisionType::TaskEscalated,
+            WatchdogEvent::TaskCompleted => DecisionType::TaskCompleted,
+            WatchdogEvent::TaskFailed => DecisionType::TaskFailed,
+            WatchdogEvent::TaskBlocked => DecisionType::TaskBlocked,
             WatchdogEvent::WorkerTimeout => DecisionType::WorkerTimedOut,
             WatchdogEvent::EscalationCreated => DecisionType::TaskEscalated,
             WatchdogEvent::CostSpike => DecisionType::BudgetBlocked,
@@ -137,7 +170,8 @@ impl WatchdogEngine {
 
         // Filter by time window and decision type.
         let cutoff = Utc::now() - chrono::Duration::seconds(condition.window_secs as i64);
-        let matching_count = events.iter()
+        let matching_count = events
+            .iter()
             .filter(|e| e.timestamp > cutoff && e.decision_type == decision_type)
             .count() as u32;
 
@@ -163,8 +197,12 @@ mod tests {
 
         // Record 3 timeout events
         for i in 0..3 {
-            audit.record(&AuditEvent::new("proj", DecisionType::WorkerTimedOut, format!("timeout {i}"))
-                .with_task(format!("t-{i:03}"))).unwrap();
+            audit
+                .record(
+                    &AuditEvent::new("proj", DecisionType::WorkerTimedOut, format!("timeout {i}"))
+                        .with_task(format!("t-{i:03}")),
+                )
+                .unwrap();
         }
 
         let rules = vec![WatchdogRule {
@@ -177,7 +215,9 @@ mod tests {
                 window_secs: 3600,
                 budget_threshold: None,
             },
-            action: WatchdogAction::Escalate { message: "Too many timeouts".to_string() },
+            action: WatchdogAction::Escalate {
+                message: "Too many timeouts".to_string(),
+            },
             cooldown_secs: 3600,
             enabled: true,
         }];
@@ -194,7 +234,13 @@ mod tests {
 
         // Only 2 events (threshold is 3)
         for i in 0..2 {
-            audit.record(&AuditEvent::new("proj", DecisionType::WorkerTimedOut, format!("timeout {i}"))).unwrap();
+            audit
+                .record(&AuditEvent::new(
+                    "proj",
+                    DecisionType::WorkerTimedOut,
+                    format!("timeout {i}"),
+                ))
+                .unwrap();
         }
 
         let rules = vec![WatchdogRule {
@@ -207,7 +253,9 @@ mod tests {
                 window_secs: 3600,
                 budget_threshold: None,
             },
-            action: WatchdogAction::Escalate { message: "Too many timeouts".to_string() },
+            action: WatchdogAction::Escalate {
+                message: "Too many timeouts".to_string(),
+            },
             cooldown_secs: 3600,
             enabled: true,
         }];
@@ -222,7 +270,13 @@ mod tests {
         let (audit, _dir) = temp_audit();
 
         for i in 0..5 {
-            audit.record(&AuditEvent::new("proj", DecisionType::WorkerTimedOut, format!("timeout {i}"))).unwrap();
+            audit
+                .record(&AuditEvent::new(
+                    "proj",
+                    DecisionType::WorkerTimedOut,
+                    format!("timeout {i}"),
+                ))
+                .unwrap();
         }
 
         let rules = vec![WatchdogRule {
@@ -235,7 +289,9 @@ mod tests {
                 window_secs: 3600,
                 budget_threshold: None,
             },
-            action: WatchdogAction::Escalate { message: "Too many timeouts".to_string() },
+            action: WatchdogAction::Escalate {
+                message: "Too many timeouts".to_string(),
+            },
             cooldown_secs: 3600,
             enabled: true,
         }];
@@ -265,7 +321,9 @@ mod tests {
                 window_secs: 3600,
                 budget_threshold: Some(0.8),
             },
-            action: WatchdogAction::Escalate { message: "Budget > 80%".to_string() },
+            action: WatchdogAction::Escalate {
+                message: "Budget > 80%".to_string(),
+            },
             cooldown_secs: 3600,
             enabled: true,
         }];
@@ -285,10 +343,34 @@ mod tests {
     fn test_project_filter() {
         let (audit, _dir) = temp_audit();
 
-        audit.record(&AuditEvent::new("proj-a", DecisionType::WorkerTimedOut, "timeout")).unwrap();
-        audit.record(&AuditEvent::new("proj-a", DecisionType::WorkerTimedOut, "timeout")).unwrap();
-        audit.record(&AuditEvent::new("proj-a", DecisionType::WorkerTimedOut, "timeout")).unwrap();
-        audit.record(&AuditEvent::new("proj-b", DecisionType::WorkerTimedOut, "timeout")).unwrap();
+        audit
+            .record(&AuditEvent::new(
+                "proj-a",
+                DecisionType::WorkerTimedOut,
+                "timeout",
+            ))
+            .unwrap();
+        audit
+            .record(&AuditEvent::new(
+                "proj-a",
+                DecisionType::WorkerTimedOut,
+                "timeout",
+            ))
+            .unwrap();
+        audit
+            .record(&AuditEvent::new(
+                "proj-a",
+                DecisionType::WorkerTimedOut,
+                "timeout",
+            ))
+            .unwrap();
+        audit
+            .record(&AuditEvent::new(
+                "proj-b",
+                DecisionType::WorkerTimedOut,
+                "timeout",
+            ))
+            .unwrap();
 
         let rules = vec![WatchdogRule {
             name: "proj-b-alert".to_string(),
@@ -300,7 +382,9 @@ mod tests {
                 window_secs: 3600,
                 budget_threshold: None,
             },
-            action: WatchdogAction::Escalate { message: "alert".to_string() },
+            action: WatchdogAction::Escalate {
+                message: "alert".to_string(),
+            },
             cooldown_secs: 3600,
             enabled: true,
         }];
@@ -334,7 +418,9 @@ mod tests {
                 window_secs: 1800,
                 budget_threshold: None,
             },
-            action: WatchdogAction::Escalate { message: "alert".to_string() },
+            action: WatchdogAction::Escalate {
+                message: "alert".to_string(),
+            },
             cooldown_secs: 600,
             enabled: true,
         };
@@ -344,5 +430,46 @@ mod tests {
         assert_eq!(parsed.name, "test-rule");
         assert_eq!(parsed.condition.count_threshold, 5);
         assert_eq!(parsed.cooldown_secs, 600);
+    }
+
+    #[test]
+    fn test_task_completed_counts_only_completion_events() {
+        let (audit, _dir) = temp_audit();
+
+        audit
+            .record(&AuditEvent::new(
+                "proj",
+                DecisionType::TaskAssigned,
+                "assigned",
+            ))
+            .unwrap();
+        audit
+            .record(&AuditEvent::new(
+                "proj",
+                DecisionType::TaskCompleted,
+                "done",
+            ))
+            .unwrap();
+
+        let rules = vec![WatchdogRule {
+            name: "done-alert".to_string(),
+            condition: WatchdogCondition {
+                event: WatchdogEvent::TaskCompleted,
+                project_filter: Some("proj".to_string()),
+                label_filter: None,
+                count_threshold: 1,
+                window_secs: 3600,
+                budget_threshold: None,
+            },
+            action: WatchdogAction::Escalate {
+                message: "completed".to_string(),
+            },
+            cooldown_secs: 3600,
+            enabled: true,
+        }];
+
+        let mut engine = WatchdogEngine::new(rules);
+        let fired = engine.evaluate(&audit, None);
+        assert_eq!(fired.len(), 1);
     }
 }

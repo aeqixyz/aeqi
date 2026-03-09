@@ -8,7 +8,7 @@ When `execution_mode = "claude_code"` (the default for production projects), eac
 
 ```bash
 claude -p "<system_prompt + task>" \
-  --output-format json \
+  --output-format stream-json \
   --max-turns 25 \
   --permission-mode bypassPermissions \
   --cwd /path/to/project/repo
@@ -16,7 +16,7 @@ claude -p "<system_prompt + task>" \
 
 **Key flags**:
 - `-p` -- print mode (non-interactive, takes prompt as argument)
-- `--output-format json` -- structured output with cost, turns, session ID
+- `--output-format stream-json` -- structured event stream with tool activity and a final result record
 - `--max-turns 25` -- agentic turn limit (configurable per project)
 - `--permission-mode bypassPermissions` -- full tool access (Edit, Grep, Glob, Task, etc.)
 - `--cwd` -- working directory set to the project's repo
@@ -47,7 +47,7 @@ Max 3 retries. Common failure modes: Claude Code CLI not found, API rate limits,
 
 ## Output Parsing
 
-Claude Code returns JSON:
+Claude Code emits a JSON event stream. The final `result` event contains the completed response:
 
 ```json
 {
@@ -59,12 +59,16 @@ Claude Code returns JSON:
 }
 ```
 
-The worker parses the `result` field for outcome:
+The worker parses the final `result` text for outcome:
 - Starts with `DONE` or `DONE:` -> `TaskOutcome::Done`
 - Starts with `BLOCKED:` -> `TaskOutcome::Blocked` (triggers escalation)
 - Starts with `FAILED:` -> `TaskOutcome::Failed` (requeue with backoff)
 - Starts with `HANDOFF:` -> `TaskOutcome::Handoff` (checkpoint + requeue)
 - No prefix -> defaults to `Done` with the full text as summary
+
+Current limitation:
+- tool progress is visible during the stream
+- total cost is known only on the final `result` event, so cost enforcement is final-result-based rather than true mid-run accounting
 
 ## Worker Protocol
 

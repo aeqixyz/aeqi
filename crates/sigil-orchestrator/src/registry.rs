@@ -353,3 +353,147 @@ pub struct TeamSummary {
     pub leader: String,
     pub agents: Vec<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::message::{Dispatch, DispatchKind};
+    use anyhow::Result;
+    use async_trait::async_trait;
+    use sigil_core::config::ProjectConfig;
+    use sigil_core::traits::{ChatRequest, ChatResponse, Provider, StopReason, Usage};
+    use sigil_core::ExecutionMode;
+    use std::path::Path;
+    use tempfile::TempDir;
+    use tokio::time::{sleep, Duration};
+
+    struct DoneProvider;
+
+    #[async_trait]
+    impl Provider for DoneProvider {
+        async fn chat(&self, _request: &ChatRequest) -> Result<ChatResponse> {
+            Ok(ChatResponse {
+                content: Some("DONE: fixed".to_string()),
+                tool_calls: Vec::new(),
+                usage: Usage::default(),
+                stop_reason: StopReason::EndTurn,
+            })
+        }
+
+        fn name(&self) -> &str {
+            "done-provider"
+        }
+
+        async fn health_check(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    fn temp_project(name: &str, prefix: &str) -> Result<(Arc<Project>, TempDir)> {
+        let dir = TempDir::new()?;
+        std::fs::create_dir_all(dir.path().join(".tasks"))?;
+        let config = ProjectConfig {
+            name: name.to_string(),
+            prefix: prefix.to_string(),
+            repo: dir.path().display().to_string(),
+            model: Some("test-model".to_string()),
+            max_workers: 1,
+            worktree_root: None,
+            execution_mode: ExecutionMode::Agent,
+            max_turns: Some(1),
+            max_budget_usd: None,
+            worker_timeout_secs: 60,
+            max_cost_per_day_usd: None,
+            team: None,
+            orchestrator: None,
+        };
+        let project = Project::from_config(&config, dir.path(), "test-model")?;
+        Ok((Arc::new(project), dir))
+    }
+
+    #[tokio::test]
+    async fn patrol_all_closes_operations_from_taskdone_dispatches() {
+        let dispatch_bus = Arc::new(DispatchBus::new());
+        let mut registry = ProjectRegistry::new(dispatch_bus.clone(), "leader".to_string());
+
+        let op_dir = TempDir::new().unwrap();
+        let operation_store = Arc::new(Mutex::new(
+            OperationStore::open(Path::new(&op_dir.path().join("operations.json"))).unwrap(),
+        ));
+        registry.set_operation_store(operation_store.clone());
+
+        let (project, _project_dir) = temp_project("demo", "dm").unwrap();
+        let provider: Arc<dyn Provider> = Arc::new(DoneProvider);
+        let supervisor = Supervisor::new(&project, provider, Vec::new(), dispatch_bus.clone());
+        registry.register_project(project.clone(), supervisor).await;
+
+        let task = registry.assign("demo", "close the loop", "").await.unwrap();
+        let operation_id = {
+            let mut store = operation_store.lock().await;
+            store
+                .create("demo-op", vec![(task.id.clone(), "demo".to_string())])
+                .unwrap()
+                .id
+                .clone()
+        };
+
+        let mut completed = false;
+        for _ in 0..20 {
+            registry.patrol_all().await.unwrap();
+            {
+                let store = operation_store.lock().await;
+                if let Some(op) = store.get(&operation_id)
+                    && op.closed_at.is_some()
+                {
+                    completed = true;
+                    break;
+                }
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+
+        assert!(completed, "operation should close after TaskDone dispatch is processed");
+    }
+
+    #[tokio::test]
+    async fn patrol_all_updates_operations_from_leader_inbox_dispatches() {
+        let dispatch_bus = Arc::new(DispatchBus::new());
+        let mut registry = ProjectRegistry::new(dispatch_bus.clone(), "leader".to_string());
+
+        let op_dir = TempDir::new().unwrap();
+        let operation_store = Arc::new(Mutex::new(
+            OperationStore::open(Path::new(&op_dir.path().join("operations.json"))).unwrap(),
+        ));
+        registry.set_operation_store(operation_store.clone());
+
+        let (project, _project_dir) = temp_project("demo", "dm").unwrap();
+        registry.register_project_only(project.clone()).await;
+
+        let task = registry.assign("demo", "manual close", "").await.unwrap();
+        let operation_id = {
+            let mut store = operation_store.lock().await;
+            store
+                .create("manual-op", vec![(task.id.clone(), "demo".to_string())])
+                .unwrap()
+                .id
+                .clone()
+        };
+
+        dispatch_bus
+            .send(Dispatch::new_typed(
+                "supervisor-demo",
+                "leader",
+                DispatchKind::TaskDone {
+                    task_id: task.id.to_string(),
+                    summary: "done".to_string(),
+                },
+            ))
+            .await;
+
+        registry.patrol_all().await.unwrap();
+
+        let store = operation_store.lock().await;
+        let op = store.get(&operation_id).unwrap();
+        assert!(op.closed_at.is_some());
+    }
+}

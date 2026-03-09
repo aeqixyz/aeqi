@@ -149,9 +149,9 @@ Per-project supervisor. Runs patrol cycles:
 patrol() {
     1. Reap finished workers (join completed tasks)
     2. Handle outcomes:
-       - Done -> close task, record cost, send dispatch
-       - Blocked -> escalation chain (project resolver -> lead agent -> human)
-       - Failed -> requeue with backoff
+       - Done -> close task, record cost, audit TaskCompleted, send TaskDone dispatch
+       - Blocked -> mark blocked, audit TaskBlocked, escalate via project resolver -> lead agent -> human
+       - Failed -> requeue with backoff, audit TaskFailed
        - Handoff -> requeue with checkpoint context
     3. Timeout detection: abort workers exceeding worker_timeout_secs
        - Capture external WorkerCheckpoint before abort
@@ -198,8 +198,10 @@ pub struct ClaudeCodeExecutor {
 
 **Features**:
 - Retry with exponential backoff (3 attempts, 1s -> 2s -> 4s)
-- JSON output parsing (`--output-format json`)
+- Stream JSON parsing (`--output-format stream-json`)
 - CLAUDECODE env var stripped to avoid nested-session detection
+- Tool/turn progress visibility during streaming
+- Cost available on the final `result` event only
 - `TaskOutcome` parsing from worker's final output:
   - `DONE` / `DONE:` prefix -> `TaskOutcome::Done`
   - `BLOCKED:` prefix -> `TaskOutcome::Blocked`
@@ -218,7 +220,7 @@ daemon.run() {
         3. Run heartbeat checks          -- periodic heartbeats
         4. Run reflection cycles         -- identity drift detection
         5. Hot reload on SIGHUP          -- re-read sigil.toml
-        6. Persist dispatches + costs    -- JSONL save
+        6. Persist state                  -- dispatches already durable in SQLite, costs append to JSONL
         7. Update daily cost gauge       -- metrics
         8. Prune old cost entries         -- 7-day TTL
         9. Sleep patrol_interval_secs
@@ -359,8 +361,9 @@ Dispatch {
 **Features**:
 - TTL expiry: 1 hour default, configurable
 - Bounded queues: max 1000 messages per recipient
-- JSONL persistence: `~/.sigil/dispatches.jsonl`
-- `read(recipient)` -> drain + return all messages
+- SQLite WAL persistence: `~/.sigil/dispatches.db`
+- `read(recipient)` -> return unread messages and mark them delivered
+- Ack-required dispatches remain retryable until explicitly acknowledged
 - `unread_count(recipient)` -> peek without consuming
 
 ### Self-Improvement

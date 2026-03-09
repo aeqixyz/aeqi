@@ -1,22 +1,22 @@
 use anyhow::Result;
-use sigil_tasks::{TaskStatus, TaskBoard};
 use sigil_core::config::{ExecutionMode, ProjectTeamConfig};
 use sigil_core::traits::{Channel, Memory, OutgoingMessage, Provider, Tool};
+use sigil_tasks::{TaskBoard, TaskStatus};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
 use tracing::{debug, info, warn};
 
+use crate::agent_worker::AgentWorker;
 use crate::audit::{AuditEvent, AuditLog, DecisionType};
 use crate::blackboard::Blackboard;
 use crate::checkpoint::AgentCheckpoint;
-use crate::cost_ledger::{CostLedger, CostEntry};
+use crate::cost_ledger::{CostEntry, CostLedger};
 use crate::emotional_state::EmotionalState;
 use crate::executor::{ClaudeCodeExecutor, TaskOutcome};
 use crate::expertise::{ExpertiseLedger, ExpertiseRecord, TaskOutcomeKind};
-use crate::metrics::SigilMetrics;
 use crate::message::{Dispatch, DispatchBus, DispatchKind};
+use crate::metrics::SigilMetrics;
 use crate::project::Project;
-use crate::agent_worker::AgentWorker;
 
 /// Label prefix for tracking escalation depth on tasks.
 const ESCALATION_LABEL_PREFIX: &str = "escalation:";
@@ -97,7 +97,12 @@ pub struct Supervisor {
 }
 
 impl Supervisor {
-    pub fn new(project: &Project, provider: Arc<dyn Provider>, tools: Vec<Arc<dyn Tool>>, dispatch_bus: Arc<DispatchBus>) -> Self {
+    pub fn new(
+        project: &Project,
+        provider: Arc<dyn Provider>,
+        tools: Vec<Arc<dyn Tool>>,
+        dispatch_bus: Arc<DispatchBus>,
+    ) -> Self {
         Self {
             project_name: project.name.clone(),
             max_workers: project.max_workers,
@@ -236,13 +241,17 @@ impl Supervisor {
 
             // Reset orphaned InProgress tasks (e.g. from daemon restart or worker panic).
             // On first patrol after restart, running_tasks is empty so all InProgress reset.
-            let running_ids: std::collections::HashSet<&str> = self.running_tasks
+            let running_ids: std::collections::HashSet<&str> = self
+                .running_tasks
                 .iter()
                 .map(|t| t.task_id.as_str())
                 .collect();
-            let orphaned: Vec<String> = store.all()
+            let orphaned: Vec<String> = store
+                .all()
                 .iter()
-                .filter(|t| t.status == TaskStatus::InProgress && !running_ids.contains(t.id.0.as_str()))
+                .filter(|t| {
+                    t.status == TaskStatus::InProgress && !running_ids.contains(t.id.0.as_str())
+                })
                 .map(|t| t.id.0.clone())
                 .collect();
             for id in orphaned {
@@ -278,9 +287,10 @@ impl Supervisor {
 
         // Reset timed-out tasks back to Pending and notify shadow.
         if !timed_out.is_empty()
-            && let Some(ref m) = self.metrics {
-                m.workers_timed_out.inc_by(timed_out.len() as u64);
-            }
+            && let Some(ref m) = self.metrics
+        {
+            m.workers_timed_out.inc_by(timed_out.len() as u64);
+        }
         for task_id in timed_out {
             warn!(
                 project = %self.project_name,
@@ -291,11 +301,14 @@ impl Supervisor {
 
             // Record audit: WorkerTimedOut.
             if let Some(ref audit) = self.audit_log {
-                let _ = audit.record(&AuditEvent::new(
-                    &self.project_name,
-                    DecisionType::WorkerTimedOut,
-                    format!("Timed out after {}s", self.worker_timeout_secs),
-                ).with_task(&task_id));
+                let _ = audit.record(
+                    &AuditEvent::new(
+                        &self.project_name,
+                        DecisionType::WorkerTimedOut,
+                        format!("Timed out after {}s", self.worker_timeout_secs),
+                    )
+                    .with_task(&task_id),
+                );
             }
 
             // Capture external checkpoint before resetting — preserve git state evidence.
@@ -366,24 +379,28 @@ impl Supervisor {
 
             // Budget check: don't spawn if global daily budget or project budget is exhausted.
             if let Some(ref ledger) = self.cost_ledger
-                && !ledger.can_afford_project(&self.project_name) {
-                    let (spent, budget, _) = ledger.project_budget_status(&self.project_name);
-                    warn!(
-                        project = %self.project_name,
-                        spent_usd = spent,
-                        budget_usd = budget,
-                        "budget exhausted for project, skipping task"
-                    );
-                    // Record audit: BudgetBlocked.
-                    if let Some(ref audit) = self.audit_log {
-                        let _ = audit.record(&AuditEvent::new(
+                && !ledger.can_afford_project(&self.project_name)
+            {
+                let (spent, budget, _) = ledger.project_budget_status(&self.project_name);
+                warn!(
+                    project = %self.project_name,
+                    spent_usd = spent,
+                    budget_usd = budget,
+                    "budget exhausted for project, skipping task"
+                );
+                // Record audit: BudgetBlocked.
+                if let Some(ref audit) = self.audit_log {
+                    let _ = audit.record(
+                        &AuditEvent::new(
                             &self.project_name,
                             DecisionType::BudgetBlocked,
                             format!("Budget exhausted: ${spent:.2}/${budget:.2}"),
-                        ).with_task(&task.id.0));
-                    }
-                    break;
+                        )
+                        .with_task(&task.id.0),
+                    );
                 }
+                break;
+            }
 
             let worker_idx = self.running_tasks.len() + 1;
             let worker_name = format!("{}-worker-{}", self.project_name, worker_idx);
@@ -398,14 +415,18 @@ impl Supervisor {
 
             // Record audit: TaskAssigned.
             if let Some(ref audit) = self.audit_log {
-                let _ = audit.record(&AuditEvent::new(
-                    &self.project_name,
-                    DecisionType::TaskAssigned,
-                    format!("Assigned to {worker_name}"),
-                ).with_task(&task.id.0).with_agent(&worker_name));
+                let _ = audit.record(
+                    &AuditEvent::new(
+                        &self.project_name,
+                        DecisionType::TaskAssigned,
+                        format!("Assigned to {worker_name}"),
+                    )
+                    .with_task(&task.id.0)
+                    .with_agent(&worker_name),
+                );
             }
 
-            let mut worker = self.create_worker(worker_name).await;
+            let mut worker = self.create_worker(worker_name.clone()).await;
 
             // If there's a previous external checkpoint for this task, inject it into the
             // task description so the new worker has context about the prior attempt's git state.
@@ -417,9 +438,8 @@ impl Supervisor {
                         let max_desc = self.max_description_chars;
                         let mut store = self.tasks.lock().await;
                         let _ = store.update(&task.id.0, |b| {
-                            b.description.push_str(&format!(
-                                "\n\n---\n{checkpoint_ctx}"
-                            ));
+                            b.description
+                                .push_str(&format!("\n\n---\n{checkpoint_ctx}"));
                             Self::cap_description_with_limit(&mut b.description, max_desc);
                         });
                         info!(
@@ -460,8 +480,11 @@ impl Supervisor {
             let tasks_for_err = self.tasks.clone();
             let expertise_ledger = self.expertise_ledger.clone();
             let audit_log_worker = self.audit_log.clone();
+            let dispatch_bus_worker = self.dispatch_bus.clone();
+            let outcome_recipient = self.system_escalation_target.clone();
             let task_labels = task.labels.clone();
             let task_subject = task.subject.clone();
+            let worker_name_for_records = worker_name.clone();
             let handle = tokio::spawn(async move {
                 let start = std::time::Instant::now();
                 match worker.execute().await {
@@ -494,14 +517,17 @@ impl Supervisor {
                             m.task_cost_usd.observe(cost_usd);
                             match &outcome {
                                 TaskOutcome::Done(_) => m.tasks_completed.inc(),
-                                TaskOutcome::Blocked { .. } | TaskOutcome::Handoff { .. } => m.tasks_blocked.inc(),
+                                TaskOutcome::Blocked { .. } | TaskOutcome::Handoff { .. } => {
+                                    m.tasks_blocked.inc()
+                                }
                                 TaskOutcome::Failed(_) => m.tasks_failed.inc(),
                             }
                         }
 
                         // Record to expertise ledger.
                         if let Some(ref ledger) = expertise_ledger {
-                            let domain = ExpertiseLedger::extract_domain(&task_labels, &task_subject);
+                            let domain =
+                                ExpertiseLedger::extract_domain(&task_labels, &task_subject);
                             let outcome_kind = match &outcome {
                                 TaskOutcome::Done(_) => TaskOutcomeKind::Done,
                                 TaskOutcome::Failed(_) => TaskOutcomeKind::Failed,
@@ -509,7 +535,7 @@ impl Supervisor {
                                 TaskOutcome::Blocked { .. } => TaskOutcomeKind::Blocked,
                             };
                             let _ = ledger.record(&ExpertiseRecord {
-                                agent_name: task_id_clone.clone(),
+                                agent_name: worker_name_for_records.clone(),
                                 task_domain: domain,
                                 outcome: outcome_kind,
                                 cost_usd,
@@ -522,16 +548,67 @@ impl Supervisor {
                         // Record audit: task outcome.
                         if let Some(ref audit) = audit_log_worker {
                             let dt = match &outcome {
-                                TaskOutcome::Done(_) => DecisionType::TaskAssigned,
-                                TaskOutcome::Failed(_) => DecisionType::TaskRetried,
+                                TaskOutcome::Done(_) => DecisionType::TaskCompleted,
+                                TaskOutcome::Failed(_) => DecisionType::TaskFailed,
                                 TaskOutcome::Handoff { .. } => DecisionType::TaskRetried,
-                                TaskOutcome::Blocked { .. } => DecisionType::TaskEscalated,
+                                TaskOutcome::Blocked { .. } => DecisionType::TaskBlocked,
                             };
-                            let _ = audit.record(&AuditEvent::new(
-                                &project_name_task,
-                                dt,
-                                format!("Outcome: {:?}, cost=${cost_usd:.3}, turns={turns}", std::mem::discriminant(&outcome)),
-                            ).with_task(&task_id_clone));
+                            let _ = audit.record(
+                                &AuditEvent::new(
+                                    &project_name_task,
+                                    dt,
+                                    format!(
+                                        "Outcome: {:?}, cost=${cost_usd:.3}, turns={turns}",
+                                        std::mem::discriminant(&outcome)
+                                    ),
+                                )
+                                .with_task(&task_id_clone)
+                                .with_agent(&worker_name_for_records),
+                            );
+                        }
+
+                        match &outcome {
+                            TaskOutcome::Done(summary) => {
+                                dispatch_bus_worker
+                                    .send(Dispatch::new_typed(
+                                        &format!("supervisor-{project_name_task}"),
+                                        &outcome_recipient,
+                                        DispatchKind::TaskDone {
+                                            task_id: task_id_clone.clone(),
+                                            summary: summary.clone(),
+                                        },
+                                    ))
+                                    .await;
+                            }
+                            TaskOutcome::Blocked {
+                                question,
+                                full_text,
+                            } => {
+                                dispatch_bus_worker
+                                    .send(Dispatch::new_typed(
+                                        &format!("supervisor-{project_name_task}"),
+                                        &outcome_recipient,
+                                        DispatchKind::TaskBlocked {
+                                            task_id: task_id_clone.clone(),
+                                            question: question.clone(),
+                                            context: full_text.clone(),
+                                        },
+                                    ))
+                                    .await;
+                            }
+                            TaskOutcome::Failed(error) => {
+                                dispatch_bus_worker
+                                    .send(Dispatch::new_typed(
+                                        &format!("supervisor-{project_name_task}"),
+                                        &outcome_recipient,
+                                        DispatchKind::TaskFailed {
+                                            task_id: task_id_clone.clone(),
+                                            error: error.clone(),
+                                        },
+                                    ))
+                                    .await;
+                            }
+                            TaskOutcome::Handoff { .. } => {}
                         }
 
                         // Update emotional state based on outcome.
@@ -539,7 +616,9 @@ impl Supervisor {
                             let mut state = emo.lock().await;
                             match &outcome {
                                 TaskOutcome::Done(_) => state.record_positive(),
-                                TaskOutcome::Blocked { .. } | TaskOutcome::Handoff { .. } => state.record_interaction(),
+                                TaskOutcome::Blocked { .. } | TaskOutcome::Handoff { .. } => {
+                                    state.record_interaction()
+                                }
                                 TaskOutcome::Failed(_) => state.record_negative(),
                             }
                             if let Some(ref path) = emo_path
@@ -614,7 +693,8 @@ impl Supervisor {
         // 5. Record patrol metrics.
         if let Some(ref m) = self.metrics {
             m.patrol_cycles.inc();
-            m.patrol_cycle_seconds.observe(patrol_start.elapsed().as_secs_f64());
+            m.patrol_cycle_seconds
+                .observe(patrol_start.elapsed().as_secs_f64());
             m.workers_active.set(active as f64);
             m.tasks_pending.set(pending as f64);
         }
@@ -634,7 +714,9 @@ impl Supervisor {
     async fn handle_blocked_tasks(&mut self) {
         let blocked_tasks = {
             let store = self.tasks.lock().await;
-            store.all().into_iter()
+            store
+                .all()
+                .into_iter()
                 .filter(|b| b.status == TaskStatus::Blocked)
                 .cloned()
                 .collect::<Vec<_>>()
@@ -648,7 +730,8 @@ impl Supervisor {
                 self.escalate_to_leader(&task).await;
             } else {
                 // Attempt project-level resolution: re-open as Pending with resolution context.
-                self.attempt_project_resolution(&task, escalation_depth).await;
+                self.attempt_project_resolution(&task, escalation_depth)
+                    .await;
             }
         }
     }
@@ -658,16 +741,14 @@ impl Supervisor {
     /// Increments escalation depth, appends the blocker question to the task
     /// description as resolution context, and resets to Pending so a new worker
     /// picks it up with the full context.
-    async fn attempt_project_resolution(
-        &self,
-        task: &sigil_tasks::Task,
-        current_depth: u32,
-    ) {
+    async fn attempt_project_resolution(&self, task: &sigil_tasks::Task, current_depth: u32) {
         let new_depth = current_depth + 1;
         let new_label = format!("{ESCALATION_LABEL_PREFIX}{new_depth}");
 
         // Extract the blocker question from closed_reason or description.
-        let blocker_context = task.closed_reason.as_deref()
+        let blocker_context = task
+            .closed_reason
+            .as_deref()
             .unwrap_or("(no blocker details captured)");
 
         info!(
@@ -679,11 +760,14 @@ impl Supervisor {
 
         // Record audit: TaskRetried.
         if let Some(ref audit) = self.audit_log {
-            let _ = audit.record(&AuditEvent::new(
-                &self.project_name,
-                DecisionType::TaskRetried,
-                format!("Project-level resolution attempt {new_depth}"),
-            ).with_task(&task.id.0));
+            let _ = audit.record(
+                &AuditEvent::new(
+                    &self.project_name,
+                    DecisionType::TaskRetried,
+                    format!("Project-level resolution attempt {new_depth}"),
+                )
+                .with_task(&task.id.0),
+            );
         }
 
         // Update task: append resolution context, increment depth, reset to Pending.
@@ -793,11 +877,14 @@ impl Supervisor {
 
         // Record audit: TaskEscalated.
         if let Some(ref audit) = self.audit_log {
-            let _ = audit.record(&AuditEvent::new(
-                &self.project_name,
-                DecisionType::TaskEscalated,
-                format!("Escalated to {target}"),
-            ).with_task(&task.id.0));
+            let _ = audit.record(
+                &AuditEvent::new(
+                    &self.project_name,
+                    DecisionType::TaskEscalated,
+                    format!("Escalated to {target}"),
+                )
+                .with_task(&task.id.0),
+            );
         }
 
         if let Some(ref m) = self.metrics {
@@ -858,30 +945,46 @@ impl Supervisor {
             b.assignee = None;
             // Remove escalation labels — fresh start with the answer.
             b.labels.retain(|l| {
-                !l.starts_with(ESCALATION_LABEL_PREFIX) && l != "escalated" && l != "escalated-system"
+                !l.starts_with(ESCALATION_LABEL_PREFIX)
+                    && l != "escalated"
+                    && l != "escalated-system"
             });
         });
     }
 
     /// Cap a task description to the configured limit, keeping the most recent content.
     fn cap_description_with_limit(desc: &mut String, max_chars: usize) {
-        if desc.len() <= max_chars {
+        let total_chars = desc.chars().count();
+        if total_chars <= max_chars {
             return;
         }
+
         // Keep the tail (most recent context is appended at the end).
-        let excess = desc.len() - max_chars + 60;
-        let cut = desc[excess..].find('\n').map(|i| i + excess).unwrap_or(excess);
+        let excess_chars = total_chars.saturating_sub(max_chars).saturating_add(60);
+        let base_cut = Self::byte_index_for_char(desc, excess_chars);
+        let cut = desc[base_cut..]
+            .find('\n')
+            .map(|i| base_cut + i + 1)
+            .unwrap_or(base_cut);
         let truncated = format!(
             "[... {} chars of earlier context truncated]\n{}",
-            cut,
+            desc[..cut].chars().count(),
             &desc[cut..]
         );
         *desc = truncated;
     }
 
+    fn byte_index_for_char(text: &str, char_idx: usize) -> usize {
+        text.char_indices()
+            .nth(char_idx)
+            .map(|(idx, _)| idx)
+            .unwrap_or(text.len())
+    }
+
     /// Get escalation depth from task labels.
     fn get_escalation_depth(labels: &[String]) -> u32 {
-        labels.iter()
+        labels
+            .iter()
             .filter_map(|l| l.strip_prefix(ESCALATION_LABEL_PREFIX))
             .filter_map(|n| n.parse::<u32>().ok())
             .max()
@@ -891,7 +994,11 @@ impl Supervisor {
     /// Get worker count by state: (idle, running, 0).
     /// Workers launch immediately as background tasks.
     pub fn worker_counts(&self) -> (usize, usize, usize) {
-        let running = self.running_tasks.iter().filter(|t| !t.handle.is_finished()).count();
+        let running = self
+            .running_tasks
+            .iter()
+            .filter(|t| !t.handle.is_finished())
+            .count();
         let capacity = self.max_workers as usize;
         let idle = capacity.saturating_sub(running);
         (idle, running, 0)
@@ -926,5 +1033,21 @@ impl Supervisor {
 
         info!(task_id, "task cancelled");
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Supervisor;
+
+    #[test]
+    fn cap_description_handles_unicode_without_panicking() {
+        let mut description = format!("{}\n{}", "alpha ".repeat(120), "🙂".repeat(200),);
+
+        Supervisor::cap_description_with_limit(&mut description, 160);
+
+        assert!(description.starts_with("[... "));
+        assert!(description.is_char_boundary(description.len()));
+        assert!(description.contains('🙂'));
     }
 }

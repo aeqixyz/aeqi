@@ -1,11 +1,11 @@
 use anyhow::Result;
 use chrono::Utc;
-use sigil_tasks::{Checkpoint, Task, TaskStatus};
 use sigil_core::traits::{
     ChatRequest, LogObserver, Memory, MemoryCategory, MemoryScope, Message, MessageContent,
     Observer, Provider, Role, Tool,
 };
 use sigil_core::{Agent, AgentConfig, Identity};
+use sigil_tasks::{Checkpoint, Task, TaskStatus};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
@@ -79,7 +79,11 @@ impl AgentWorker {
             project_name,
             state: WorkerState::Idle,
             hook: None,
-            execution: WorkerExecution::Agent { provider, tools, model },
+            execution: WorkerExecution::Agent {
+                provider,
+                tools,
+                model,
+            },
             identity,
             dispatch_bus,
             tasks,
@@ -282,7 +286,9 @@ impl AgentWorker {
                     if !b.checkpoints.is_empty() {
                         let budget = crate::context_budget::ContextBudget::default();
                         ctx.push_str(&budget.budget_checkpoints(&b.checkpoints));
-                        ctx.push_str("Review the above before starting. Skip work that's already done.\n\n");
+                        ctx.push_str(
+                            "Review the above before starting. Skip work that's already done.\n\n",
+                        );
                     }
 
                     // Include acceptance criteria if defined.
@@ -324,36 +330,47 @@ impl AgentWorker {
 
         // Dispatch based on execution mode. Returns (text, cost_usd, turns_used).
         let raw_result = match &self.execution {
-            WorkerExecution::Agent { provider, tools, model } => {
-                self.execute_agent(provider.clone(), tools.clone(), model, &task_context, &enriched_identity)
-                    .await
-                    .map(|agent_result| {
-                        let cost = sigil_providers::estimate_cost(
-                            &agent_result.model,
-                            agent_result.total_prompt_tokens,
-                            agent_result.total_completion_tokens,
-                        );
-                        info!(
-                            worker = %self.name,
-                            model = %agent_result.model,
-                            prompt_tokens = agent_result.total_prompt_tokens,
-                            completion_tokens = agent_result.total_completion_tokens,
-                            cost_usd = cost,
-                            iterations = agent_result.iterations,
-                            "agent execution cost calculated"
-                        );
-                        (agent_result.text, cost, agent_result.iterations)
-                    })
-            }
+            WorkerExecution::Agent {
+                provider,
+                tools,
+                model,
+            } => self
+                .execute_agent(
+                    provider.clone(),
+                    tools.clone(),
+                    model,
+                    &task_context,
+                    &enriched_identity,
+                )
+                .await
+                .map(|agent_result| {
+                    let cost = sigil_providers::estimate_cost(
+                        &agent_result.model,
+                        agent_result.total_prompt_tokens,
+                        agent_result.total_completion_tokens,
+                    );
+                    info!(
+                        worker = %self.name,
+                        model = %agent_result.model,
+                        prompt_tokens = agent_result.total_prompt_tokens,
+                        completion_tokens = agent_result.total_completion_tokens,
+                        cost_usd = cost,
+                        iterations = agent_result.iterations,
+                        "agent execution cost calculated"
+                    );
+                    (agent_result.text, cost, agent_result.iterations)
+                }),
             WorkerExecution::ClaudeCode(executor) => {
-                self.execute_claude_code(executor, &task_context, &enriched_identity).await
+                self.execute_claude_code(executor, &task_context, &enriched_identity)
+                    .await
             }
         };
 
         // Fire-and-forget reflection for Agent mode (ClaudeCode mode triggers its own).
         if matches!(self.execution, WorkerExecution::Agent { .. })
             && let Ok((ref result_text, _, _)) = raw_result
-            && let (Some(mem), Some(provider)) = (self.memory.clone(), self.reflect_provider.clone())
+            && let (Some(mem), Some(provider)) =
+                (self.memory.clone(), self.reflect_provider.clone())
         {
             let task_ctx = task_context.clone();
             let text = result_text.clone();
@@ -384,7 +401,8 @@ impl AgentWorker {
                     &format!("DONE: {}", result_text),
                     cost,
                     turns,
-                ).await;
+                )
+                .await;
                 {
                     let mut store = self.tasks.lock().await;
                     let _ = store.close(&hook.task_id.0, result_text);
@@ -393,7 +411,10 @@ impl AgentWorker {
                 self.state = WorkerState::Done;
             }
 
-            TaskOutcome::Blocked { question, full_text } => {
+            TaskOutcome::Blocked {
+                question,
+                full_text,
+            } => {
                 info!(
                     worker = %self.name,
                     task = %hook.task_id,
@@ -403,14 +424,21 @@ impl AgentWorker {
                 // Capture external checkpoint from git state before recording block.
                 self.capture_and_save_checkpoint(
                     &hook.task_id.0,
-                    Some(&format!("BLOCKED: {}\n\nWork so far:\n{}", question, full_text)),
+                    Some(&format!(
+                        "BLOCKED: {}\n\nWork so far:\n{}",
+                        question, full_text
+                    )),
                 );
                 self.save_checkpoint(
                     &hook.task_id.0,
-                    &format!("BLOCKED on: {}\n\nWork done so far:\n{}", question, full_text),
+                    &format!(
+                        "BLOCKED on: {}\n\nWork done so far:\n{}",
+                        question, full_text
+                    ),
                     cost,
                     turns,
-                ).await;
+                )
+                .await;
                 // Mark task as Blocked and preserve the question for Supervisor resolution.
                 {
                     let mut store = self.tasks.lock().await;
@@ -438,7 +466,8 @@ impl AgentWorker {
                     &format!("HANDOFF: {}", checkpoint),
                     cost,
                     turns,
-                ).await;
+                )
+                .await;
                 {
                     let mut store = self.tasks.lock().await;
                     let max_retries = self.max_task_retries;
@@ -484,7 +513,8 @@ impl AgentWorker {
                     &format!("FAILED: {}", error_text),
                     cost,
                     turns,
-                ).await;
+                )
+                .await;
                 let auto_cancelled = {
                     let mut store = self.tasks.lock().await;
                     let mut cancelled = false;
@@ -545,13 +575,7 @@ impl AgentWorker {
             ..Default::default()
         };
 
-        let mut agent = Agent::new(
-            agent_config,
-            provider,
-            tools,
-            observer,
-            identity.clone(),
-        );
+        let mut agent = Agent::new(agent_config, provider, tools, observer, identity.clone());
 
         if let Some(ref mem) = self.memory {
             agent = agent.with_memory(mem.clone());
@@ -606,8 +630,8 @@ impl AgentWorker {
         }
 
         let max_len = 8000;
-        let truncated = if transcript.len() > max_len {
-            &transcript[..max_len]
+        let truncated = if transcript.chars().count() > max_len {
+            Self::char_prefix(&transcript, max_len)
         } else {
             &transcript
         };
@@ -718,5 +742,14 @@ impl AgentWorker {
                 }
             }
         }
+    }
+
+    fn char_prefix(text: &str, max_chars: usize) -> &str {
+        let cut = text
+            .char_indices()
+            .nth(max_chars)
+            .map(|(idx, _)| idx)
+            .unwrap_or(text.len());
+        &text[..cut]
     }
 }

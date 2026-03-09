@@ -16,6 +16,9 @@ use std::sync::Mutex;
 #[serde(rename_all = "snake_case")]
 pub enum DecisionType {
     TaskAssigned,
+    TaskCompleted,
+    TaskBlocked,
+    TaskFailed,
     TaskEscalated,
     TaskRetried,
     TaskCancelled,
@@ -125,12 +128,17 @@ impl AuditLog {
                  ON sigil_decisions(timestamp);",
         )?;
 
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     /// Record a decision event.
     pub fn record(&self, event: &AuditEvent) -> Result<()> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
         let metadata_json = serde_json::to_string(&event.metadata).unwrap_or_default();
         let decision_type_str = event.decision_type.to_string();
 
@@ -152,7 +160,10 @@ impl AuditLog {
 
     /// Query events for a specific task.
     pub fn query_by_task(&self, task_id: &str) -> Result<Vec<AuditEvent>> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
         Self::query_events(
             &conn,
             "SELECT timestamp, project, task_id, decision_type, agent, reasoning, metadata_json
@@ -163,7 +174,10 @@ impl AuditLog {
 
     /// Query events for a specific project.
     pub fn query_by_project(&self, project: &str) -> Result<Vec<AuditEvent>> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
         Self::query_events(
             &conn,
             "SELECT timestamp, project, task_id, decision_type, agent, reasoning, metadata_json
@@ -174,7 +188,10 @@ impl AuditLog {
 
     /// Query the N most recent events.
     pub fn query_recent(&self, limit: u32) -> Result<Vec<AuditEvent>> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
         Self::query_events(
             &conn,
             "SELECT timestamp, project, task_id, decision_type, agent, reasoning, metadata_json
@@ -183,7 +200,11 @@ impl AuditLog {
         )
     }
 
-    fn query_events(conn: &Connection, sql: &str, params: impl rusqlite::Params) -> Result<Vec<AuditEvent>> {
+    fn query_events(
+        conn: &Connection,
+        sql: &str,
+        params: impl rusqlite::Params,
+    ) -> Result<Vec<AuditEvent>> {
         let mut stmt = conn.prepare(sql)?;
         let rows = stmt.query_map(params, |row| {
             let ts_str: String = row.get(0)?;
@@ -193,20 +214,29 @@ impl AuditLog {
             let agent: Option<String> = row.get(4)?;
             let reasoning: String = row.get(5)?;
             let metadata_json: String = row.get(6)?;
-            Ok((ts_str, project, task_id, decision_type_str, agent, reasoning, metadata_json))
+            Ok((
+                ts_str,
+                project,
+                task_id,
+                decision_type_str,
+                agent,
+                reasoning,
+                metadata_json,
+            ))
         })?;
 
         let mut events = Vec::new();
         for row in rows {
-            let (ts_str, project, task_id, decision_type_str, agent, reasoning, metadata_json) = row?;
+            let (ts_str, project, task_id, decision_type_str, agent, reasoning, metadata_json) =
+                row?;
             let timestamp = DateTime::parse_from_rfc3339(&ts_str)
                 .map(|dt| dt.with_timezone(&Utc))
                 .unwrap_or_else(|_| Utc::now());
-            let decision_type: DecisionType = serde_json::from_value(
-                serde_json::Value::String(decision_type_str.clone())
-            ).unwrap_or(DecisionType::RouteDecision);
-            let metadata: serde_json::Value = serde_json::from_str(&metadata_json)
-                .unwrap_or(serde_json::Value::Null);
+            let decision_type: DecisionType =
+                serde_json::from_value(serde_json::Value::String(decision_type_str.clone()))
+                    .unwrap_or(DecisionType::RouteDecision);
+            let metadata: serde_json::Value =
+                serde_json::from_str(&metadata_json).unwrap_or(serde_json::Value::Null);
 
             events.push(AuditEvent {
                 timestamp,
@@ -238,17 +268,30 @@ mod tests {
     fn test_audit_record_and_query_by_task() {
         let (log, _dir) = temp_audit();
 
-        log.record(&AuditEvent::new("proj-a", DecisionType::TaskAssigned, "best agent for domain")
+        log.record(
+            &AuditEvent::new(
+                "proj-a",
+                DecisionType::TaskAssigned,
+                "best agent for domain",
+            )
             .with_task("t-001")
-            .with_agent("worker-1")).unwrap();
+            .with_agent("worker-1"),
+        )
+        .unwrap();
 
-        log.record(&AuditEvent::new("proj-a", DecisionType::WorkerTimedOut, "exceeded 1800s")
-            .with_task("t-001")
-            .with_agent("worker-1")).unwrap();
+        log.record(
+            &AuditEvent::new("proj-a", DecisionType::WorkerTimedOut, "exceeded 1800s")
+                .with_task("t-001")
+                .with_agent("worker-1"),
+        )
+        .unwrap();
 
-        log.record(&AuditEvent::new("proj-a", DecisionType::TaskAssigned, "reassigned")
-            .with_task("t-002")
-            .with_agent("worker-2")).unwrap();
+        log.record(
+            &AuditEvent::new("proj-a", DecisionType::TaskAssigned, "reassigned")
+                .with_task("t-002")
+                .with_agent("worker-2"),
+        )
+        .unwrap();
 
         let events = log.query_by_task("t-001").unwrap();
         assert_eq!(events.len(), 2);
@@ -260,11 +303,20 @@ mod tests {
     fn test_audit_query_by_project() {
         let (log, _dir) = temp_audit();
 
-        log.record(&AuditEvent::new("proj-a", DecisionType::TaskAssigned, "assigned")
-            .with_task("t-001")).unwrap();
-        log.record(&AuditEvent::new("proj-b", DecisionType::BudgetBlocked, "over budget")).unwrap();
-        log.record(&AuditEvent::new("proj-a", DecisionType::TaskEscalated, "escalated")
-            .with_task("t-001")).unwrap();
+        log.record(
+            &AuditEvent::new("proj-a", DecisionType::TaskAssigned, "assigned").with_task("t-001"),
+        )
+        .unwrap();
+        log.record(&AuditEvent::new(
+            "proj-b",
+            DecisionType::BudgetBlocked,
+            "over budget",
+        ))
+        .unwrap();
+        log.record(
+            &AuditEvent::new("proj-a", DecisionType::TaskEscalated, "escalated").with_task("t-001"),
+        )
+        .unwrap();
 
         let events = log.query_by_project("proj-a").unwrap();
         assert_eq!(events.len(), 2);
@@ -279,8 +331,11 @@ mod tests {
         let (log, _dir) = temp_audit();
 
         for i in 0..10 {
-            log.record(&AuditEvent::new("proj", DecisionType::TaskAssigned, format!("event {i}"))
-                .with_task(format!("t-{i:03}"))).unwrap();
+            log.record(
+                &AuditEvent::new("proj", DecisionType::TaskAssigned, format!("event {i}"))
+                    .with_task(format!("t-{i:03}")),
+            )
+            .unwrap();
         }
 
         let events = log.query_recent(3).unwrap();

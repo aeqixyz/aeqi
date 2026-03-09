@@ -10,35 +10,35 @@ use tracing::{debug, info, warn};
 
 fn resolve_claude_binary() -> String {
     static CACHED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    CACHED.get_or_init(|| {
-        if let Ok(path) = std::process::Command::new("which")
-            .arg("claude")
-            .output()
-        {
-            let s = String::from_utf8_lossy(&path.stdout).trim().to_string();
-            if !s.is_empty() {
-                return s;
+    CACHED
+        .get_or_init(|| {
+            if let Ok(path) = std::process::Command::new("which").arg("claude").output() {
+                let s = String::from_utf8_lossy(&path.stdout).trim().to_string();
+                if !s.is_empty() {
+                    return s;
+                }
             }
-        }
-        for candidate in [
-            dirs::home_dir()
-                .map(|h| h.join(".local/bin/claude"))
-                .unwrap_or_default(),
-            PathBuf::from("/usr/local/bin/claude"),
-            PathBuf::from("/usr/bin/claude"),
-        ] {
-            if candidate.exists() {
-                return candidate.to_string_lossy().into_owned();
+            for candidate in [
+                dirs::home_dir()
+                    .map(|h| h.join(".local/bin/claude"))
+                    .unwrap_or_default(),
+                PathBuf::from("/usr/local/bin/claude"),
+                PathBuf::from("/usr/bin/claude"),
+            ] {
+                if candidate.exists() {
+                    return candidate.to_string_lossy().into_owned();
+                }
             }
-        }
-        "claude".to_string()
-    }).clone()
+            "claude".to_string()
+        })
+        .clone()
 }
 
 const INITIAL_RETRY_DELAY_MS: u64 = 1000;
 
-/// Callback invoked with accumulated cost during streaming execution.
-/// Return `false` to abort the execution immediately.
+/// Callback invoked with the latest known cost during execution.
+/// The current Claude stream surfaces cost on the final result event only.
+/// Return `false` to abort once that cost is known.
 pub type CostCallback = Arc<dyn Fn(f64) -> bool + Send + Sync>;
 
 /// Real-time progress from a streaming execution.
@@ -203,10 +203,10 @@ pub struct ClaudeCodeExecutor {
     pub child_pid: Arc<AtomicU32>,
     /// Max retries on transient failures.
     max_retries: u32,
-    /// Optional cost callback — invoked mid-execution with accumulated cost.
+    /// Optional cost callback — invoked when the stream reports cost.
     /// Return false to abort.
     cost_callback: Option<CostCallback>,
-    /// Optional progress sender — emits real-time progress during streaming.
+    /// Optional progress sender — emits tool/turn progress during streaming.
     progress_sender: Option<tokio::sync::watch::Sender<ExecutionProgress>>,
 }
 
@@ -235,7 +235,7 @@ impl ClaudeCodeExecutor {
         self
     }
 
-    /// Set a cost callback for mid-execution budget enforcement.
+    /// Set a cost callback for budget enforcement once the stream reports cost.
     pub fn with_cost_callback(mut self, cb: CostCallback) -> Self {
         self.cost_callback = Some(cb);
         self
@@ -243,7 +243,9 @@ impl ClaudeCodeExecutor {
 
     /// Set a progress sender for real-time execution visibility.
     /// Returns the watch receiver for the caller to subscribe to.
-    pub fn with_progress_channel(mut self) -> (Self, tokio::sync::watch::Receiver<ExecutionProgress>) {
+    pub fn with_progress_channel(
+        mut self,
+    ) -> (Self, tokio::sync::watch::Receiver<ExecutionProgress>) {
         let (tx, rx) = tokio::sync::watch::channel(ExecutionProgress::default());
         self.progress_sender = Some(tx);
         (self, rx)
@@ -300,7 +302,7 @@ impl ClaudeCodeExecutor {
     }
 
     /// Single execution attempt (no retry). Uses `--output-format stream-json`
-    /// for real-time cost enforcement and progress visibility.
+    /// for progress visibility and final-result cost inspection.
     async fn execute_once(
         &self,
         system_prompt: &str,
@@ -336,7 +338,9 @@ impl ClaudeCodeExecutor {
         unsafe {
             cmd.pre_exec(|| {
                 // setsid() creates a new session + process group.
-                unsafe extern "C" { fn setsid() -> i32; }
+                unsafe extern "C" {
+                    fn setsid() -> i32;
+                }
                 let _ = setsid();
                 Ok(())
             });
@@ -352,13 +356,16 @@ impl ClaudeCodeExecutor {
         let timeout_secs = (self.max_turns as u64 * 300).max(1800);
 
         // Spawn child and track its PID for process group kill.
-        let mut child = cmd.spawn()
+        let mut child = cmd
+            .spawn()
             .context("failed to spawn claude CLI — is it installed?")?;
         let pid = child.id().unwrap_or(0) as u32;
         self.child_pid.store(pid, Ordering::Relaxed);
 
         // Read stdout line-by-line for streaming events.
-        let stdout = child.stdout.take()
+        let stdout = child
+            .stdout
+            .take()
             .context("failed to capture stdout from claude CLI")?;
         let mut reader = BufReader::new(stdout).lines();
 
@@ -366,9 +373,8 @@ impl ClaudeCodeExecutor {
         let mut progress = ExecutionProgress::default();
         let mut aborted = false;
 
-        let stream_result = tokio::time::timeout(
-            std::time::Duration::from_secs(timeout_secs),
-            async {
+        let stream_result =
+            tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
                 while let Some(line) = reader.next_line().await? {
                     let line = line.trim().to_string();
                     if line.is_empty() {
@@ -383,8 +389,18 @@ impl ClaudeCodeExecutor {
                     };
 
                     match event {
-                        StreamEvent::Result { result, session_id, num_turns, total_cost_usd, duration_ms } => {
-                            let dur = if duration_ms > 0 { duration_ms } else { start.elapsed().as_millis() as u64 };
+                        StreamEvent::Result {
+                            result,
+                            session_id,
+                            num_turns,
+                            total_cost_usd,
+                            duration_ms,
+                        } => {
+                            let dur = if duration_ms > 0 {
+                                duration_ms
+                            } else {
+                                start.elapsed().as_millis() as u64
+                            };
                             final_result = Some(ExecutionResult {
                                 result_text: result,
                                 session_id,
@@ -400,7 +416,9 @@ impl ClaudeCodeExecutor {
                                 let _ = tx.send(progress.clone());
                             }
                         }
-                        StreamEvent::System { .. } | StreamEvent::Assistant { .. } | StreamEvent::ToolResult { .. } => {}
+                        StreamEvent::System { .. }
+                        | StreamEvent::Assistant { .. }
+                        | StreamEvent::ToolResult { .. } => {}
                     }
 
                     // Check cost callback on every event that might update cost.
@@ -408,7 +426,8 @@ impl ClaudeCodeExecutor {
                         progress.cost_so_far = result.total_cost_usd;
                     }
                     if let Some(ref cb) = self.cost_callback
-                        && progress.cost_so_far > 0.0 && !cb(progress.cost_so_far)
+                        && progress.cost_so_far > 0.0
+                        && !cb(progress.cost_so_far)
                     {
                         warn!(
                             cost_usd = progress.cost_so_far,
@@ -416,12 +435,15 @@ impl ClaudeCodeExecutor {
                         );
                         aborted = true;
                         Self::kill_process_group(pid);
-                        anyhow::bail!("execution aborted by cost callback at ${:.4}", progress.cost_so_far);
+                        anyhow::bail!(
+                            "execution aborted by cost callback at ${:.4}",
+                            progress.cost_so_far
+                        );
                     }
                 }
                 Ok::<(), anyhow::Error>(())
-            }
-        ).await;
+            })
+            .await;
 
         // Wait for the child process to exit.
         let status = child.wait().await;
@@ -434,7 +456,8 @@ impl ClaudeCodeExecutor {
                 Self::kill_process_group(pid);
                 anyhow::bail!(
                     "claude code timed out after {}s (max_turns={})",
-                    timeout_secs, self.max_turns,
+                    timeout_secs,
+                    self.max_turns,
                 );
             }
             Ok(Err(e)) => {
@@ -450,12 +473,10 @@ impl ClaudeCodeExecutor {
 
         // Check exit status — if we got no result event and the process failed, report it.
         if let Ok(status) = status
-            && !status.success() && final_result.is_none()
+            && !status.success()
+            && final_result.is_none()
         {
-            anyhow::bail!(
-                "claude code failed (exit {})",
-                status.code().unwrap_or(-1),
-            );
+            anyhow::bail!("claude code failed (exit {})", status.code().unwrap_or(-1),);
         }
 
         match final_result {
@@ -481,13 +502,19 @@ impl ClaudeCodeExecutor {
     /// Kill an entire process group by PID. Used on timeout to clean up
     /// Claude Code and any sub-processes it spawned.
     pub fn kill_process_group(pid: u32) {
-        if pid == 0 { return; }
+        if pid == 0 {
+            return;
+        }
         #[cfg(unix)]
         {
             // kill(-pid, SIGKILL) sends SIGKILL to the entire process group.
-            unsafe extern "C" { fn kill(pid: i32, sig: i32) -> i32; }
+            unsafe extern "C" {
+                fn kill(pid: i32, sig: i32) -> i32;
+            }
             const SIGKILL: i32 = 9;
-            unsafe { kill(-(pid as i32), SIGKILL); }
+            unsafe {
+                kill(-(pid as i32), SIGKILL);
+            }
             info!(pid, "killed process group");
         }
     }
@@ -496,24 +523,25 @@ impl ClaudeCodeExecutor {
     /// Kept for tests and potential non-streaming fallback.
     #[allow(dead_code)]
     fn parse_json_output(stdout: &str, duration_ms: u64) -> Result<ExecutionResult> {
-        let v: serde_json::Value = serde_json::from_str(stdout)
-            .context("failed to parse claude code JSON output")?;
+        let v: serde_json::Value =
+            serde_json::from_str(stdout).context("failed to parse claude code JSON output")?;
 
-        let result_text = v.get("result")
+        let result_text = v
+            .get("result")
             .and_then(|r| r.as_str())
             .unwrap_or("")
             .to_string();
 
-        let session_id = v.get("session_id")
+        let session_id = v
+            .get("session_id")
             .and_then(|s| s.as_str())
             .map(String::from);
 
-        let num_turns = v.get("num_turns")
-            .and_then(|n| n.as_u64())
-            .unwrap_or(0) as u32;
+        let num_turns = v.get("num_turns").and_then(|n| n.as_u64()).unwrap_or(0) as u32;
 
         let cost_missing = v.get("total_cost_usd").is_none();
-        let total_cost_usd = v.get("total_cost_usd")
+        let total_cost_usd = v
+            .get("total_cost_usd")
             .and_then(|c| c.as_f64())
             .unwrap_or(0.0);
 
@@ -585,16 +613,10 @@ impl TaskOutcome {
             // Extract everything after the first-line prefix as the blocker text.
             let after_prefix = if first_line == "BLOCKED:" {
                 // Prefix alone on first line — question is on subsequent lines.
-                trimmed
-                    .strip_prefix("BLOCKED:")
-                    .unwrap_or(trimmed)
-                    .trim()
+                trimmed.strip_prefix("BLOCKED:").unwrap_or(trimmed).trim()
             } else {
                 // Prefix + text on same line.
-                first_line
-                    .strip_prefix("BLOCKED:")
-                    .unwrap_or("")
-                    .trim()
+                first_line.strip_prefix("BLOCKED:").unwrap_or("").trim()
             };
             let question = after_prefix
                 .split("\n\n")
@@ -672,7 +694,8 @@ mod tests {
 
     #[test]
     fn test_worker_outcome_failed() {
-        let outcome = TaskOutcome::parse("FAILED:\ncargo build returned 3 errors in pms/src/main.rs");
+        let outcome =
+            TaskOutcome::parse("FAILED:\ncargo build returned 3 errors in pms/src/main.rs");
         assert!(matches!(outcome, TaskOutcome::Failed(_)));
     }
 
@@ -719,7 +742,12 @@ mod tests {
         let result = r#"{"type":"result","result":"done","session_id":"s1","num_turns":5,"total_cost_usd":0.12,"duration_ms":3000}"#;
         let event: StreamEvent = serde_json::from_str(result).unwrap();
         match event {
-            StreamEvent::Result { result, num_turns, total_cost_usd, .. } => {
+            StreamEvent::Result {
+                result,
+                num_turns,
+                total_cost_usd,
+                ..
+            } => {
                 assert_eq!(result, "done");
                 assert_eq!(num_turns, 5);
                 assert!((total_cost_usd - 0.12).abs() < f64::EPSILON);
@@ -732,7 +760,7 @@ mod tests {
     fn test_cost_callback_abort_logic() {
         // Verify the CostCallback type and closure behavior.
         let cb: CostCallback = Arc::new(|cost| cost < 1.0);
-        assert!(cb(0.5));  // under budget
+        assert!(cb(0.5)); // under budget
         assert!(!cb(1.5)); // over budget → should abort
     }
 
