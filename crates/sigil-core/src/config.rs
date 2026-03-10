@@ -1243,6 +1243,25 @@ impl SigilConfig {
         self.agents_with_role(AgentRole::Advisor)
     }
 
+    fn organization_contains_agent(org: &OrganizationConfig, agent_name: &str) -> bool {
+        org.roles.iter().any(|role| role.agent == agent_name)
+            || org.units.iter().any(|unit| {
+                unit.lead.as_deref() == Some(agent_name)
+                    || unit.members.iter().any(|member| member == agent_name)
+            })
+            || org
+                .relationships
+                .iter()
+                .any(|rel| rel.from == agent_name || rel.to == agent_name)
+            || org.rituals.iter().any(|ritual| {
+                ritual.owner == agent_name
+                    || ritual
+                        .participants
+                        .iter()
+                        .any(|participant| participant == agent_name)
+            })
+    }
+
     pub fn organization(&self, name: &str) -> Option<&OrganizationConfig> {
         self.organizations.iter().find(|org| org.name == name)
     }
@@ -1264,25 +1283,47 @@ impl SigilConfig {
             .and_then(|org| org.units.iter().find(|unit| unit.name == unit_name))
     }
 
-    pub fn agent_org_context(&self, agent_name: &str) -> Option<AgentOrgContext> {
-        let org = self.organizations.iter().find(|org| {
-            org.roles.iter().any(|role| role.agent == agent_name)
-                || org.units.iter().any(|unit| {
-                    unit.lead.as_deref() == Some(agent_name)
-                        || unit.members.iter().any(|member| member == agent_name)
-                })
-                || org
-                    .relationships
-                    .iter()
-                    .any(|rel| rel.from == agent_name || rel.to == agent_name)
-                || org.rituals.iter().any(|ritual| {
-                    ritual.owner == agent_name
-                        || ritual
-                            .participants
-                            .iter()
-                            .any(|participant| participant == agent_name)
-                })
-        })?;
+    pub fn organizations_for_agent(&self, agent_name: &str) -> Vec<&OrganizationConfig> {
+        self.organizations
+            .iter()
+            .filter(|org| Self::organization_contains_agent(org, agent_name))
+            .collect()
+    }
+
+    pub fn resolve_agent_organization(
+        &self,
+        agent_name: &str,
+        preferred_org: Option<&str>,
+    ) -> Option<&OrganizationConfig> {
+        if let Some(org_name) = preferred_org {
+            let org = self.organization(org_name)?;
+            return Self::organization_contains_agent(org, agent_name).then_some(org);
+        }
+
+        let organizations = self.organizations_for_agent(agent_name);
+        match organizations.len() {
+            0 => None,
+            1 => Some(organizations[0]),
+            _ => {
+                if let Some(default_org) = self.organizations.iter().find(|org| org.default)
+                    && organizations
+                        .iter()
+                        .any(|org| org.name.as_str() == default_org.name.as_str())
+                {
+                    Some(default_org)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    pub fn agent_org_context_for(
+        &self,
+        agent_name: &str,
+        preferred_org: Option<&str>,
+    ) -> Option<AgentOrgContext> {
+        let org = self.resolve_agent_organization(agent_name, preferred_org)?;
 
         let role = org.roles.iter().find(|role| role.agent == agent_name);
         let unit = role
@@ -1429,6 +1470,10 @@ impl SigilConfig {
         })
     }
 
+    pub fn agent_org_context(&self, agent_name: &str) -> Option<AgentOrgContext> {
+        self.agent_org_context_for(agent_name, None)
+    }
+
     /// Resolve a repo key to a path. If the key exists in `[repos]`, return that.
     /// Otherwise treat it as a raw path.
     pub fn resolve_repo(&self, key: &str) -> PathBuf {
@@ -1540,8 +1585,6 @@ impl SigilConfig {
     pub fn validate_organizations(&self) -> Vec<String> {
         let mut errors = Vec::new();
         let mut org_names = std::collections::HashSet::new();
-        let mut memberships: std::collections::HashMap<String, std::collections::HashSet<String>> =
-            std::collections::HashMap::new();
         let agent_names: std::collections::HashSet<&str> = self
             .agents
             .iter()
@@ -1583,17 +1626,7 @@ impl SigilConfig {
                         org.name, unit.name, lead
                     ));
                 }
-                if let Some(ref lead) = unit.lead {
-                    memberships
-                        .entry(lead.clone())
-                        .or_default()
-                        .insert(org.name.clone());
-                }
                 for member in &unit.members {
-                    memberships
-                        .entry(member.clone())
-                        .or_default()
-                        .insert(org.name.clone());
                     if !agent_names.is_empty() && !agent_names.contains(member.as_str()) {
                         errors.push(format!(
                             "organization '{}' unit '{}' references unknown member '{}'",
@@ -1604,10 +1637,6 @@ impl SigilConfig {
             }
 
             for role in &org.roles {
-                memberships
-                    .entry(role.agent.clone())
-                    .or_default()
-                    .insert(org.name.clone());
                 if !agent_names.is_empty() && !agent_names.contains(role.agent.as_str()) {
                     errors.push(format!(
                         "organization '{}' role '{}' references unknown agent '{}'",
@@ -1626,10 +1655,6 @@ impl SigilConfig {
 
             for rel in &org.relationships {
                 for endpoint in [&rel.from, &rel.to] {
-                    memberships
-                        .entry(endpoint.clone())
-                        .or_default()
-                        .insert(org.name.clone());
                     if !agent_names.is_empty() && !agent_names.contains(endpoint.as_str()) {
                         errors.push(format!(
                             "organization '{}' relationship references unknown agent '{}'",
@@ -1640,10 +1665,6 @@ impl SigilConfig {
             }
 
             for ritual in &org.rituals {
-                memberships
-                    .entry(ritual.owner.clone())
-                    .or_default()
-                    .insert(org.name.clone());
                 if !agent_names.is_empty() && !agent_names.contains(ritual.owner.as_str()) {
                     errors.push(format!(
                         "organization '{}' ritual '{}' references unknown owner '{}'",
@@ -1651,10 +1672,6 @@ impl SigilConfig {
                     ));
                 }
                 for participant in &ritual.participants {
-                    memberships
-                        .entry(participant.clone())
-                        .or_default()
-                        .insert(org.name.clone());
                     if !agent_names.is_empty() && !agent_names.contains(participant.as_str()) {
                         errors.push(format!(
                             "organization '{}' ritual '{}' references unknown participant '{}'",
@@ -1662,18 +1679,6 @@ impl SigilConfig {
                         ));
                     }
                 }
-            }
-        }
-
-        for (agent, orgs) in memberships {
-            if orgs.len() > 1 {
-                let mut orgs = orgs.into_iter().collect::<Vec<_>>();
-                orgs.sort();
-                errors.push(format!(
-                    "agent '{}' appears in multiple organizations: {}",
-                    agent,
-                    orgs.join(", ")
-                ));
             }
         }
 
@@ -2452,7 +2457,7 @@ title = "Leader"
     }
 
     #[test]
-    fn test_validate_organizations_flags_ambiguous_membership() {
+    fn test_agent_org_context_uses_preferred_org_when_membership_is_ambiguous() {
         let toml = r#"
 [sigil]
 name = "test"
@@ -2477,12 +2482,47 @@ name = "shadow"
 agent = "leader"
 title = "Backup Leader"
 "#;
-        let issues = SigilConfig::parse(toml).unwrap().validate_organizations();
-        assert!(
-            issues
-                .iter()
-                .any(|issue| issue.contains("appears in multiple organizations")),
-            "expected ambiguous membership issue: {issues:?}"
+        let config = SigilConfig::parse(toml).unwrap();
+        assert!(config.agent_org_context("leader").is_some());
+        let shadow = config
+            .agent_org_context_for("leader", Some("shadow"))
+            .expect("expected shadow org context");
+        assert_eq!(shadow.organization, "shadow");
+        assert_eq!(shadow.title.as_deref(), Some("Backup Leader"));
+    }
+
+    #[test]
+    fn test_agent_org_context_does_not_guess_without_default_or_preference() {
+        let toml = r#"
+[sigil]
+name = "test"
+
+[[agents]]
+name = "leader"
+prefix = "ld"
+role = "orchestrator"
+
+[[organizations]]
+name = "core"
+
+[[organizations.roles]]
+agent = "leader"
+title = "Leader"
+
+[[organizations]]
+name = "shadow"
+
+[[organizations.roles]]
+agent = "leader"
+title = "Backup Leader"
+"#;
+        let config = SigilConfig::parse(toml).unwrap();
+        assert!(config.agent_org_context("leader").is_none());
+        assert_eq!(
+            config
+                .agent_org_context_for("leader", Some("shadow"))
+                .and_then(|ctx| ctx.title),
+            Some("Backup Leader".to_string())
         );
     }
 

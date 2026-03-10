@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
-use crate::helpers::load_config_with_agents;
+use crate::helpers::{format_project_org_hint, load_config_with_agents};
 
 pub(crate) async fn cmd_team(
     config_path: &Option<PathBuf>,
@@ -42,24 +42,7 @@ pub(crate) async fn cmd_team(
         } else {
             "system fallback"
         };
-        let org_hint = project_cfg
-            .team
-            .as_ref()
-            .map(|team| {
-                let resolved_org = team.org.clone().or_else(|| {
-                    team.unit
-                        .as_deref()
-                        .and_then(|_| config.resolve_organization(None))
-                        .map(|org| org.name.clone())
-                });
-                match (resolved_org, team.unit.as_deref()) {
-                    (Some(org), Some(unit)) => format!(" org={org} unit={unit}"),
-                    (Some(org), None) => format!(" org={org}"),
-                    (None, Some(unit)) => format!(" unit={unit}"),
-                    (None, None) => String::new(),
-                }
-            })
-            .unwrap_or_default();
+        let org_hint = format_project_org_hint(&config, &project_cfg.name);
         println!(
             "  {} → leader={} agents=[{}] ({}){}",
             project_cfg.name,

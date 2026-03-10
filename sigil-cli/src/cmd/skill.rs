@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use crate::cli::SkillAction;
 use crate::helpers::{
-    augment_identity_with_org_context, build_project_tools, build_provider, find_project_dir,
-    load_config, open_memory,
+    augment_identity_with_org_context, build_project_tools, build_provider_for_project,
+    find_agent_dir, find_project_dir, load_config, one_shot_agent_name, open_memory,
 };
 
 fn discover_project_skills(project_dir: &Path) -> Result<Vec<Skill>> {
@@ -83,7 +83,7 @@ pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction
                 .context(format!("skill not found: {name}"))?;
 
             // Build provider.
-            let provider = build_provider(&config)?;
+            let provider = build_provider_for_project(&config, &project)?;
             let workdir = PathBuf::from(&project_cfg.repo);
             let tasks_dir = project_dir.join(".tasks");
             let worktree_root = project_cfg.worktree_root.as_ref().map(PathBuf::from);
@@ -101,11 +101,15 @@ pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction
                 .collect();
 
             // Build identity with skill system prompt.
-            let identity = Identity::load_from_dir(&project_dir).unwrap_or_default();
+            let execution_agent = one_shot_agent_name(&config, Some(&project));
+            let identity = find_agent_dir(&execution_agent)
+                .ok()
+                .map(|agent_dir| Identity::load(&agent_dir, Some(&project_dir)).unwrap_or_default())
+                .unwrap_or_else(|| Identity::load_from_dir(&project_dir).unwrap_or_default());
             let identity = augment_identity_with_org_context(
                 &config,
                 identity,
-                Some(config.leader()),
+                Some(&execution_agent),
                 Some(&project),
             );
             let base_prompt = identity.system_prompt();

@@ -46,7 +46,7 @@ CLI command
 
 Key properties:
 
-- Provider selection follows the configured runtime preset in `sigil-cli/src/helpers.rs`
+- Provider selection follows the project runtime for project-scoped one-shot runs, or the standalone leader/runtime when no project is selected
 - Tool execution happens inside Sigil, not through Claude Code
 - Memory recall is injected into the system prompt before the loop starts
 - This path is the simplest way to work on providers, tools, identity, and memory behavior
@@ -157,6 +157,8 @@ At runtime, Sigil resolves:
 - org-linked project teams through `team.org` and `team.unit`
 - per-agent org context through roles, unit membership, relationships, and ritual participation
 - hierarchy-aware prompt context via the identity `operational` section
+
+If an agent belongs to multiple organizations, Sigil now prefers the explicitly bound project org, otherwise the default organization when that agent is a member, and otherwise omits single-org context instead of picking an arbitrary first match.
 
 That gives the current runtime a native way to express leaders, peers, direct reports, advisors, reviewers, and escalation paths without hardcoding a specific org chart into the core.
 

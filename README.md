@@ -11,7 +11,7 @@ Sigil currently has two real execution paths:
 
 - 8 crates in one Cargo workspace
 - 25 top-level CLI commands
-- 212 unit tests passing with `cargo test --workspace`
+- 214 unit tests passing with `cargo test --workspace`
 - `cargo clippy --workspace --all-targets -- -D warnings` clean
 - Implemented subsystems: task DAGs, missions, operations, memory, audit log, blackboard, schedules, watchdogs, project teams, organization kernel config, Telegram ingress, Claude Code worker execution
 
@@ -65,8 +65,8 @@ sigil daemon query metrics
 `sigil run` uses the internal `sigil-core` agent loop:
 
 1. Load `sigil.toml`
-2. Build provider and tool set
-3. Load identity from `agents/` and `projects/`
+2. Build the provider from the selected project runtime, or from the standalone leader/runtime when no project is selected
+3. Load identity from the project team leader plus `projects/` context when a project is selected
 4. Optionally attach SQLite memory
 5. Run the LLM loop until there are no more tool calls
 
@@ -98,6 +98,8 @@ Sigil now has a first-class organization model in `sigil.toml`:
 - `[[organizations.rituals]]`: recurring reviews, planning loops, incident cadences
 
 Project teams can bind to an org unit with `team.org` and `team.unit`. Agent identity assembly now injects organizational context, so leaders, peers, advisors, direct reports, and rituals are visible in the system prompt for `sigil run`, `sigil skill run`, and daemon-supervised workers.
+
+If an agent belongs to multiple organizations, Sigil now resolves org context explicitly: project-bound runs prefer `team.org`, otherwise the default organization is used when that agent belongs to it, and Sigil refuses to guess when neither choice is available.
 
 Use these operator surfaces to inspect the model:
 

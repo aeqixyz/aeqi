@@ -350,51 +350,65 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                                         let tg_reply = tg.clone();
                                         let reaction_api_key =
                                             get_api_key(&config).unwrap_or_default();
-                                        // Shared HTTP client for Phase 1 reactions (reuses connection pool).
-                                        let phase1_client = Arc::new(
-                                            reqwest::Client::builder()
-                                                .timeout(std::time::Duration::from_secs(15))
-                                                .build()
-                                                .expect("failed to build phase1 reqwest client"),
-                                        );
                                         // Persistent conversation history per chat_id (SQLite-backed).
                                         let conv_db_path = find_agent_dir(&leader_name)
                                             .unwrap_or_else(|_| PathBuf::from("agents/aurelia"))
                                             .join(".sigil")
                                             .join("conversations.db");
-                                        let conversations: Arc<ConversationStore> = Arc::new(
-                                            ConversationStore::open(&conv_db_path)
-                                                .expect("failed to open conversation store"),
-                                        );
-                                        // Pre-compute council config outside the spawn closure.
-                                        let council_advisors: Arc<
-                                            Vec<sigil_core::config::PeerAgentConfig>,
-                                        > = Arc::new(
-                                            config.advisor_agents().into_iter().cloned().collect(),
-                                        );
-                                        let advisor_bots_outer = advisor_bots.clone();
-                                        let debounce_ms = tg_config.debounce_window_ms;
-                                        let fa_task_notify_tg = fa_task_notify.clone();
-                                        let leader_name_tg = leader_name.clone();
-                                        let agent_router_tg = agent_router.clone();
-                                        tokio::spawn(async move {
-                                            telegram_message_loop(
-                                                &mut rx,
-                                                reg,
-                                                tg_reply,
-                                                reaction_api_key,
-                                                phase1_client,
-                                                conversations,
-                                                council_advisors,
-                                                advisor_bots_outer,
-                                                debounce_ms,
-                                                fa_task_notify_tg,
-                                                leader_name_tg,
-                                                agent_router_tg,
-                                            )
-                                            .await;
-                                        });
-                                        info!("Telegram channel active");
+                                        let phase1_client = reqwest::Client::builder()
+                                            .timeout(std::time::Duration::from_secs(15))
+                                            .build();
+                                        let conversations = ConversationStore::open(&conv_db_path);
+                                        match (phase1_client, conversations) {
+                                            (Ok(phase1_client), Ok(conversations)) => {
+                                                // Pre-compute council config outside the spawn closure.
+                                                let council_advisors: Arc<
+                                                    Vec<sigil_core::config::PeerAgentConfig>,
+                                                > = Arc::new(
+                                                    config
+                                                        .advisor_agents()
+                                                        .into_iter()
+                                                        .cloned()
+                                                        .collect(),
+                                                );
+                                                let advisor_bots_outer = advisor_bots.clone();
+                                                let debounce_ms = tg_config.debounce_window_ms;
+                                                let fa_task_notify_tg = fa_task_notify.clone();
+                                                let leader_name_tg = leader_name.clone();
+                                                let agent_router_tg = agent_router.clone();
+                                                tokio::spawn(async move {
+                                                    telegram_message_loop(
+                                                        &mut rx,
+                                                        reg,
+                                                        tg_reply,
+                                                        reaction_api_key,
+                                                        Arc::new(phase1_client),
+                                                        Arc::new(conversations),
+                                                        council_advisors,
+                                                        advisor_bots_outer,
+                                                        debounce_ms,
+                                                        fa_task_notify_tg,
+                                                        leader_name_tg,
+                                                        agent_router_tg,
+                                                    )
+                                                    .await;
+                                                });
+                                                info!("Telegram channel active");
+                                            }
+                                            (Err(e), _) => {
+                                                warn!(
+                                                    error = %e,
+                                                    "failed to build phase1 reqwest client; telegram polling disabled"
+                                                );
+                                            }
+                                            (_, Err(e)) => {
+                                                warn!(
+                                                    error = %e,
+                                                    path = %conv_db_path.display(),
+                                                    "failed to open conversation store; telegram polling disabled"
+                                                );
+                                            }
+                                        }
                                     }
                                     Err(e) => {
                                         warn!(error = %e, "failed to start Telegram polling")
@@ -416,7 +430,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             let leader_cfg = config
                 .leader_agent()
                 .cloned()
-                .expect("no leader agent configured");
+                .context("no leader agent configured")?;
             let fa_agent_dir =
                 find_agent_dir(&leader_name).unwrap_or_else(|_| PathBuf::from("agents/aurelia"));
             let fa_identity = augment_identity_with_org_context(

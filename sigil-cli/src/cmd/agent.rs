@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
-use crate::helpers::{load_config, resolve_agents_dir, role_str};
+use crate::helpers::{format_agent_org_hint, load_config, resolve_agents_dir, role_str};
 
 pub(crate) async fn cmd_agent(
     config_path: &Option<PathBuf>,
@@ -40,19 +40,7 @@ pub(crate) async fn cmd_agent(
 
             println!("Discovered Agents ({}):\n", all_agents.len());
             for (name, source, role) in &all_agents {
-                let org_hint = config
-                    .agent_org_context(name)
-                    .map(|ctx| {
-                        let mut parts = vec![format!("org={}", ctx.organization)];
-                        if let Some(unit) = ctx.unit {
-                            parts.push(format!("unit={unit}"));
-                        }
-                        if let Some(title) = ctx.title {
-                            parts.push(format!("title={title}"));
-                        }
-                        format!(" {}", parts.join(" "))
-                    })
-                    .unwrap_or_default();
+                let org_hint = format_agent_org_hint(&config, name);
                 println!("  {name:<15} role={role:<12} source={source}{org_hint}");
             }
         }

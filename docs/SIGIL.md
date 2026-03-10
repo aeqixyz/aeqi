@@ -7,7 +7,7 @@ This is the live reference for the Sigil workspace as it exists today.
 - Cargo workspace with 8 crates
 - CLI binary in `sigil-cli/`
 - 25 top-level CLI commands
-- 212 unit tests currently passing
+- 214 unit tests currently passing
 
 ## Command Surface
 
@@ -32,7 +32,7 @@ This is the live reference for the Sigil workspace as it exists today.
 
 Notes:
 
-- `sigil run` uses the internal agent loop
+- `sigil run` uses the internal agent loop and selects the project runtime when `--project` is set
 - `sigil skill run` also uses the internal agent loop, but filters tools by the selected skill policy
 
 ### Task and Mission Flow
@@ -185,6 +185,12 @@ Sigil now also appends organizational context when an agent is mapped into an `[
 - recurring rituals the agent owns or participates in
 
 The intent is to keep the core modular: Sigil models graphs of responsibility and communication, not just a fixed CEO/CTO hierarchy.
+
+When an agent participates in more than one organization, Sigil resolves org context in this order:
+
+- explicit project binding through `team.org`
+- default organization, if the agent belongs to it
+- otherwise no single org context is injected, rather than guessing
 
 ## Persistence
 
