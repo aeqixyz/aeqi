@@ -5,9 +5,12 @@ use std::path::PathBuf;
 use crate::cli::OperationAction;
 use crate::helpers::load_config;
 
-pub(crate) async fn cmd_operation(config_path: &Option<PathBuf>, action: OperationAction) -> Result<()> {
+pub(crate) async fn cmd_operation(
+    config_path: &Option<PathBuf>,
+    action: OperationAction,
+) -> Result<()> {
     let (config, _) = load_config(config_path)?;
-    let operations_path = config.data_dir().join("raids.json");
+    let operations_path = config.data_dir().join("operations.json");
 
     match action {
         OperationAction::Create { name, task_ids } => {

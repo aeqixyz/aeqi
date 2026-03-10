@@ -11,6 +11,8 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
 use tracing::{debug, info, warn};
 
+use crate::audit::AuditLog;
+use crate::blackboard::Blackboard;
 use crate::checkpoint::AgentCheckpoint;
 use crate::executor::{ClaudeCodeExecutor, TaskOutcome};
 use crate::hook::Hook;
@@ -58,6 +60,14 @@ pub struct AgentWorker {
     pub project_dir: Option<PathBuf>,
     /// Max task retries (handoff/failure) before auto-cancel.
     pub max_task_retries: u32,
+    /// Optional shared blackboard for adaptive retry strategies.
+    pub blackboard: Option<Arc<Blackboard>>,
+    /// Optional audit log for recording retry analysis.
+    pub audit_log: Option<Arc<AuditLog>>,
+    /// Whether adaptive retry is enabled for this worker.
+    pub adaptive_retry: bool,
+    /// Model used for failure analysis when adaptive retry is enabled.
+    pub failure_analysis_model: String,
 }
 
 impl AgentWorker {
@@ -93,6 +103,10 @@ impl AgentWorker {
             reflect_model,
             project_dir: None,
             max_task_retries: 3,
+            blackboard: None,
+            audit_log: None,
+            adaptive_retry: false,
+            failure_analysis_model: String::new(),
         }
     }
 
@@ -121,6 +135,10 @@ impl AgentWorker {
             reflect_model: String::new(),
             project_dir,
             max_task_retries: 3,
+            blackboard: None,
+            audit_log: None,
+            adaptive_retry: false,
+            failure_analysis_model: String::new(),
         }
     }
 
@@ -142,6 +160,12 @@ impl AgentWorker {
 
     pub fn with_max_task_retries(mut self, max_retries: u32) -> Self {
         self.max_task_retries = max_retries;
+        self
+    }
+
+    pub fn with_adaptive_retry(mut self, model: String) -> Self {
+        self.adaptive_retry = true;
+        self.failure_analysis_model = model;
         self
     }
 

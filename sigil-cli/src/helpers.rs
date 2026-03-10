@@ -195,8 +195,8 @@ pub(crate) fn project_name_for_prefix(config: &SigilConfig, prefix: &str) -> Opt
 }
 
 pub(crate) fn open_tasks_for_project(project_name: &str) -> Result<TaskBoard> {
-    let project_dir = find_project_dir(project_name)?;
-    let tasks_dir = project_dir.join(".tasks");
+    let owner_dir = find_project_dir(project_name).or_else(|_| find_agent_dir(project_name))?;
+    let tasks_dir = owner_dir.join(".tasks");
     TaskBoard::open(&tasks_dir)
 }
 
@@ -261,7 +261,7 @@ pub(crate) async fn handle_fast_lane(text: &str, reg: &Arc<ProjectRegistry>) -> 
              /help — This message"
             .to_string(),
         "/cost" => {
-            "Cost tracking: use `sigil cost` from CLI for detailed breakdown.".to_string()
+            "Cost tracking: use `/cost` here or `sigil daemon query cost` from CLI.".to_string()
         }
         _ => format!("Unknown fast-lane command: {cmd}"),
     }

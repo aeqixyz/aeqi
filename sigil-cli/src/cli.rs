@@ -24,6 +24,9 @@ pub enum Commands {
         /// Auto-fix detected issues.
         #[arg(long)]
         fix: bool,
+        /// Exit with a non-zero status if any issues remain.
+        #[arg(long)]
+        strict: bool,
     },
     /// Show system status.
     Status,
@@ -123,10 +126,7 @@ pub enum Commands {
 
     // --- Worker management ---
     /// Pin work to a worker.
-    Hook {
-        worker: String,
-        task_id: String,
-    },
+    Hook { worker: String, task_id: String },
     /// Mark task as done, trigger cleanup.
     Done {
         task_id: String,
@@ -244,7 +244,7 @@ pub enum DaemonAction {
     Status,
     /// Query the running daemon via IPC socket.
     Query {
-        /// Command to send (ping, status, projects, dispatches).
+        /// Command to send (ping, status, readiness, projects, dispatches, cost, metrics, audit, blackboard, expertise).
         cmd: String,
     },
 }
@@ -331,13 +331,9 @@ pub enum MissionAction {
         all: bool,
     },
     /// Show mission details and its tasks.
-    Status {
-        id: String,
-    },
+    Status { id: String },
     /// Close a mission.
-    Close {
-        id: String,
-    },
+    Close { id: String },
 }
 
 #[derive(Subcommand)]
@@ -357,7 +353,5 @@ pub enum PipelineAction {
         project: Option<String>,
     },
     /// Show status of a pipeline (parent task and its children).
-    Status {
-        id: String,
-    },
+    Status { id: String },
 }

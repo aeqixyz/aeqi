@@ -5,10 +5,7 @@ use std::path::PathBuf;
 use crate::cli::ConfigAction;
 use crate::helpers::{load_config, pid_file_path};
 
-pub(crate) async fn cmd_config(
-    config_path: &Option<PathBuf>,
-    action: ConfigAction,
-) -> Result<()> {
+pub(crate) async fn cmd_config(config_path: &Option<PathBuf>, action: ConfigAction) -> Result<()> {
     match action {
         ConfigAction::Show => {
             let (config, path) = load_config(config_path)?;
@@ -65,9 +62,7 @@ pub(crate) async fn cmd_config(
             let pid_path = pid_file_path(&config);
 
             if !Daemon::is_running_from_pid(&pid_path) {
-                println!(
-                    "No daemon running. Config will be loaded on next `sg daemon start`."
-                );
+                println!("No daemon running. Config will be loaded on next `sigil daemon start`.");
                 return Ok(());
             }
 
@@ -89,9 +84,7 @@ pub(crate) async fn cmd_config(
             }
             #[cfg(not(unix))]
             {
-                println!(
-                    "Config reload not supported on this platform. Restart the daemon."
-                );
+                println!("Config reload not supported on this platform. Restart the daemon.");
             }
         }
     }

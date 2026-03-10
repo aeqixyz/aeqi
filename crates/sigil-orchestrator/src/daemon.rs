@@ -8,7 +8,7 @@ use tracing::{debug, info, warn};
 
 use crate::heartbeat::Heartbeat;
 use crate::lifecycle::LifecycleEngine;
-use crate::message::{Dispatch, DispatchBus};
+use crate::message::{Dispatch, DispatchBus, DispatchHealth};
 use crate::reflection::Reflection;
 use crate::registry::ProjectRegistry;
 use crate::schedule::ScheduleStore;
@@ -16,6 +16,14 @@ use crate::session_tracker::SessionTracker;
 use crate::watchdog::WatchdogEngine;
 
 const ACK_RETRY_AGE_SECS: u64 = 60;
+
+#[derive(Debug, Clone, Default)]
+struct ReadinessContext {
+    configured_projects: usize,
+    configured_advisors: usize,
+    skipped_projects: Vec<String>,
+    skipped_advisors: Vec<String>,
+}
 
 /// The Daemon: background process that runs the ProjectRegistry patrol loop,
 /// pulses, and cron jobs.
@@ -34,6 +42,7 @@ pub struct Daemon {
     running: Arc<std::sync::atomic::AtomicBool>,
     config_reloaded: Arc<std::sync::atomic::AtomicBool>,
     shutdown_notify: Arc<tokio::sync::Notify>,
+    readiness: ReadinessContext,
 }
 
 impl Daemon {
@@ -53,6 +62,7 @@ impl Daemon {
             running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             config_reloaded: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             shutdown_notify: Arc::new(tokio::sync::Notify::new()),
+            readiness: ReadinessContext::default(),
         }
     }
 
@@ -109,6 +119,21 @@ impl Daemon {
     /// Set a Unix socket path for IPC.
     pub fn set_socket_path(&mut self, path: PathBuf) {
         self.socket_path = Some(path);
+    }
+
+    pub fn set_readiness_context(
+        &mut self,
+        configured_projects: usize,
+        configured_advisors: usize,
+        skipped_projects: Vec<String>,
+        skipped_advisors: Vec<String>,
+    ) {
+        self.readiness = ReadinessContext {
+            configured_projects,
+            configured_advisors,
+            skipped_projects,
+            skipped_advisors,
+        };
     }
 
     /// Write PID file.
@@ -204,6 +229,7 @@ impl Daemon {
                     let pulse_count = self.pulses.len();
                     let cron_store = self.cron_store.clone();
                     let running = self.running.clone();
+                    let readiness = self.readiness.clone();
                     info!(path = %sock_path.display(), "IPC socket listening");
                     tokio::spawn(async move {
                         Self::socket_accept_loop(
@@ -213,6 +239,7 @@ impl Daemon {
                             pulse_count,
                             cron_store,
                             running,
+                            readiness,
                         )
                         .await;
                     });
@@ -366,10 +393,23 @@ impl Daemon {
                                 s.max_description_chars = proj_orch.max_description_chars;
                                 s.max_task_retries = proj_orch.max_task_retries;
 
+                                // V3 feature flags.
+                                s.expertise_routing = orch.expertise_routing;
+                                s.preflight_enabled = orch.preflight_enabled;
+                                s.preflight_model = orch.preflight_model.clone();
+                                s.preflight_max_cost_usd = orch.preflight_max_cost_usd;
+                                s.adaptive_retry = orch.adaptive_retry;
+                                s.failure_analysis_model = orch.failure_analysis_model.clone();
+                                s.auto_redecompose = orch.auto_redecompose;
+                                s.decomposition_model = orch.decomposition_model.clone();
+
                                 debug!(
                                     project = %pcfg.name,
                                     max_workers = s.max_workers,
                                     max_retries = s.max_task_retries,
+                                    expertise_routing = s.expertise_routing,
+                                    preflight = s.preflight_enabled,
+                                    adaptive_retry = s.adaptive_retry,
                                     "supervisor config updated via SIGHUP"
                                 );
                             }
@@ -451,7 +491,7 @@ impl Daemon {
                 warn!(error = %e, "failed to prune blackboard");
             }
 
-            // 12. Evaluate watchdog rules.
+            // 12. Evaluate watchdog rules and execute fired actions.
             if let Some(ref mut watchdog) = self.watchdog
                 && let Some(ref audit) = self.registry.audit_log
             {
@@ -462,8 +502,111 @@ impl Daemon {
                     None
                 };
                 let fired = watchdog.evaluate(audit, budget_pct);
-                for (name, _action) in &fired {
+                for (name, action) in &fired {
                     info!(rule = %name, "watchdog rule fired");
+
+                    // Record audit event.
+                    let _ = audit.record(
+                        &crate::audit::AuditEvent::new(
+                            "*",
+                            crate::audit::DecisionType::WatchdogFired,
+                            format!("Rule '{}' fired", name),
+                        )
+                        .with_metadata(serde_json::json!({"action": format!("{action:?}")})),
+                    );
+
+                    // Execute the action.
+                    match action {
+                        crate::watchdog::WatchdogAction::CreateTask {
+                            project,
+                            subject,
+                            description,
+                        } => match self.registry.assign(project, subject, description).await {
+                            Ok(task) => {
+                                info!(
+                                    rule = %name,
+                                    task = %task.id,
+                                    project = %project,
+                                    "watchdog created task"
+                                );
+                            }
+                            Err(e) => {
+                                warn!(
+                                    rule = %name,
+                                    project = %project,
+                                    error = %e,
+                                    "watchdog failed to create task"
+                                );
+                            }
+                        },
+                        crate::watchdog::WatchdogAction::SendDispatch { to, message } => {
+                            self.dispatch_bus
+                                .send(crate::message::Dispatch::new_typed(
+                                    "watchdog",
+                                    to,
+                                    crate::message::DispatchKind::Escalation {
+                                        project: "*".to_string(),
+                                        task_id: String::new(),
+                                        subject: format!("[watchdog] {name}"),
+                                        description: message.clone(),
+                                        attempts: 0,
+                                    },
+                                ))
+                                .await;
+                            info!(rule = %name, to = %to, "watchdog sent dispatch");
+                        }
+                        crate::watchdog::WatchdogAction::Escalate { message } => {
+                            self.dispatch_bus
+                                .send(crate::message::Dispatch::new_typed(
+                                    "watchdog",
+                                    &self.registry.leader_agent_name,
+                                    crate::message::DispatchKind::Escalation {
+                                        project: "*".to_string(),
+                                        task_id: String::new(),
+                                        subject: format!("[watchdog] {name}"),
+                                        description: message.clone(),
+                                        attempts: 0,
+                                    },
+                                ))
+                                .await;
+                            info!(rule = %name, "watchdog escalated to leader");
+                        }
+                        crate::watchdog::WatchdogAction::PauseProject { project } => {
+                            if let Some(sup) = self.registry.get_supervisor(project).await {
+                                let mut s = sup.lock().await;
+                                s.paused = true;
+                                info!(
+                                    rule = %name,
+                                    project = %project,
+                                    "watchdog paused project"
+                                );
+                            }
+                        }
+                        crate::watchdog::WatchdogAction::RunCommand { command } => {
+                            info!(rule = %name, command = %command, "watchdog executing command");
+                            match tokio::process::Command::new("sh")
+                                .arg("-c")
+                                .arg(command)
+                                .status()
+                                .await
+                            {
+                                Ok(status) => {
+                                    info!(
+                                        rule = %name,
+                                        status = %status,
+                                        "watchdog command completed"
+                                    );
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        rule = %name,
+                                        error = %e,
+                                        "watchdog command failed"
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -499,6 +642,7 @@ impl Daemon {
         pulse_count: usize,
         cron_store: Option<Arc<Mutex<ScheduleStore>>>,
         running: Arc<std::sync::atomic::AtomicBool>,
+        readiness: ReadinessContext,
     ) {
         loop {
             if !running.load(std::sync::atomic::Ordering::SeqCst) {
@@ -509,6 +653,7 @@ impl Daemon {
                     let registry = registry.clone();
                     let dispatch_bus = dispatch_bus.clone();
                     let cron_store = cron_store.clone();
+                    let readiness = readiness.clone();
                     tokio::spawn(async move {
                         if let Err(e) = Self::handle_socket_connection(
                             stream,
@@ -516,6 +661,7 @@ impl Daemon {
                             dispatch_bus,
                             pulse_count,
                             cron_store,
+                            readiness,
                         )
                         .await
                         {
@@ -539,6 +685,7 @@ impl Daemon {
         dispatch_bus: Arc<DispatchBus>,
         pulse_count: usize,
         cron_store: Option<Arc<Mutex<ScheduleStore>>>,
+        readiness: ReadinessContext,
     ) -> Result<()> {
         let (reader, mut writer) = stream.into_split();
         let mut lines = BufReader::new(reader).lines();
@@ -603,6 +750,20 @@ impl Daemon {
                         "budget_remaining_usd": remaining,
                         "project_budgets": project_budget_info,
                     })
+                }
+
+                "readiness" => {
+                    let worker_limits = registry.project_worker_limits().await;
+                    let dispatch_health = dispatch_bus.health(ACK_RETRY_AGE_SECS).await;
+                    let (spent, budget, remaining) = registry.cost_ledger.budget_status();
+                    readiness_response(
+                        &registry.leader_agent_name,
+                        worker_limits,
+                        pulse_count,
+                        dispatch_health,
+                        (spent, budget, remaining),
+                        &readiness,
+                    )
                 }
 
                 "projects" => {
@@ -844,4 +1005,192 @@ fn dispatch_summary_json(
         "age_seconds": (Utc::now() - dispatch.timestamp).num_seconds().max(0),
         "delivery_seconds": (Utc::now() - dispatch.first_sent_at).num_seconds().max(0),
     })
+}
+
+fn readiness_response(
+    leader_agent_name: &str,
+    mut worker_limits: Vec<(String, u32)>,
+    pulse_count: usize,
+    dispatch_health: DispatchHealth,
+    budget_status: (f64, f64, f64),
+    readiness: &ReadinessContext,
+) -> serde_json::Value {
+    let (spent, budget, remaining) = budget_status;
+    worker_limits.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let managed_owners: Vec<(String, u32)> = worker_limits
+        .into_iter()
+        .filter(|(name, _)| name != leader_agent_name)
+        .collect();
+    let registered_owners: Vec<String> = managed_owners
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect();
+    let max_workers: u32 = managed_owners.iter().map(|(_, workers)| *workers).sum();
+
+    let mut blocking_reasons = Vec::new();
+    if readiness.configured_projects + readiness.configured_advisors == 0 {
+        blocking_reasons.push("no projects or advisor agents are configured".to_string());
+    }
+    if registered_owners.is_empty() {
+        blocking_reasons.push("no projects or advisor agents were registered".to_string());
+    }
+    if !readiness.skipped_projects.is_empty() {
+        blocking_reasons.push(format!(
+            "{} configured project(s) were skipped because their directories were missing",
+            readiness.skipped_projects.len()
+        ));
+    }
+    if !readiness.skipped_advisors.is_empty() {
+        blocking_reasons.push(format!(
+            "{} advisor agent(s) were skipped because their directories were missing",
+            readiness.skipped_advisors.len()
+        ));
+    }
+    if max_workers == 0 {
+        blocking_reasons
+            .push("registered projects and advisors expose zero worker capacity".to_string());
+    }
+    if remaining <= 0.0 {
+        blocking_reasons.push(format!(
+            "daily budget exhausted (${spent:.2} spent of ${budget:.2})"
+        ));
+    }
+
+    let mut warnings = Vec::new();
+    if dispatch_health.overdue_ack > 0 {
+        warnings.push(format!(
+            "{} dispatch(es) are overdue for acknowledgment",
+            dispatch_health.overdue_ack
+        ));
+    }
+    if dispatch_health.dead_letters > 0 {
+        warnings.push(format!(
+            "{} dispatch(es) are in dead-letter state",
+            dispatch_health.dead_letters
+        ));
+    }
+    if dispatch_health.retrying_delivery > 0 {
+        warnings.push(format!(
+            "{} dispatch(es) are retrying delivery",
+            dispatch_health.retrying_delivery
+        ));
+    }
+
+    serde_json::json!({
+        "ok": true,
+        "ready": blocking_reasons.is_empty(),
+        "leader_agent": leader_agent_name,
+        "configured_projects": readiness.configured_projects,
+        "configured_advisors": readiness.configured_advisors,
+        "registered_owners": registered_owners,
+        "registered_owner_count": managed_owners.len(),
+        "max_workers": max_workers,
+        "pulses": pulse_count,
+        "dispatch_health": {
+            "unread": dispatch_health.unread,
+            "awaiting_ack": dispatch_health.awaiting_ack,
+            "retrying_delivery": dispatch_health.retrying_delivery,
+            "overdue_ack": dispatch_health.overdue_ack,
+            "dead_letters": dispatch_health.dead_letters,
+        },
+        "cost_today_usd": spent,
+        "daily_budget_usd": budget,
+        "budget_remaining_usd": remaining,
+        "skipped_projects": readiness.skipped_projects.clone(),
+        "skipped_advisors": readiness.skipped_advisors.clone(),
+        "blocking_reasons": blocking_reasons,
+        "warnings": warnings,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DispatchHealth, ReadinessContext, readiness_response};
+
+    #[test]
+    fn readiness_blocks_when_owner_registration_is_incomplete() {
+        let response = readiness_response(
+            "leader",
+            vec![("leader".to_string(), 1), ("alpha".to_string(), 2)],
+            1,
+            DispatchHealth::default(),
+            (2.5, 50.0, 47.5),
+            &ReadinessContext {
+                configured_projects: 2,
+                configured_advisors: 0,
+                skipped_projects: vec!["beta".to_string()],
+                skipped_advisors: Vec::new(),
+            },
+        );
+
+        assert_eq!(response["ready"], serde_json::json!(false));
+        assert_eq!(response["registered_owner_count"], serde_json::json!(1));
+        assert_eq!(response["max_workers"], serde_json::json!(2));
+        assert_eq!(response["skipped_projects"], serde_json::json!(["beta"]));
+        assert!(
+            response["blocking_reasons"]
+                .as_array()
+                .expect("blocking_reasons array")
+                .iter()
+                .any(|reason| reason.as_str().is_some_and(|text| text.contains("skipped")))
+        );
+    }
+
+    #[test]
+    fn readiness_surfaces_dispatch_warnings_without_blocking() {
+        let response = readiness_response(
+            "leader",
+            vec![("leader".to_string(), 1), ("alpha".to_string(), 2)],
+            2,
+            DispatchHealth {
+                unread: 0,
+                awaiting_ack: 1,
+                retrying_delivery: 1,
+                overdue_ack: 1,
+                dead_letters: 1,
+            },
+            (3.0, 50.0, 47.0),
+            &ReadinessContext {
+                configured_projects: 1,
+                configured_advisors: 0,
+                skipped_projects: Vec::new(),
+                skipped_advisors: Vec::new(),
+            },
+        );
+
+        assert_eq!(response["ready"], serde_json::json!(true));
+        assert_eq!(
+            response["warnings"].as_array().map(|items| items.len()),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn readiness_blocks_when_budget_is_exhausted() {
+        let response = readiness_response(
+            "leader",
+            vec![("leader".to_string(), 1), ("alpha".to_string(), 2)],
+            0,
+            DispatchHealth::default(),
+            (50.0, 50.0, 0.0),
+            &ReadinessContext {
+                configured_projects: 1,
+                configured_advisors: 0,
+                skipped_projects: Vec::new(),
+                skipped_advisors: Vec::new(),
+            },
+        );
+
+        assert_eq!(response["ready"], serde_json::json!(false));
+        assert!(
+            response["blocking_reasons"]
+                .as_array()
+                .expect("blocking_reasons array")
+                .iter()
+                .any(|reason| reason
+                    .as_str()
+                    .is_some_and(|text| text.contains("budget exhausted")))
+        );
+    }
 }

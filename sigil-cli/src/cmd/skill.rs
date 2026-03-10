@@ -2,11 +2,31 @@ use anyhow::{Context, Result};
 use sigil_core::traits::{LogObserver, Observer, Tool};
 use sigil_core::{Agent, AgentConfig, Identity};
 use sigil_tools::Skill;
-use std::path::PathBuf;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::cli::SkillAction;
-use crate::helpers::{build_project_tools, build_provider, find_project_dir, load_config, open_memory};
+use crate::helpers::{
+    build_project_tools, build_provider, find_project_dir, load_config, open_memory,
+};
+
+fn discover_project_skills(project_dir: &Path) -> Result<Vec<Skill>> {
+    let mut merged = BTreeMap::new();
+    let mut dirs = Vec::new();
+    if let Some(parent) = project_dir.parent() {
+        dirs.push(parent.join("shared").join("skills"));
+    }
+    dirs.push(project_dir.join("skills"));
+
+    for dir in dirs {
+        for skill in Skill::discover(&dir)? {
+            merged.insert(skill.skill.name.clone(), skill);
+        }
+    }
+
+    Ok(merged.into_values().collect())
+}
 
 pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction) -> Result<()> {
     let (config, _) = load_config(config_path)?;
@@ -21,8 +41,7 @@ pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction
 
             for name in projects {
                 if let Ok(project_dir) = find_project_dir(name) {
-                    let skills_dir = project_dir.join("skills");
-                    let skills = Skill::discover(&skills_dir)?;
+                    let skills = discover_project_skills(&project_dir)?;
                     if !skills.is_empty() {
                         println!("=== {} ===", name);
                         for skill in &skills {
@@ -55,8 +74,7 @@ pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction
                 .project(&project)
                 .context(format!("project not found: {project}"))?;
             let project_dir = find_project_dir(&project)?;
-            let skills_dir = project_dir.join("skills");
-            let skills = Skill::discover(&skills_dir)?;
+            let skills = discover_project_skills(&project_dir)?;
 
             let skill = skills
                 .iter()
@@ -111,8 +129,13 @@ pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction
                 ..Default::default()
             };
 
-            let mut agent =
-                Agent::new(agent_config, provider, filtered_tools, observer, skill_identity);
+            let mut agent = Agent::new(
+                agent_config,
+                provider,
+                filtered_tools,
+                observer,
+                skill_identity,
+            );
             if let Ok(mem) = open_memory(&config, Some(&project)) {
                 agent = agent.with_memory(Arc::new(mem));
             }

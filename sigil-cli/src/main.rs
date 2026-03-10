@@ -50,7 +50,7 @@ async fn main() -> Result<()> {
         }
         Commands::Init => cmd::init::cmd_init().await,
         Commands::Secrets { action } => cmd::secrets::cmd_secrets(&cli.config, action).await,
-        Commands::Doctor { fix } => cmd::doctor::cmd_doctor(&cli.config, fix).await,
+        Commands::Doctor { fix, strict } => cmd::doctor::cmd_doctor(&cli.config, fix, strict).await,
         Commands::Status => cmd::status::cmd_status(&cli.config).await,
         Commands::Assign {
             subject,
@@ -69,15 +69,11 @@ async fn main() -> Result<()> {
             )
             .await
         }
-        Commands::Ready { project } => {
-            cmd::tasks::cmd_ready(&cli.config, project.as_deref()).await
-        }
+        Commands::Ready { project } => cmd::tasks::cmd_ready(&cli.config, project.as_deref()).await,
         Commands::Tasks { project, all } => {
             cmd::tasks::cmd_tasks(&cli.config, project.as_deref(), all).await
         }
-        Commands::Close { id, reason } => {
-            cmd::tasks::cmd_close(&cli.config, &id, &reason).await
-        }
+        Commands::Close { id, reason } => cmd::tasks::cmd_close(&cli.config, &id, &reason).await,
         Commands::Daemon { action } => cmd::daemon::cmd_daemon(&cli.config, action).await,
         Commands::Recall {
             query,
@@ -88,9 +84,7 @@ async fn main() -> Result<()> {
             key,
             content,
             project,
-        } => {
-            cmd::memory::cmd_remember(&cli.config, &key, &content, project.as_deref()).await
-        }
+        } => cmd::memory::cmd_remember(&cli.config, &key, &content, project.as_deref()).await,
         Commands::Pipeline { action } => cmd::pipeline::cmd_pipeline(&cli.config, action).await,
         Commands::Cron { action } => cmd::cron::cmd_cron(&cli.config, action).await,
         Commands::Skill { action } => cmd::skill::cmd_skill(&cli.config, action).await,
@@ -102,15 +96,17 @@ async fn main() -> Result<()> {
         Commands::Done { task_id, reason } => {
             cmd::tasks::cmd_done(&cli.config, &task_id, &reason).await
         }
-        Commands::Team { project } => {
-            cmd::team::cmd_team(&cli.config, project.as_deref()).await
-        }
+        Commands::Team { project } => cmd::team::cmd_team(&cli.config, project.as_deref()).await,
         Commands::Config { action } => cmd::config::cmd_config(&cli.config, action).await,
         Commands::Agent { action } => cmd::agent::cmd_agent(&cli.config, action).await,
-        Commands::Audit { project, task, last } => {
-            cmd::audit::cmd_audit(&cli.config, project.as_deref(), task.as_deref(), last).await
+        Commands::Audit {
+            project,
+            task,
+            last,
+        } => cmd::audit::cmd_audit(&cli.config, project.as_deref(), task.as_deref(), last).await,
+        Commands::Blackboard { action } => {
+            cmd::blackboard::cmd_blackboard(&cli.config, action).await
         }
-        Commands::Blackboard { action } => cmd::blackboard::cmd_blackboard(&cli.config, action).await,
         Commands::Deps { project, apply } => {
             cmd::deps::cmd_deps(&cli.config, &project, apply).await
         }

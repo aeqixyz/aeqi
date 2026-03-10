@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use reqwest::Client;
-use sigil_core::traits::{Channel, ToolResult, ToolSpec};
 use sigil_core::traits::Tool;
+use sigil_core::traits::{Channel, ToolResult, ToolSpec};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -39,13 +39,20 @@ impl Tool for ProjectStatusTool {
             }
             output.push_str(&format!(
                 "{}: {} open, {} ready | workers: {} idle, {} working, {} bonded\n",
-                ds.name, ds.open_tasks, ds.ready_tasks,
-                ds.workers_idle, ds.workers_working, ds.workers_bonded,
+                ds.name,
+                ds.open_tasks,
+                ds.ready_tasks,
+                ds.workers_idle,
+                ds.workers_working,
+                ds.workers_bonded,
             ));
         }
 
         if project_filter.is_none() {
-            output.push_str(&format!("\nUnread dispatches: {}\n", status.unread_dispatches));
+            output.push_str(&format!(
+                "\nUnread dispatches: {}\n",
+                status.unread_dispatches
+            ));
         }
 
         if output.is_empty() {
@@ -71,7 +78,9 @@ impl Tool for ProjectStatusTool {
         }
     }
 
-    fn name(&self) -> &str { "project_status" }
+    fn name(&self) -> &str {
+        "project_status"
+    }
 }
 
 /// Tool for assigning a task to a target project.
@@ -88,13 +97,16 @@ impl ProjectAssignTool {
 #[async_trait]
 impl Tool for ProjectAssignTool {
     async fn execute(&self, args: serde_json::Value) -> Result<ToolResult> {
-        let project = args.get("project")
+        let project = args
+            .get("project")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing project"))?;
-        let subject = args.get("subject")
+        let subject = args
+            .get("subject")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing subject"))?;
-        let description = args.get("description")
+        let description = args
+            .get("description")
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
@@ -123,7 +135,9 @@ impl Tool for ProjectAssignTool {
         }
     }
 
-    fn name(&self) -> &str { "project_assign" }
+    fn name(&self) -> &str {
+        "project_assign"
+    }
 }
 
 /// Tool for listing all registered projects with metadata.
@@ -162,7 +176,8 @@ impl Tool for ProjectListTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "project_list".to_string(),
-            description: "List all registered projects with their prefix, model, and worker count.".to_string(),
+            description: "List all registered projects with their prefix, model, and worker count."
+                .to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {}
@@ -170,7 +185,9 @@ impl Tool for ProjectListTool {
         }
     }
 
-    fn name(&self) -> &str { "project_list" }
+    fn name(&self) -> &str {
+        "project_list"
+    }
 }
 
 /// Tool for reading unread mail addressed to the agent.
@@ -198,7 +215,9 @@ impl Tool for MailReadTool {
             output.push_str(&format!(
                 "[{}] from={} subject={}\n{}\n\n",
                 m.timestamp.format("%H:%M:%S"),
-                m.from, m.kind.subject_tag(), m.kind.body_text(),
+                m.from,
+                m.kind.subject_tag(),
+                m.kind.body_text(),
             ));
         }
         Ok(ToolResult::success(output))
@@ -215,7 +234,9 @@ impl Tool for MailReadTool {
         }
     }
 
-    fn name(&self) -> &str { "dispatch_read" }
+    fn name(&self) -> &str {
+        "dispatch_read"
+    }
 }
 
 /// Tool for sending mail through the bus.
@@ -232,17 +253,18 @@ impl MailSendTool {
 #[async_trait]
 impl Tool for MailSendTool {
     async fn execute(&self, args: serde_json::Value) -> Result<ToolResult> {
-        let to = args.get("to")
+        let to = args
+            .get("to")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing to"))?;
-        let subject = args.get("subject")
+        let subject = args
+            .get("subject")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing subject"))?;
-        let body = args.get("body")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let body = args.get("body").and_then(|v| v.as_str()).unwrap_or("");
 
-        let task_id = args.get("task_id")
+        let task_id = args
+            .get("task_id")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
@@ -258,14 +280,20 @@ impl Tool for MailSendTool {
             },
         };
 
-        self.dispatch_bus.send(Dispatch::new_typed("leader", to, kind)).await;
-        Ok(ToolResult::success(format!("Message sent to '{to}': {subject}")))
+        self.dispatch_bus
+            .send(Dispatch::new_typed("leader", to, kind))
+            .await;
+        Ok(ToolResult::success(format!(
+            "Message sent to '{to}': {subject}"
+        )))
     }
 
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "dispatch_send".to_string(),
-            description: "Send a dispatch message to another project or agent through the dispatch bus.".to_string(),
+            description:
+                "Send a dispatch message to another project or agent through the dispatch bus."
+                    .to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -278,7 +306,9 @@ impl Tool for MailSendTool {
         }
     }
 
-    fn name(&self) -> &str { "dispatch_send" }
+    fn name(&self) -> &str {
+        "dispatch_send"
+    }
 }
 
 /// Tool for listing all unblocked tasks across all projects.
@@ -305,8 +335,15 @@ impl Tool for AllReadyTool {
         for (project_name, task) in &ready {
             output.push_str(&format!(
                 "[{}] {} [{}] {} — {}\n",
-                project_name, task.id, task.priority, task.subject,
-                if task.description.is_empty() { "(no description)" } else { &task.description }
+                project_name,
+                task.id,
+                task.priority,
+                task.subject,
+                if task.description.is_empty() {
+                    "(no description)"
+                } else {
+                    &task.description
+                }
             ));
         }
         Ok(ToolResult::success(output))
@@ -315,7 +352,8 @@ impl Tool for AllReadyTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "all_ready".to_string(),
-            description: "List all unblocked tasks across all projects that are ready for work.".to_string(),
+            description: "List all unblocked tasks across all projects that are ready for work."
+                .to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {}
@@ -323,7 +361,9 @@ impl Tool for AllReadyTool {
         }
     }
 
-    fn name(&self) -> &str { "all_ready" }
+    fn name(&self) -> &str {
+        "all_ready"
+    }
 }
 
 /// Tool for replying to a channel message (Telegram, Discord, etc.)
@@ -339,10 +379,12 @@ impl ChannelReplyTool {
 #[async_trait]
 impl Tool for ChannelReplyTool {
     async fn execute(&self, args: serde_json::Value) -> Result<ToolResult> {
-        let channel_name = args.get("channel")
+        let channel_name = args
+            .get("channel")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing channel"))?;
-        let text = args.get("text")
+        let text = args
+            .get("text")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing text"))?;
 
@@ -359,7 +401,8 @@ impl Tool for ChannelReplyTool {
         }
 
         let channels = self.channels.read().await;
-        let channel = channels.get(channel_name)
+        let channel = channels
+            .get(channel_name)
             .ok_or_else(|| anyhow::anyhow!("channel not found: {channel_name}"))?;
 
         let outgoing = sigil_core::traits::OutgoingMessage {
@@ -373,23 +416,28 @@ impl Tool for ChannelReplyTool {
 
         // Add reaction if specified
         if let Some(emoji) = reaction {
-            let chat_id = args.get("chat_id")
+            let chat_id = args
+                .get("chat_id")
                 .and_then(|v| v.as_i64())
                 .ok_or_else(|| anyhow::anyhow!("missing chat_id for reaction"))?;
-            let message_id = args.get("message_id")
+            let message_id = args
+                .get("message_id")
                 .and_then(|v| v.as_i64())
                 .ok_or_else(|| anyhow::anyhow!("missing message_id for reaction"))?;
-            
+
             channel.react(chat_id, message_id, emoji).await?;
         }
 
-        Ok(ToolResult::success(format!("Reply sent via {channel_name}")))
+        Ok(ToolResult::success(format!(
+            "Reply sent via {channel_name}"
+        )))
     }
 
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "channel_reply".to_string(),
-            description: "Send a reply through a messaging channel (Telegram, Discord, etc.)".to_string(),
+            description: "Send a reply through a messaging channel (Telegram, Discord, etc.)"
+                .to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -402,7 +450,9 @@ impl Tool for ChannelReplyTool {
         }
     }
 
-    fn name(&self) -> &str { "channel_reply" }
+    fn name(&self) -> &str {
+        "channel_reply"
+    }
 }
 
 /// Tool that surfaces Claude Code session costs, OpenRouter key usage, and
@@ -459,7 +509,9 @@ impl Tool for UsageStatsTool {
         }
     }
 
-    fn name(&self) -> &str { "usage_stats" }
+    fn name(&self) -> &str {
+        "usage_stats"
+    }
 }
 
 /// Read Claude Code's ~/.claude.json and return a formatted usage summary.
@@ -468,11 +520,12 @@ pub async fn collect_claude_usage() -> Result<String> {
         .context("no home directory")?
         .join(".claude.json");
 
-    let content = tokio::fs::read_to_string(&path).await
+    let content = tokio::fs::read_to_string(&path)
+        .await
         .context("failed to read ~/.claude.json")?;
 
-    let v: serde_json::Value = serde_json::from_str(&content)
-        .context("failed to parse ~/.claude.json")?;
+    let v: serde_json::Value =
+        serde_json::from_str(&content).context("failed to parse ~/.claude.json")?;
 
     let mut out = String::new();
 
@@ -488,9 +541,18 @@ pub async fn collect_claude_usage() -> Result<String> {
             bc.partial_cmp(&ac).unwrap_or(std::cmp::Ordering::Equal)
         });
         for (model, usage) in &models {
-            let input = usage.get("inputTokens").and_then(|t| t.as_u64()).unwrap_or(0);
-            let output = usage.get("outputTokens").and_then(|t| t.as_u64()).unwrap_or(0);
-            let cache_read = usage.get("cacheReadInputTokens").and_then(|t| t.as_u64()).unwrap_or(0);
+            let input = usage
+                .get("inputTokens")
+                .and_then(|t| t.as_u64())
+                .unwrap_or(0);
+            let output = usage
+                .get("outputTokens")
+                .and_then(|t| t.as_u64())
+                .unwrap_or(0);
+            let cache_read = usage
+                .get("cacheReadInputTokens")
+                .and_then(|t| t.as_u64())
+                .unwrap_or(0);
             let cost = usage.get("cost").and_then(|c| c.as_f64()).unwrap_or(0.0);
             out.push_str(&format!(
                 "  {model}: {}k in / {}k out (cache: {}k read) — ${cost:.2}\n",
@@ -542,19 +604,26 @@ pub async fn collect_openrouter_usage(api_key: &str) -> Result<String> {
 pub async fn collect_worker_usage() -> Result<String> {
     let path = usage_log_path();
 
-    let content = tokio::fs::read_to_string(&path).await
+    let content = tokio::fs::read_to_string(&path)
+        .await
         .context("no usage log yet")?;
 
     let mut project_totals: HashMap<String, (f64, usize)> = HashMap::new();
     for line in content.lines() {
-        if line.is_empty() { continue; }
+        if line.is_empty() {
+            continue;
+        }
         if let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) {
-            let project = entry.get("project")
+            let project = entry
+                .get("project")
                 .or_else(|| entry.get("rig"))
                 .and_then(|r| r.as_str())
                 .unwrap_or("unknown")
                 .to_string();
-            let cost = entry.get("cost_usd").and_then(|c| c.as_f64()).unwrap_or(0.0);
+            let cost = entry
+                .get("cost_usd")
+                .and_then(|c| c.as_f64())
+                .unwrap_or(0.0);
             let e = project_totals.entry(project).or_insert((0.0, 0));
             e.0 += cost;
             e.1 += 1;
@@ -566,7 +635,11 @@ pub async fn collect_worker_usage() -> Result<String> {
     }
 
     let mut projects: Vec<_> = project_totals.iter().collect();
-    projects.sort_by(|a, b| b.1.0.partial_cmp(&a.1.0).unwrap_or(std::cmp::Ordering::Equal));
+    projects.sort_by(|a, b| {
+        b.1.0
+            .partial_cmp(&a.1.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let mut out = String::new();
     let total_cost: f64 = projects.iter().map(|(_, (c, _))| c).sum();
@@ -598,10 +671,12 @@ impl MemoryStoreTool {
 #[async_trait]
 impl Tool for MemoryStoreTool {
     async fn execute(&self, args: serde_json::Value) -> Result<ToolResult> {
-        let key = args.get("key")
+        let key = args
+            .get("key")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing key"))?;
-        let content = args.get("content")
+        let content = args
+            .get("content")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing content"))?;
         let scope = match args.get("scope").and_then(|v| v.as_str()) {
@@ -616,11 +691,19 @@ impl Tool for MemoryStoreTool {
             Some("evergreen") => MemoryCategory::Evergreen,
             _ => MemoryCategory::Fact,
         };
-        let entity_id = args.get("entity_id").and_then(|v| v.as_str())
+        let entity_id = args
+            .get("entity_id")
+            .and_then(|v| v.as_str())
             .or_else(|| args.get("companion_id").and_then(|v| v.as_str()));
 
-        match self.memory.store(key, content, category, scope, entity_id).await {
-            Ok(id) => Ok(ToolResult::success(format!("Stored memory {id} [{scope}] {key}"))),
+        match self
+            .memory
+            .store(key, content, category, scope, entity_id)
+            .await
+        {
+            Ok(id) => Ok(ToolResult::success(format!(
+                "Stored memory {id} [{scope}] {key}"
+            ))),
             Err(e) => Ok(ToolResult::error(format!("Failed to store: {e}"))),
         }
     }
@@ -643,7 +726,9 @@ impl Tool for MemoryStoreTool {
         }
     }
 
-    fn name(&self) -> &str { "memory_store" }
+    fn name(&self) -> &str {
+        "memory_store"
+    }
 }
 
 pub struct MemoryRecallTool {
@@ -659,12 +744,11 @@ impl MemoryRecallTool {
 #[async_trait]
 impl Tool for MemoryRecallTool {
     async fn execute(&self, args: serde_json::Value) -> Result<ToolResult> {
-        let query_text = args.get("query")
+        let query_text = args
+            .get("query")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing query"))?;
-        let top_k = args.get("top_k")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(5) as usize;
+        let top_k = args.get("top_k").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
 
         let mut query = MemoryQuery::new(query_text, top_k);
 
@@ -675,16 +759,18 @@ impl Tool for MemoryRecallTool {
                 _ => MemoryScope::Domain,
             });
         }
-        if let Some(eid) = args.get("entity_id").and_then(|v| v.as_str())
+        if let Some(eid) = args
+            .get("entity_id")
+            .and_then(|v| v.as_str())
             .or_else(|| args.get("companion_id").and_then(|v| v.as_str()))
         {
             query = query.with_entity(eid);
         }
 
         match self.memory.search(&query).await {
-            Ok(results) if results.is_empty() => {
-                Ok(ToolResult::success(format!("No memories found for: {query_text}")))
-            }
+            Ok(results) if results.is_empty() => Ok(ToolResult::success(format!(
+                "No memories found for: {query_text}"
+            ))),
             Ok(results) => {
                 let mut output = String::new();
                 for (i, entry) in results.iter().enumerate() {
@@ -698,7 +784,11 @@ impl Tool for MemoryRecallTool {
                     };
                     output.push_str(&format!(
                         "{}. [{}] ({:.2}) {} — {}\n",
-                        i + 1, age_str, entry.score, entry.key, entry.content,
+                        i + 1,
+                        age_str,
+                        entry.score,
+                        entry.key,
+                        entry.content,
                     ));
                 }
                 Ok(ToolResult::success(output))
@@ -724,7 +814,9 @@ impl Tool for MemoryRecallTool {
         }
     }
 
-    fn name(&self) -> &str { "memory_recall" }
+    fn name(&self) -> &str {
+        "memory_recall"
+    }
 }
 
 /// Tool for reading full task details by ID.
@@ -792,7 +884,9 @@ impl Tool for QuestDetailTool {
         }
     }
 
-    fn name(&self) -> &str { "task_detail" }
+    fn name(&self) -> &str {
+        "task_detail"
+    }
 }
 
 /// Tool for cancelling a task by ID.
@@ -828,7 +922,9 @@ impl Tool for QuestCancelTool {
                         q.assignee = None;
                         q.closed_reason = Some(reason.to_string());
                     }) {
-                        Ok(_) => return Ok(ToolResult::success(format!("Task {task_id} cancelled."))),
+                        Ok(_) => {
+                            return Ok(ToolResult::success(format!("Task {task_id} cancelled.")));
+                        }
                         Err(e) => return Ok(ToolResult::error(format!("Failed to cancel: {e}"))),
                     }
                 }
@@ -853,7 +949,9 @@ impl Tool for QuestCancelTool {
         }
     }
 
-    fn name(&self) -> &str { "task_cancel" }
+    fn name(&self) -> &str {
+        "task_cancel"
+    }
 }
 
 /// Tool for reprioritizing a task.
@@ -884,7 +982,11 @@ impl Tool for QuestReprioritizeTool {
             "normal" => sigil_tasks::Priority::Normal,
             "high" => sigil_tasks::Priority::High,
             "critical" => sigil_tasks::Priority::Critical,
-            _ => return Ok(ToolResult::error(format!("Invalid priority: {priority_str}. Use: low, normal, high, critical"))),
+            _ => {
+                return Ok(ToolResult::error(format!(
+                    "Invalid priority: {priority_str}. Use: low, normal, high, critical"
+                )));
+            }
         };
 
         let projects = self.registry.project_names().await;
@@ -895,8 +997,14 @@ impl Tool for QuestReprioritizeTool {
                     match store.update(task_id, |q| {
                         q.priority = priority;
                     }) {
-                        Ok(_) => return Ok(ToolResult::success(format!("Task {task_id} reprioritized to {priority}."))),
-                        Err(e) => return Ok(ToolResult::error(format!("Failed to reprioritize: {e}"))),
+                        Ok(_) => {
+                            return Ok(ToolResult::success(format!(
+                                "Task {task_id} reprioritized to {priority}."
+                            )));
+                        }
+                        Err(e) => {
+                            return Ok(ToolResult::error(format!("Failed to reprioritize: {e}")));
+                        }
                     }
                 }
             }
@@ -920,7 +1028,9 @@ impl Tool for QuestReprioritizeTool {
         }
     }
 
-    fn name(&self) -> &str { "task_reprioritize" }
+    fn name(&self) -> &str {
+        "task_reprioritize"
+    }
 }
 
 /// Tool for posting/querying the inter-agent blackboard.
@@ -936,35 +1046,54 @@ impl BlackboardTool {
         agent_name: String,
         project_name: String,
     ) -> Self {
-        Self { blackboard, agent_name, project_name }
+        Self {
+            blackboard,
+            agent_name,
+            project_name,
+        }
     }
 }
 
 #[async_trait]
 impl Tool for BlackboardTool {
     async fn execute(&self, args: serde_json::Value) -> Result<ToolResult> {
-        let action = args.get("action")
+        let action = args
+            .get("action")
             .and_then(|v| v.as_str())
             .unwrap_or("query");
 
         match action {
             "post" => {
-                let key = args.get("key")
+                let key = args
+                    .get("key")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing key"))?;
-                let content = args.get("content")
+                let content = args
+                    .get("content")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing content"))?;
-                let tags: Vec<String> = args.get("tags")
+                let tags: Vec<String> = args
+                    .get("tags")
                     .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
                     .unwrap_or_default();
                 let durability = match args.get("durability").and_then(|v| v.as_str()) {
                     Some("durable") => crate::blackboard::EntryDurability::Durable,
                     _ => crate::blackboard::EntryDurability::Transient,
                 };
 
-                match self.blackboard.post(key, content, &self.agent_name, &self.project_name, &tags, durability) {
+                match self.blackboard.post(
+                    key,
+                    content,
+                    &self.agent_name,
+                    &self.project_name,
+                    &tags,
+                    durability,
+                ) {
                     Ok(entry) => Ok(ToolResult::success(format!(
                         "Posted to blackboard: {} (expires {})",
                         entry.key,
@@ -974,9 +1103,14 @@ impl Tool for BlackboardTool {
                 }
             }
             "query" => {
-                let tags: Vec<String> = args.get("tags")
+                let tags: Vec<String> = args
+                    .get("tags")
                     .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
                     .unwrap_or_default();
                 let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as u32;
 
@@ -989,8 +1123,14 @@ impl Tool for BlackboardTool {
                         for e in &entries {
                             out.push_str(&format!(
                                 "{}: {} (by {}, tags: {})\n",
-                                e.key, e.content, e.agent,
-                                if e.tags.is_empty() { "-".to_string() } else { e.tags.join(", ") },
+                                e.key,
+                                e.content,
+                                e.agent,
+                                if e.tags.is_empty() {
+                                    "-".to_string()
+                                } else {
+                                    e.tags.join(", ")
+                                },
                             ));
                         }
                         Ok(ToolResult::success(out))
@@ -999,21 +1139,28 @@ impl Tool for BlackboardTool {
                 }
             }
             "get" => {
-                let key = args.get("key")
+                let key = args
+                    .get("key")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing key"))?;
 
                 match self.blackboard.get_by_key(&self.project_name, key) {
                     Ok(Some(entry)) => Ok(ToolResult::success(format!(
                         "{}: {} (by {}, expires {})",
-                        entry.key, entry.content, entry.agent,
+                        entry.key,
+                        entry.content,
+                        entry.agent,
                         entry.expires_at.format("%Y-%m-%d %H:%M"),
                     ))),
-                    Ok(None) => Ok(ToolResult::success(format!("No entry found for key: {key}"))),
+                    Ok(None) => Ok(ToolResult::success(format!(
+                        "No entry found for key: {key}"
+                    ))),
                     Err(e) => Ok(ToolResult::error(format!("Get failed: {e}"))),
                 }
             }
-            _ => Ok(ToolResult::error(format!("Unknown action: {action}. Use: post, query, get"))),
+            _ => Ok(ToolResult::error(format!(
+                "Unknown action: {action}. Use: post, query, get"
+            ))),
         }
     }
 
@@ -1035,7 +1182,9 @@ impl Tool for BlackboardTool {
         }
     }
 
-    fn name(&self) -> &str { "blackboard" }
+    fn name(&self) -> &str {
+        "blackboard"
+    }
 }
 
 /// Build orchestration tools for the leader agent.
@@ -1050,7 +1199,9 @@ pub fn build_orchestration_tools(
     _channels: Arc<RwLock<HashMap<String, Arc<dyn Channel>>>>,
     api_key: Option<String>,
     memory: Option<Arc<dyn Memory>>,
+    blackboard: Option<Arc<crate::blackboard::Blackboard>>,
 ) -> Vec<Arc<dyn Tool>> {
+    let leader_name = registry.leader_agent_name.clone();
     let mut tools: Vec<Arc<dyn Tool>> = vec![
         Arc::new(ProjectStatusTool::new(registry.clone())),
         Arc::new(ProjectAssignTool::new(registry.clone())),
@@ -1067,6 +1218,14 @@ pub fn build_orchestration_tools(
     if let Some(mem) = memory {
         tools.push(Arc::new(MemoryStoreTool::new(mem.clone())));
         tools.push(Arc::new(MemoryRecallTool::new(mem)));
+    }
+
+    if let Some(bb) = blackboard {
+        tools.push(Arc::new(BlackboardTool::new(
+            bb,
+            leader_name,
+            "*".to_string(),
+        )));
     }
 
     tools

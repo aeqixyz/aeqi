@@ -1,43 +1,74 @@
 # Projects Directory
 
-Each subdirectory defines a project — WHAT gets done.
+Each subdirectory in `projects/` defines what gets done.
 
-## Structure
+## Layout
 
-```
+```text
 projects/
-  shared/            # Shared assets (all projects inherit)
-    skills/          # Reusable skill definitions
-    pipelines/       # Pipeline templates
-  my-project/        # One directory per project
-    AGENTS.md        # Operating instructions for workers
-    KNOWLEDGE.md     # Domain knowledge and context
-    HEARTBEAT.md     # Health check endpoints (optional)
-    .tasks/          # Task storage (JSONL files)
-    skills/          # Project-specific skills
+  shared/
+    skills/*.toml
+    pipelines/*.toml
+  <project>/
+    AGENTS.md
+    KNOWLEDGE.md
+    HEARTBEAT.md
+    skills/*.toml
+    pipelines/*.toml
+    rituals/*.toml
+    .tasks/
+    .sigil/memory.db
 ```
 
-## Creating a Project
+## Required and Optional Files
 
-1. Create `projects/my-project/` directory
-2. Add `AGENTS.md` with operating instructions
-3. Add `KNOWLEDGE.md` with domain context
-4. Add the project to `config/sigil.toml`:
+- `AGENTS.md`: project operating instructions for workers
+- `KNOWLEDGE.md`: project context and domain facts
+- `HEARTBEAT.md`: optional periodic check instructions
+- `skills/`: project-local skills
+- `pipelines/` or `rituals/`: project-local workflow templates
+
+## Shared Assets
+
+Shared assets live under `projects/shared/`.
+
+Discovery order for reusable automation:
+
+1. shared skills or pipelines
+2. project-local skills or pipelines
+
+Project-local names override shared names.
+
+## Task Storage
+
+Task boards live in `.tasks/`.
+
+- `<prefix>.jsonl`: append-only task records for that prefix
+- `_missions.jsonl`: append-only mission records
+
+Examples:
+
+- `sg.jsonl`
+- `sig.jsonl`
+- `_missions.jsonl`
+
+## Minimal Project Config
 
 ```toml
 [[projects]]
-name = "my-project"
-prefix = "mp"
+name = "sigil"
+prefix = "sg"
 repo = "/path/to/repo"
 model = "claude-sonnet-4-6"
 max_workers = 2
 execution_mode = "claude_code"
+worker_timeout_secs = 1800
 ```
 
-## Task Storage
+## Useful Commands
 
-Tasks are stored as JSONL files in `.tasks/`:
-- `_tasks.jsonl` — task definitions
-- `_missions.jsonl` — mission definitions (groups of tasks)
-
-Use `sigil task create` to add tasks via CLI.
+- `sigil assign "subject" --project sigil`
+- `sigil ready --project sigil`
+- `sigil tasks --project sigil`
+- `sigil pipeline list --project sigil`
+- `sigil skill list --project sigil`

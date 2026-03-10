@@ -1,39 +1,59 @@
 # Agents Directory
 
-Each subdirectory defines an agent — WHO does the work.
+Each subdirectory in `agents/` defines who does the work.
 
-## Structure
+## Layout
 
-```
+```text
 agents/
-  shared/            # Shared workflow (all agents inherit)
-    WORKFLOW.md      # Base workflow instructions
-  my-agent/          # One directory per agent
-    agent.toml       # Execution config (model, role, budget)
-    PERSONA.md       # Personality and character
-    IDENTITY.md      # Identity and background
-    PREFERENCES.md   # Working preferences
-    MEMORY.md        # Accumulated knowledge
-    KNOWLEDGE.md     # Domain expertise
+  shared/
+    WORKFLOW.md
+  <agent>/
+    agent.toml
+    PERSONA.md
+    IDENTITY.md
+    OPERATIONAL.md
+    PREFERENCES.md
+    MEMORY.md
+    EVOLUTION.md
+    .tasks/
 ```
 
-## agent.toml
+Only files that exist are loaded. Empty files are ignored.
+
+## `agent.toml`
+
+Typical fields:
 
 ```toml
-name = "my-agent"
-prefix = "ma"
-role = "advisor"       # orchestrator | advisor
+name = "reviewer"
+prefix = "rv"
+role = "advisor"       # orchestrator | worker | advisor
 voice = "vocal"        # vocal | silent
 model = "claude-sonnet-4-6"
-expertise = ["my-project"]
+expertise = ["sigil"]
+max_workers = 1
 max_budget_usd = 1.0
 ```
 
-## Creating an Agent
+Agents are discovered from disk and merged with any legacy `[[agents]]` blocks in `sigil.toml`.
 
-1. Create `agents/my-agent/` directory
-2. Add `agent.toml` with execution config
-3. Add `PERSONA.md` with personality description
-4. Reference the agent in your team config in `sigil.toml`
+## Identity Assembly
 
-Agents are auto-discovered from disk — no need to add `[[agents]]` to the config file.
+Agent-side identity comes from:
+
+- `agents/shared/WORKFLOW.md`
+- `PERSONA.md`
+- `IDENTITY.md`
+- `OPERATIONAL.md`
+- `PREFERENCES.md`
+- `MEMORY.md`
+- `EVOLUTION.md`
+
+Project context is layered on top separately from `projects/<name>/`.
+
+## Notes
+
+- Advisor agents can receive tasks from the daemon and therefore may have their own `.tasks/` store.
+- Use `sigil agent list` to see discovered agents.
+- Use `sigil agent migrate` to write disk `agent.toml` files from legacy config entries.

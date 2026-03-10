@@ -1,12 +1,54 @@
 use anyhow::{Context, Result};
 use sigil_orchestrator::Pipeline;
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
 
 use crate::cli::PipelineAction;
-use crate::helpers::{find_project_dir, load_config, open_tasks_for_project, project_name_for_prefix};
+use crate::helpers::{
+    find_project_dir, load_config, open_tasks_for_project, project_name_for_prefix,
+};
 
-pub(crate) async fn cmd_pipeline(config_path: &Option<PathBuf>, action: PipelineAction) -> Result<()> {
+fn pipeline_dirs(project_dir: &Path) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(parent) = project_dir.parent() {
+        dirs.push(parent.join("shared").join("pipelines"));
+        dirs.push(parent.join("shared").join("rituals"));
+    }
+    dirs.push(project_dir.join("pipelines"));
+    dirs.push(project_dir.join("rituals"));
+    dirs
+}
+
+fn discover_project_pipelines(project_dir: &Path) -> Result<BTreeMap<String, Pipeline>> {
+    let mut merged = BTreeMap::new();
+
+    for dir in pipeline_dirs(project_dir) {
+        if !dir.exists() {
+            continue;
+        }
+
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "toml") {
+                let stem = path
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                let pipeline = Pipeline::load(&path)?;
+                merged.insert(stem, pipeline);
+            }
+        }
+    }
+
+    Ok(merged)
+}
+
+pub(crate) async fn cmd_pipeline(
+    config_path: &Option<PathBuf>,
+    action: PipelineAction,
+) -> Result<()> {
     let (config, _) = load_config(config_path)?;
 
     match action {
@@ -19,20 +61,11 @@ pub(crate) async fn cmd_pipeline(config_path: &Option<PathBuf>, action: Pipeline
                 .project(&project)
                 .context(format!("project not found: {project}"))?;
             let project_dir = find_project_dir(&project)?;
-
-            // Find the pipeline template.
-            let pipeline_path = project_dir.join("pipelines").join(format!("{template}.toml"));
-            let pipeline_path = if pipeline_path.exists() {
-                pipeline_path
-            } else {
-                let fallback = project_dir.join("rituals").join(format!("{template}.toml"));
-                if !fallback.exists() {
-                    anyhow::bail!("pipeline template not found: {}", pipeline_path.display());
-                }
-                fallback
-            };
-
-            let pipeline = Pipeline::load(&pipeline_path)?;
+            let pipelines = discover_project_pipelines(&project_dir)?;
+            let pipeline = pipelines
+                .get(&template)
+                .cloned()
+                .context(format!("pipeline template not found: {template}"))?;
 
             // Parse vars.
             let var_map: HashMap<String, String> = vars
@@ -84,30 +117,16 @@ pub(crate) async fn cmd_pipeline(config_path: &Option<PathBuf>, action: Pipeline
 
             for name in projects {
                 if let Ok(project_dir) = find_project_dir(name) {
-                    let pipelines_dir = project_dir.join("pipelines");
-                    let pipelines_dir = if pipelines_dir.exists() {
-                        pipelines_dir
-                    } else {
-                        project_dir.join("rituals")
-                    };
-                    if pipelines_dir.exists() {
+                    let pipelines = discover_project_pipelines(&project_dir)?;
+                    if !pipelines.is_empty() {
                         println!("=== {} ===", name);
-                        if let Ok(entries) = std::fs::read_dir(&pipelines_dir) {
-                            for entry in entries.flatten() {
-                                let path = entry.path();
-                                if path.extension().is_some_and(|e| e == "toml")
-                                    && let Ok(mol) = Pipeline::load(&path)
-                                {
-                                    let stem =
-                                        path.file_stem().unwrap_or_default().to_string_lossy();
-                                    println!(
-                                        "  {} — {} ({} steps)",
-                                        stem,
-                                        mol.meta.description,
-                                        mol.steps.len()
-                                    );
-                                }
-                            }
+                        for (stem, pipeline) in pipelines {
+                            println!(
+                                "  {} — {} ({} steps)",
+                                stem,
+                                pipeline.meta.description,
+                                pipeline.steps.len()
+                            );
                         }
                     }
                 }

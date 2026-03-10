@@ -2,12 +2,12 @@ use anyhow::{Context, Result};
 use sigil_core::traits::{Channel, Memory};
 use sigil_core::{ExecutionMode, Identity, SecretStore};
 use sigil_gates::TelegramChannel;
+use sigil_orchestrator::tools::build_orchestration_tools;
 use sigil_orchestrator::{
     AgentRouter, AuditLog, Blackboard, ConversationStore, Daemon, DispatchBus, EmotionalState,
     ExpertiseLedger, LifecycleEngine, Project, ProjectRegistry, ScheduleStore, Supervisor,
     WatchdogEngine,
 };
-use sigil_orchestrator::tools::build_orchestration_tools;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -21,10 +21,7 @@ use crate::helpers::{
     pid_file_path,
 };
 
-pub(crate) async fn cmd_daemon(
-    config_path: &Option<PathBuf>,
-    action: DaemonAction,
-) -> Result<()> {
+pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonAction) -> Result<()> {
     match action {
         DaemonAction::Start => {
             let (config, _) = load_config_with_agents(config_path)?;
@@ -39,8 +36,7 @@ pub(crate) async fn cmd_daemon(
             }
 
             let data_dir = config.data_dir();
-            let dispatch_bus =
-                Arc::new(DispatchBus::with_persistence(data_dir.join("dispatches")));
+            let dispatch_bus = Arc::new(DispatchBus::with_persistence(data_dir.join("dispatches")));
             let cost_ledger = Arc::new(sigil_orchestrator::CostLedger::with_persistence(
                 config.security.max_cost_per_day_usd,
                 data_dir.join("cost_ledger.jsonl"),
@@ -87,6 +83,9 @@ pub(crate) async fn cmd_daemon(
             let registry = Arc::new(registry_inner);
             let provider = build_provider(&config)?;
             let mut heartbeats = Vec::new();
+            let advisor_agents = config.advisor_agents();
+            let mut skipped_projects = Vec::new();
+            let mut skipped_advisors = Vec::new();
 
             // Set per-project budget ceilings from config.
             for project_cfg in &config.projects {
@@ -99,7 +98,14 @@ pub(crate) async fn cmd_daemon(
             for project_cfg in &config.projects {
                 let project_dir = match find_project_dir(&project_cfg.name) {
                     Ok(d) => d,
-                    Err(_) => continue,
+                    Err(_) => {
+                        skipped_projects.push(project_cfg.name.clone());
+                        warn!(
+                            project = %project_cfg.name,
+                            "project dir not found, skipping daemon registration"
+                        );
+                        continue;
+                    }
                 };
                 let default_model = config
                     .providers
@@ -108,8 +114,11 @@ pub(crate) async fn cmd_daemon(
                     .map(|or| or.default_model.as_str())
                     .unwrap_or("minimax/minimax-m2.5");
 
-                let rig =
-                    Arc::new(Project::from_config(project_cfg, &project_dir, default_model)?);
+                let rig = Arc::new(Project::from_config(
+                    project_cfg,
+                    &project_dir,
+                    default_model,
+                )?);
                 let workdir = rig.repo.clone();
                 let tasks_dir = project_dir.join(".tasks");
                 let tools = build_project_tools(
@@ -118,12 +127,8 @@ pub(crate) async fn cmd_daemon(
                     &project_cfg.prefix,
                     Some(&rig.worktree_root),
                 );
-                let mut witness = Supervisor::new(
-                    &rig,
-                    provider.clone(),
-                    tools.clone(),
-                    dispatch_bus.clone(),
-                );
+                let mut witness =
+                    Supervisor::new(&rig, provider.clone(), tools.clone(), dispatch_bus.clone());
 
                 // Wire memory + reflection for worker post-execution insight extraction.
                 if let Ok(mem) = open_memory(&config, Some(&project_cfg.name)) {
@@ -143,14 +148,23 @@ pub(crate) async fn cmd_daemon(
                 {
                     let emo_path = EmotionalState::path_for_agent(&project_dir);
                     let emo = EmotionalState::load(&emo_path, &project_cfg.name);
-                    witness.emotional_state =
-                        Some(Arc::new(tokio::sync::Mutex::new(emo)));
+                    witness.emotional_state = Some(Arc::new(tokio::sync::Mutex::new(emo)));
                     witness.emotional_state_path = Some(emo_path);
                 }
 
                 // Wire per-project team if configured.
                 let project_team = config.project_team(&project_cfg.name);
                 witness.set_team(project_team, config.leader());
+
+                // Wire v3 orchestrator config fields.
+                witness.expertise_routing = config.orchestrator.expertise_routing;
+                witness.preflight_enabled = config.orchestrator.preflight_enabled;
+                witness.preflight_model = config.orchestrator.preflight_model.clone();
+                witness.preflight_max_cost_usd = config.orchestrator.preflight_max_cost_usd;
+                witness.adaptive_retry = config.orchestrator.adaptive_retry;
+                witness.failure_analysis_model = config.orchestrator.failure_analysis_model.clone();
+                witness.auto_redecompose = config.orchestrator.auto_redecompose;
+                witness.decomposition_model = config.orchestrator.decomposition_model.clone();
 
                 // Configure execution mode for workers.
                 if project_cfg.execution_mode == ExecutionMode::ClaudeCode {
@@ -177,8 +191,7 @@ pub(crate) async fn cmd_daemon(
                 if config.heartbeat.enabled
                     && let Some(ref hb_content) = rig.project_identity.heartbeat
                 {
-                    let interval =
-                        config.heartbeat.default_interval_minutes as u64 * 60;
+                    let interval = config.heartbeat.default_interval_minutes as u64 * 60;
                     let heartbeat_cfg = sigil_orchestrator::Heartbeat::new(
                         rig.name.clone(),
                         interval,
@@ -194,16 +207,16 @@ pub(crate) async fn cmd_daemon(
             }
 
             // Build channels map for the leader agent.
-            let channels: Arc<
-                RwLock<HashMap<String, Arc<dyn sigil_core::traits::Channel>>>,
-            > = Arc::new(RwLock::new(HashMap::new()));
+            let channels: Arc<RwLock<HashMap<String, Arc<dyn sigil_core::traits::Channel>>>> =
+                Arc::new(RwLock::new(HashMap::new()));
 
             // Register advisor agents as projects (so they can receive tasks).
-            for agent_cfg in config.advisor_agents() {
+            for agent_cfg in &advisor_agents {
                 let agent_dir = match find_agent_dir(&agent_cfg.name) {
                     Ok(d) => d,
                     Err(_) => {
                         warn!(agent = %agent_cfg.name, "advisor agent dir not found, skipping");
+                        skipped_advisors.push(agent_cfg.name.clone());
                         continue;
                     }
                 };
@@ -225,9 +238,7 @@ pub(crate) async fn cmd_daemon(
                     name: agent_cfg.name.clone(),
                     prefix: agent_cfg.prefix.clone(),
                     repo: agent_workdir.clone(),
-                    worktree_root: dirs::home_dir()
-                        .unwrap_or_default()
-                        .join("worktrees"),
+                    worktree_root: dirs::home_dir().unwrap_or_default().join("worktrees"),
                     model: agent_model.clone(),
                     max_workers: agent_cfg.max_workers,
                     worker_timeout_secs: 300, // 5 min timeout for advisor responses
@@ -271,14 +282,11 @@ pub(crate) async fn cmd_daemon(
                 {
                     let emo_path = EmotionalState::path_for_agent(&agent_dir);
                     let emo = EmotionalState::load(&emo_path, &agent_cfg.name);
-                    agent_scout.emotional_state =
-                        Some(Arc::new(tokio::sync::Mutex::new(emo)));
+                    agent_scout.emotional_state = Some(Arc::new(tokio::sync::Mutex::new(emo)));
                     agent_scout.emotional_state_path = Some(emo_path);
                 }
 
-                registry
-                    .register_project(agent_project, agent_scout)
-                    .await;
+                registry.register_project(agent_project, agent_scout).await;
                 info!(
                     agent = %agent_cfg.name,
                     model = %agent_model,
@@ -294,8 +302,7 @@ pub(crate) async fn cmd_daemon(
             )));
 
             // Pre-create task notify so the completion listener and leader agent project share it.
-            let fa_task_notify: Arc<tokio::sync::Notify> =
-                Arc::new(tokio::sync::Notify::new());
+            let fa_task_notify: Arc<tokio::sync::Notify> = Arc::new(tokio::sync::Notify::new());
 
             // Wire Telegram if configured (single SecretStore open for all bot tokens).
             let mut advisor_bots: HashMap<String, Arc<TelegramChannel>> = HashMap::new();
@@ -309,7 +316,7 @@ pub(crate) async fn cmd_daemon(
                 match SecretStore::open(&secret_store_path) {
                     Ok(secret_store) => {
                         // Load advisor Telegram bots (send-only, no polling).
-                        for agent_cfg in config.advisor_agents() {
+                        for agent_cfg in &advisor_agents {
                             if let Some(ref token_key) = agent_cfg.telegram_token_secret
                                 && let Ok(token) = secret_store.get(token_key)
                                 && !token.is_empty()
@@ -346,23 +353,17 @@ pub(crate) async fn cmd_daemon(
                                         let reaction_api_key =
                                             get_api_key(&config).unwrap_or_default();
                                         // Shared HTTP client for Phase 1 reactions (reuses connection pool).
-                                        let phase1_client =
-                                            Arc::new(
-                                                reqwest::Client::builder()
-                                                    .timeout(std::time::Duration::from_secs(15))
-                                                    .build()
-                                                    .expect(
-                                                        "failed to build phase1 reqwest client",
-                                                    ),
-                                            );
+                                        let phase1_client = Arc::new(
+                                            reqwest::Client::builder()
+                                                .timeout(std::time::Duration::from_secs(15))
+                                                .build()
+                                                .expect("failed to build phase1 reqwest client"),
+                                        );
                                         // Persistent conversation history per chat_id (SQLite-backed).
-                                        let conv_db_path =
-                                            find_agent_dir(&leader_name)
-                                                .unwrap_or_else(|_| {
-                                                    PathBuf::from("agents/aurelia")
-                                                })
-                                                .join(".sigil")
-                                                .join("conversations.db");
+                                        let conv_db_path = find_agent_dir(&leader_name)
+                                            .unwrap_or_else(|_| PathBuf::from("agents/aurelia"))
+                                            .join(".sigil")
+                                            .join("conversations.db");
                                         let conversations: Arc<ConversationStore> = Arc::new(
                                             ConversationStore::open(&conv_db_path)
                                                 .expect("failed to open conversation store"),
@@ -371,11 +372,7 @@ pub(crate) async fn cmd_daemon(
                                         let council_advisors: Arc<
                                             Vec<sigil_core::config::PeerAgentConfig>,
                                         > = Arc::new(
-                                            config
-                                                .advisor_agents()
-                                                .into_iter()
-                                                .cloned()
-                                                .collect(),
+                                            config.advisor_agents().into_iter().cloned().collect(),
                                         );
                                         let advisor_bots_outer = advisor_bots.clone();
                                         let debounce_ms = tg_config.debounce_window_ms;
@@ -422,8 +419,8 @@ pub(crate) async fn cmd_daemon(
                 .leader_agent()
                 .cloned()
                 .expect("no leader agent configured");
-            let fa_agent_dir = find_agent_dir(&leader_name)
-                .unwrap_or_else(|_| PathBuf::from("agents/aurelia"));
+            let fa_agent_dir =
+                find_agent_dir(&leader_name).unwrap_or_else(|_| PathBuf::from("agents/aurelia"));
             let fa_identity = Identity::load(&fa_agent_dir, None).unwrap_or_default();
             let fa_tasks_dir = fa_agent_dir.join(".tasks");
             std::fs::create_dir_all(&fa_tasks_dir).ok();
@@ -440,9 +437,7 @@ pub(crate) async fn cmd_daemon(
                 name: leader_name.clone(),
                 prefix: fa_prefix.clone(),
                 repo: fa_workdir.clone(),
-                worktree_root: dirs::home_dir()
-                    .unwrap_or_default()
-                    .join("worktrees"),
+                worktree_root: dirs::home_dir().unwrap_or_default().join("worktrees"),
                 model: fa_model,
                 max_workers: leader_cfg.max_workers,
                 worker_timeout_secs: 1800,
@@ -471,15 +466,12 @@ pub(crate) async fn cmd_daemon(
                 channels.clone(),
                 get_api_key(&config).ok(),
                 fa_memory,
+                registry.blackboard.clone(),
             );
             fa_tools.extend(orch_tools);
 
-            let mut fa_witness = Supervisor::new(
-                &fa_rig,
-                provider.clone(),
-                fa_tools,
-                dispatch_bus.clone(),
-            );
+            let mut fa_witness =
+                Supervisor::new(&fa_rig, provider.clone(), fa_tools, dispatch_bus.clone());
 
             // Wire memory + reflection for leader agent worker insight extraction.
             if let Ok(mem) = open_memory(&config, Some(&leader_name)) {
@@ -499,8 +491,7 @@ pub(crate) async fn cmd_daemon(
             {
                 let emo_path = EmotionalState::path_for_agent(&fa_agent_dir);
                 let emo = EmotionalState::load(&emo_path, &leader_name);
-                fa_witness.emotional_state =
-                    Some(Arc::new(tokio::sync::Mutex::new(emo)));
+                fa_witness.emotional_state = Some(Arc::new(tokio::sync::Mutex::new(emo)));
                 fa_witness.emotional_state_path = Some(emo_path);
             }
 
@@ -543,7 +534,13 @@ pub(crate) async fn cmd_daemon(
 
             // Build lifecycle engine if enabled.
             let lifecycle_engine = if config.lifecycle.enabled {
-                Some(build_lifecycle_engine(&config, &provider, &registry, &dispatch_bus, &leader_name)?)
+                Some(build_lifecycle_engine(
+                    &config,
+                    &provider,
+                    &registry,
+                    &dispatch_bus,
+                    &leader_name,
+                )?)
             } else {
                 None
             };
@@ -551,6 +548,12 @@ pub(crate) async fn cmd_daemon(
             println!("Press Ctrl+C to stop.\n");
 
             let mut daemon = Daemon::new(registry, dispatch_bus);
+            daemon.set_readiness_context(
+                config.projects.len(),
+                advisor_agents.len(),
+                skipped_projects,
+                skipped_advisors,
+            );
             daemon.set_pid_file(pid_path);
             daemon.set_socket_path(socket_path.clone());
             daemon.set_cron_store(cron_store);
@@ -565,7 +568,10 @@ pub(crate) async fn cmd_daemon(
             if !config.watchdogs.is_empty() {
                 let mut rules = Vec::new();
                 for val in &config.watchdogs {
-                    match val.clone().try_into::<sigil_orchestrator::watchdog::WatchdogRule>() {
+                    match val
+                        .clone()
+                        .try_into::<sigil_orchestrator::watchdog::WatchdogRule>()
+                    {
                         Ok(rule) => rules.push(rule),
                         Err(e) => warn!(error = %e, "failed to parse watchdog rule"),
                     }
@@ -627,7 +633,7 @@ pub(crate) async fn cmd_daemon(
                 println!("Daemon: NOT RUNNING");
                 if pid_path.exists() {
                     println!(
-                        "  (stale PID file: {} — run `sg daemon stop` to clean up)",
+                        "  (stale PID file: {} — run `sigil daemon stop` to clean up)",
                         pid_path.display()
                     );
                 }
@@ -712,7 +718,9 @@ fn build_lifecycle_engine(
         let bond =
             sigil_orchestrator::lifecycle::interaction_count_to_bond_level(emo.interaction_count);
         engine.set_bond_level(&agent_cfg.name, bond);
-        engine.agent_dirs.insert(agent_cfg.name.clone(), agent_dir.clone());
+        engine
+            .agent_dirs
+            .insert(agent_cfg.name.clone(), agent_dir.clone());
 
         // Process 1: MemoryConsolidation (bond 0, always active).
         let mem_interval = config.lifecycle.memory_reflection_interval_hours as u64 * 3600;
@@ -1009,9 +1017,7 @@ async fn completion_listener(
             let status = {
                 if let Some(rig) = reg_deliver.get_project(&leader_project_name).await {
                     let store = rig.tasks.lock().await;
-                    store
-                        .get(&qid)
-                        .map(|b| (b.status, b.closed_reason.clone()))
+                    store.get(&qid).map(|b| (b.status, b.closed_reason.clone()))
                 } else {
                     None
                 }
@@ -1031,9 +1037,7 @@ async fn completion_listener(
                         .filter(|r| !r.trim().is_empty())
                         .unwrap_or_else(|| "Done.".to_string());
                     // Record in conversation history.
-                    let _ = convos_deliver
-                        .record(chat_id, "Aurelia", &reply_text)
-                        .await;
+                    let _ = convos_deliver.record(chat_id, "Aurelia", &reply_text).await;
                     let out = sigil_core::traits::OutgoingMessage {
                         channel: "telegram".to_string(),
                         recipient: String::new(),
@@ -1091,8 +1095,7 @@ async fn completion_listener(
                         };
                         let _ = tg_deliver.send(out).await;
                         map.remove(&qid);
-                    } else if elapsed > std::time::Duration::from_secs(120)
-                        && !pq.sent_slow_notice
+                    } else if elapsed > std::time::Duration::from_secs(120) && !pq.sent_slow_notice
                     {
                         pq.sent_slow_notice = true;
                         info!(task = %qid, "telegram reply past 2min, sending progress update");
@@ -1368,7 +1371,10 @@ async fn handle_telegram_message(
                     )
                 };
 
-                let task_id = match reg3.assign(&fam_project_name, &task_subject, &task_desc).await {
+                let task_id = match reg3
+                    .assign(&fam_project_name, &task_subject, &task_desc)
+                    .await
+                {
                     Ok(b) => b.id.0.clone(),
                     Err(e) => {
                         warn!(agent = %adv_name, error = %e, "failed to create advisor task");

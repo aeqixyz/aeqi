@@ -4,13 +4,16 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{info, warn};
 
-use crate::audit::AuditLog;
+use sigil_core::traits::{ChatRequest, Message, MessageContent, Provider, Role};
+
+use crate::audit::{AuditEvent, AuditLog, DecisionType};
 use crate::blackboard::Blackboard;
 use crate::cost_ledger::CostLedger;
+use crate::decomposition::DecompositionResult;
 use crate::expertise::ExpertiseLedger;
+use crate::message::DispatchBus;
 use crate::metrics::SigilMetrics;
 use crate::operation::OperationStore;
-use crate::message::DispatchBus;
 use crate::project::Project;
 use crate::supervisor::Supervisor;
 
@@ -84,10 +87,18 @@ impl ProjectRegistry {
         supervisor.blackboard = self.blackboard.clone();
         self.metrics.ensure_project(&name);
         self.projects.write().await.insert(name.clone(), project);
-        self.supervisors.write().await.insert(name, Arc::new(Mutex::new(supervisor)));
+        self.supervisors
+            .write()
+            .await
+            .insert(name, Arc::new(Mutex::new(supervisor)));
     }
 
-    pub async fn assign(&self, project_name: &str, subject: &str, description: &str) -> Result<sigil_tasks::Task> {
+    pub async fn assign(
+        &self,
+        project_name: &str,
+        subject: &str,
+        description: &str,
+    ) -> Result<sigil_tasks::Task> {
         let projects = self.projects.read().await;
         let project = projects
             .get(project_name)
@@ -113,15 +124,109 @@ impl ProjectRegistry {
         Ok(task)
     }
 
+    /// Create a mission and optionally decompose it into a task DAG using an LLM.
+    pub async fn create_mission_with_decomposition(
+        &self,
+        project_name: &str,
+        mission_name: &str,
+        description: &str,
+        decomposition_model: &str,
+        provider: &Arc<dyn Provider>,
+    ) -> Result<sigil_tasks::Mission> {
+        let projects = self.projects.read().await;
+        let project = projects
+            .get(project_name)
+            .ok_or_else(|| anyhow::anyhow!("project not found: {project_name}"))?;
+
+        let mut store = project.tasks.lock().await;
+        let mut mission = store.create_mission(&project.prefix, mission_name)?;
+
+        if !description.is_empty() {
+            mission = store.update_mission(&mission.id, |m| {
+                m.description = description.to_string();
+            })?;
+        }
+
+        // Decompose if model is provided and description is non-empty.
+        if !decomposition_model.is_empty() && !description.is_empty() {
+            let prompt = DecompositionResult::decomposition_prompt(mission_name, description);
+            let request = ChatRequest {
+                model: decomposition_model.to_string(),
+                messages: vec![Message {
+                    role: Role::User,
+                    content: MessageContent::text(&prompt),
+                }],
+                tools: vec![],
+                max_tokens: 2048,
+                temperature: 0.0,
+            };
+            match provider.chat(&request).await {
+                Ok(response) if response.content.is_some() => {
+                    let mut result =
+                        DecompositionResult::parse(response.content.as_deref().unwrap());
+                    let task_ids = result.materialize(&mut store, &project.prefix, &mission.id)?;
+                    info!(
+                        project = %project_name,
+                        mission = %mission.id,
+                        tasks = task_ids.len(),
+                        critical_path = result.critical_path.len(),
+                        "mission decomposed into task DAG"
+                    );
+
+                    if let Some(ref audit) = self.audit_log {
+                        let _ = audit.record(
+                            &AuditEvent::new(
+                                project_name,
+                                DecisionType::MissionDecomposed,
+                                format!(
+                                    "Mission {} decomposed into {} tasks",
+                                    mission.id,
+                                    task_ids.len()
+                                ),
+                            )
+                            .with_task(&mission.id),
+                        );
+                    }
+                }
+                Ok(_) => {
+                    warn!(
+                        project = %project_name,
+                        mission = %mission.id,
+                        "decomposition returned empty response"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        project = %project_name,
+                        mission = %mission.id,
+                        error = %e,
+                        "decomposition failed"
+                    );
+                }
+            }
+        }
+
+        self.wake.notify_one();
+        Ok(mission)
+    }
+
     pub async fn patrol_all(&self) -> Result<()> {
         let whispers = self.dispatch_bus.read(&self.leader_agent_name).await;
         for w in &whispers {
             let mut handled = true;
             match &w.kind {
-                crate::message::DispatchKind::PatrolReport { project, active, pending } => {
+                crate::message::DispatchKind::PatrolReport {
+                    project,
+                    active,
+                    pending,
+                } => {
                     info!(from = %w.from, project = %project, active = active, pending = pending, "supervisor report");
                 }
-                crate::message::DispatchKind::WorkerCrashed { project, worker, error } => {
+                crate::message::DispatchKind::WorkerCrashed {
+                    project,
+                    worker,
+                    error,
+                } => {
                     warn!(from = %w.from, project = %project, worker = %worker, error = %error, "worker crashed");
                 }
                 crate::message::DispatchKind::TaskDone { task_id, .. } => {
@@ -153,7 +258,10 @@ impl ProjectRegistry {
         // Parallel patrol: collect Arc clones, drop read lock, then join_all.
         let supervisor_entries: Vec<(String, Arc<Mutex<Supervisor>>)> = {
             let supervisors = self.supervisors.read().await;
-            supervisors.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+            supervisors
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
         };
 
         let futures: Vec<_> = supervisor_entries
@@ -225,7 +333,10 @@ impl ProjectRegistry {
             });
         }
 
-        let unread = self.dispatch_bus.unread_count(&self.leader_agent_name).await;
+        let unread = self
+            .dispatch_bus
+            .unread_count(&self.leader_agent_name)
+            .await;
 
         RegistryStatus {
             projects: project_statuses,
@@ -257,18 +368,37 @@ impl ProjectRegistry {
     }
 
     pub async fn total_max_workers(&self) -> u32 {
-        self.projects.read().await.values().map(|d| d.max_workers).sum()
+        self.projects
+            .read()
+            .await
+            .values()
+            .map(|d| d.max_workers)
+            .sum()
+    }
+
+    pub async fn project_worker_limits(&self) -> Vec<(String, u32)> {
+        self.projects
+            .read()
+            .await
+            .iter()
+            .map(|(name, project)| (name.clone(), project.max_workers))
+            .collect()
     }
 
     pub async fn projects_info(&self) -> Vec<serde_json::Value> {
-        self.projects.read().await.values().map(|d| {
-            serde_json::json!({
-                "name": d.name,
-                "prefix": d.prefix,
-                "model": d.model,
-                "max_workers": d.max_workers,
+        self.projects
+            .read()
+            .await
+            .values()
+            .map(|d| {
+                serde_json::json!({
+                    "name": d.name,
+                    "prefix": d.prefix,
+                    "model": d.model,
+                    "max_workers": d.max_workers,
+                })
             })
-        }).collect()
+            .collect()
     }
 
     /// Get a supervisor by project name (for config reload).
@@ -277,8 +407,15 @@ impl ProjectRegistry {
     }
 
     /// Get a project's TaskBoard for direct task/mission access.
-    pub async fn get_task_board(&self, project_name: &str) -> Option<std::sync::Arc<tokio::sync::Mutex<sigil_tasks::TaskBoard>>> {
-        self.projects.read().await.get(project_name).map(|p| p.tasks.clone())
+    pub async fn get_task_board(
+        &self,
+        project_name: &str,
+    ) -> Option<std::sync::Arc<tokio::sync::Mutex<sigil_tasks::TaskBoard>>> {
+        self.projects
+            .read()
+            .await
+            .get(project_name)
+            .map(|p| p.tasks.clone())
     }
 
     /// List all projects with summary stats (task counts, mission counts, team info).
@@ -364,12 +501,12 @@ mod tests {
     use crate::message::{Dispatch, DispatchKind};
     use anyhow::Result;
     use async_trait::async_trait;
+    use sigil_core::ExecutionMode;
     use sigil_core::config::ProjectConfig;
     use sigil_core::traits::{ChatRequest, ChatResponse, Provider, StopReason, Usage};
-    use sigil_core::ExecutionMode;
     use std::path::Path;
     use tempfile::TempDir;
-    use tokio::time::{sleep, Duration};
+    use tokio::time::{Duration, sleep};
 
     struct DoneProvider;
 
@@ -456,7 +593,10 @@ mod tests {
             sleep(Duration::from_millis(20)).await;
         }
 
-        assert!(completed, "operation should close after TaskDone dispatch is processed");
+        assert!(
+            completed,
+            "operation should close after TaskDone dispatch is processed"
+        );
     }
 
     #[tokio::test]
@@ -536,6 +676,9 @@ mod tests {
         registry.patrol_all().await.unwrap();
 
         let retries = dispatch_bus.retry_unacked(0).await;
-        assert!(retries.is_empty(), "processed TaskDone dispatch should be acknowledged");
+        assert!(
+            retries.is_empty(),
+            "processed TaskDone dispatch should be acknowledged"
+        );
     }
 }
