@@ -124,21 +124,35 @@ impl Channel for TelegramChannel {
 
                 match result {
                     Ok(response) => {
-                        match response.json::<TelegramResponse<Vec<TelegramUpdate>>>().await {
+                        match response
+                            .json::<TelegramResponse<Vec<TelegramUpdate>>>()
+                            .await
+                        {
                             Ok(body) if body.ok => {
                                 backoff_secs = 1;
                                 for update in body.result.unwrap_or_default() {
                                     offset = Some(update.update_id + 1);
 
                                     if let Some(msg) = update.message {
-                                        if !allowed_chats.is_empty() && !allowed_chats.contains(&msg.chat.id) {
-                                            debug!(chat_id = msg.chat.id, "ignoring message from unauthorized chat");
+                                        if !allowed_chats.is_empty()
+                                            && !allowed_chats.contains(&msg.chat.id)
+                                        {
+                                            debug!(
+                                                chat_id = msg.chat.id,
+                                                "ignoring message from unauthorized chat"
+                                            );
                                             continue;
                                         }
 
                                         if let Some(text) = msg.text {
-                                            let react_url = format!("{}/bot{}/setMessageReaction", TELEGRAM_API, token);
-                                            let typing_url = format!("{}/bot{}/sendChatAction", TELEGRAM_API, token);
+                                            let react_url = format!(
+                                                "{}/bot{}/setMessageReaction",
+                                                TELEGRAM_API, token
+                                            );
+                                            let typing_url = format!(
+                                                "{}/bot{}/sendChatAction",
+                                                TELEGRAM_API, token
+                                            );
                                             let c1 = client.clone();
                                             let c2 = client.clone();
                                             let chat = msg.chat.id;
@@ -157,9 +171,10 @@ impl Channel for TelegramChannel {
                                                 );
                                             });
 
-                                            let sender = msg.from.map(|u| {
-                                                u.username.unwrap_or(u.first_name)
-                                            }).unwrap_or_else(|| "unknown".to_string());
+                                            let sender = msg
+                                                .from
+                                                .map(|u| u.username.unwrap_or(u.first_name))
+                                                .unwrap_or_else(|| "unknown".to_string());
 
                                             info!(sender = %sender, "received telegram message");
 
@@ -182,12 +197,14 @@ impl Channel for TelegramChannel {
                             }
                             Ok(body) => {
                                 error!(description = ?body.description, backoff_secs, "Telegram API error");
-                                tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
+                                tokio::time::sleep(std::time::Duration::from_secs(backoff_secs))
+                                    .await;
                                 backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
                             }
                             Err(e) => {
                                 error!(error = %e, backoff_secs, "failed to parse Telegram response");
-                                tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
+                                tokio::time::sleep(std::time::Duration::from_secs(backoff_secs))
+                                    .await;
                                 backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
                             }
                         }
@@ -206,7 +223,9 @@ impl Channel for TelegramChannel {
     }
 
     async fn send(&self, message: OutgoingMessage) -> Result<()> {
-        let chat_id = message.metadata.get("chat_id")
+        let chat_id = message
+            .metadata
+            .get("chat_id")
             .and_then(|v| v.as_i64())
             .context("missing chat_id in metadata")?;
 
@@ -217,7 +236,8 @@ impl Channel for TelegramChannel {
             parse_mode: Some("Markdown".to_string()),
         };
 
-        let response = self.client
+        let response = self
+            .client
             .post(self.api_url("sendMessage"))
             .json(&send_msg)
             .send()
@@ -233,7 +253,8 @@ impl Channel for TelegramChannel {
                 text: message.text,
                 parse_mode: None,
             };
-            let response = self.client
+            let response = self
+                .client
                 .post(self.api_url("sendMessage"))
                 .json(&plain_msg)
                 .send()
@@ -241,7 +262,10 @@ impl Channel for TelegramChannel {
                 .context("failed to send Telegram message (plain)")?;
             let body: TelegramResponse<serde_json::Value> = response.json().await?;
             if !body.ok {
-                anyhow::bail!("Telegram sendMessage failed: {}", body.description.unwrap_or_default());
+                anyhow::bail!(
+                    "Telegram sendMessage failed: {}",
+                    body.description.unwrap_or_default()
+                );
             }
         }
 
@@ -249,7 +273,8 @@ impl Channel for TelegramChannel {
     }
 
     async fn react(&self, chat_id: i64, message_id: i64, emoji: &str) -> Result<()> {
-        let response = self.client
+        let response = self
+            .client
             .post(self.api_url("setMessageReaction"))
             .json(&serde_json::json!({
                 "chat_id": chat_id,
@@ -263,11 +288,16 @@ impl Channel for TelegramChannel {
         if response.status().is_success() {
             Ok(())
         } else {
-            Err(anyhow::anyhow!("reaction request failed: {}", response.status()))
+            Err(anyhow::anyhow!(
+                "reaction request failed: {}",
+                response.status()
+            ))
         }
     }
 
-    fn name(&self) -> &str { "telegram" }
+    fn name(&self) -> &str {
+        "telegram"
+    }
 
     async fn stop(&self) -> Result<()> {
         let _ = self.shutdown.send(true);

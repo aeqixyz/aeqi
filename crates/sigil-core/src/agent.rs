@@ -122,9 +122,10 @@ impl Agent {
                         .join("\n");
 
                     if let Some(msg) = messages.first_mut()
-                        && let MessageContent::Text(t) = &mut msg.content {
-                            *t = format!("{t}\n\n# Recalled Memory\n{ctx}");
-                        }
+                        && let MessageContent::Text(t) = &mut msg.content
+                    {
+                        *t = format!("{t}\n\n# Recalled Memory\n{ctx}");
+                    }
 
                     debug!(agent = %self.config.name, count = entries.len(), "memory context injected");
                 }
@@ -205,9 +206,7 @@ impl Agent {
             // Build assistant message with tool use parts.
             let mut assistant_parts: Vec<ContentPart> = Vec::new();
             if let Some(ref text) = response.content {
-                assistant_parts.push(ContentPart::Text {
-                    text: text.clone(),
-                });
+                assistant_parts.push(ContentPart::Text { text: text.clone() });
             }
             for tc in &response.tool_calls {
                 assistant_parts.push(ContentPart::ToolUse {
@@ -223,18 +222,22 @@ impl Agent {
             });
 
             // Execute tool calls in parallel for concurrency.
-            let tool_futures: Vec<_> = response.tool_calls.iter().map(|tc| {
-                let tools = self.tools.clone();
-                let name = tc.name.clone();
-                let args = tc.arguments.clone();
-                let id = tc.id.clone();
-                async move {
-                    let start = std::time::Instant::now();
-                    let result = Self::execute_tool_static(&tools, &name, args).await;
-                    let duration_ms = start.elapsed().as_millis() as u64;
-                    (id, name, result, duration_ms)
-                }
-            }).collect();
+            let tool_futures: Vec<_> = response
+                .tool_calls
+                .iter()
+                .map(|tc| {
+                    let tools = self.tools.clone();
+                    let name = tc.name.clone();
+                    let args = tc.arguments.clone();
+                    let id = tc.id.clone();
+                    async move {
+                        let start = std::time::Instant::now();
+                        let result = Self::execute_tool_static(&tools, &name, args).await;
+                        let duration_ms = start.elapsed().as_millis() as u64;
+                        (id, name, result, duration_ms)
+                    }
+                })
+                .collect();
 
             let results = futures::future::join_all(tool_futures).await;
 
@@ -282,9 +285,14 @@ impl Agent {
             if mid_loop_recalls < MAX_MID_LOOP_RECALLS
                 && let Some(ref mem) = self.memory
             {
-                let tool_output: String = tool_result_parts.iter()
+                let tool_output: String = tool_result_parts
+                    .iter()
                     .filter_map(|p| match p {
-                        ContentPart::ToolResult { content, is_error: false, .. } => Some(content.as_str()),
+                        ContentPart::ToolResult {
+                            content,
+                            is_error: false,
+                            ..
+                        } => Some(content.as_str()),
                         _ => None,
                     })
                     .collect::<Vec<_>>()
@@ -295,15 +303,16 @@ impl Agent {
                     if let Ok(entries) = mem.search(&mq).await
                         && !entries.is_empty()
                     {
-                        let ctx = entries.iter()
+                        let ctx = entries
+                            .iter()
                             .map(|e| format!("[{}] {}: {}", e.scope, e.key, e.content))
                             .collect::<Vec<_>>()
                             .join("\n");
                         messages.push(Message {
                             role: Role::System,
-                            content: MessageContent::text(
-                                format!("# Updated Memory Recall\n{ctx}")
-                            ),
+                            content: MessageContent::text(format!(
+                                "# Updated Memory Recall\n{ctx}"
+                            )),
                         });
                         mid_loop_recalls += 1;
                         debug!(

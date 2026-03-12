@@ -1,5 +1,5 @@
-use crate::task::{Task, TaskStatus, Priority};
 use crate::store::TaskBoard;
+use crate::task::{Priority, Task, TaskStatus};
 
 /// Query builder for filtering tasks.
 pub struct TaskQuery<'a> {
@@ -73,29 +73,35 @@ impl<'a> TaskQuery<'a> {
                     return false;
                 }
                 if let Some(ref prefix) = self.prefix
-                    && b.id.prefix() != prefix {
-                        return false;
-                    }
+                    && b.id.prefix() != prefix
+                {
+                    return false;
+                }
                 if let Some(ref status) = self.status
-                    && &b.status != status {
-                        return false;
-                    }
+                    && &b.status != status
+                {
+                    return false;
+                }
                 if let Some(ref assignee) = self.assignee
-                    && b.assignee.as_deref() != Some(assignee.as_str()) {
-                        return false;
-                    }
+                    && b.assignee.as_deref() != Some(assignee.as_str())
+                {
+                    return false;
+                }
                 if let Some(ref label) = self.label
-                    && !b.labels.contains(label) {
-                        return false;
-                    }
+                    && !b.labels.contains(label)
+                {
+                    return false;
+                }
                 if let Some(ref mid) = self.mission_id
-                    && b.mission_id.as_deref() != Some(mid.as_str()) {
-                        return false;
-                    }
+                    && b.mission_id.as_deref() != Some(mid.as_str())
+                {
+                    return false;
+                }
                 if let Some(ref min_pri) = self.min_priority
-                    && b.priority < *min_pri {
-                        return false;
-                    }
+                    && b.priority < *min_pri
+                {
+                    return false;
+                }
                 true
             })
             .collect();

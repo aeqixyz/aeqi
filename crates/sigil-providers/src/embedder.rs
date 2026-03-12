@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use sigil_core::traits::Embedder;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use sigil_core::traits::Embedder;
 use tracing::debug;
 
 const OPENROUTER_EMBED_URL: &str = "https://openrouter.ai/api/v1/embeddings";
@@ -20,7 +20,12 @@ impl OpenRouterEmbedder {
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .expect("failed to build HTTP client");
-        Self { client, api_key, model: model.into(), dimensions }
+        Self {
+            client,
+            api_key,
+            model: model.into(),
+            dimensions,
+        }
     }
 }
 
@@ -55,12 +60,16 @@ impl Embedder for OpenRouterEmbedder {
     async fn embed(&self, text: &str) -> Result<Vec<f32>> {
         debug!(model = %self.model, len = text.len(), "embedding text");
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(OPENROUTER_EMBED_URL)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("HTTP-Referer", "https://sigil.dev")
             .header("X-Title", "System Memory")
-            .json(&EmbedRequest { model: &self.model, input: text })
+            .json(&EmbedRequest {
+                model: &self.model,
+                input: text,
+            })
             .send()
             .await
             .context("embedding request failed")?;
@@ -74,8 +83,14 @@ impl Embedder for OpenRouterEmbedder {
             anyhow::bail!("embedding API error ({status}): {body}");
         }
 
-        let parsed: EmbedResponse = resp.json().await.context("failed to parse embedding response")?;
-        parsed.data.into_iter().next()
+        let parsed: EmbedResponse = resp
+            .json()
+            .await
+            .context("failed to parse embedding response")?;
+        parsed
+            .data
+            .into_iter()
+            .next()
             .map(|d| d.embedding)
             .context("no embedding data in response")
     }

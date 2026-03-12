@@ -151,9 +151,7 @@ pub struct ScanProject {
 /// What this process does.
 pub enum ProcessKind {
     /// Consolidate MEMORY.md — deduplicate, compress, merge.
-    MemoryConsolidation {
-        memory: Option<Arc<dyn Memory>>,
-    },
+    MemoryConsolidation { memory: Option<Arc<dyn Memory>> },
     /// Evolve personality — append to EVOLUTION.md, micro-adjust IDENTITY.md.
     Evolution,
     /// Audit projects, create tasks or dispatch proposals.
@@ -190,7 +188,11 @@ impl ProcessKind {
             Self::MemoryConsolidation { .. } => 0,
             Self::Evolution => 3,
             Self::ProactiveScan { cross_project, .. } => {
-                if *cross_project { 8 } else { 5 }
+                if *cross_project {
+                    8
+                } else {
+                    5
+                }
             }
         }
     }
@@ -250,9 +252,9 @@ impl LifecycleProcess {
         // Compute these before the mutable borrow on cached_state.
         let path = self.state_path();
         let name = self.kind.name().to_string();
-        let state = self.cached_state.get_or_insert_with(|| {
-            LifecycleState::load(&path)
-        });
+        let state = self
+            .cached_state
+            .get_or_insert_with(|| LifecycleState::load(&path));
         if let Some(&ts) = state.last_run.get(&name) {
             let elapsed = Utc::now().timestamp() - ts;
             return elapsed >= self.interval_secs as i64;
@@ -264,9 +266,9 @@ impl LifecycleProcess {
     fn persist_last_run(&mut self) {
         let path = self.state_path();
         let name = self.kind.name().to_string();
-        let state = self.cached_state.get_or_insert_with(|| {
-            LifecycleState::load(&path)
-        });
+        let state = self
+            .cached_state
+            .get_or_insert_with(|| LifecycleState::load(&path));
         state.last_run.insert(name, Utc::now().timestamp());
         let _ = state.save(&path);
         self.last_run = Some(std::time::Instant::now());
@@ -311,14 +313,27 @@ impl LifecycleProcess {
         let snippet = truncate_chars(&current, 3000);
 
         // Read recent SQLite memories (all scopes — Domain, Entity, and System).
-        let sqlite_entries = if let ProcessKind::MemoryConsolidation { memory: Some(ref mem) } = self.kind {
+        let sqlite_entries = if let ProcessKind::MemoryConsolidation {
+            memory: Some(ref mem),
+        } = self.kind
+        {
             let query = sigil_core::traits::MemoryQuery::new(
-                format!("{} recent activity", self.agent_name), 10,
+                format!("{} recent activity", self.agent_name),
+                10,
             );
             match mem.search(&query).await {
-                Ok(entries) => entries.iter()
-                    .map(|e| format!("- [{}] {}: {}", e.scope, e.key, truncate_chars(&e.content, 200)))
-                    .collect::<Vec<_>>().join("\n"),
+                Ok(entries) => entries
+                    .iter()
+                    .map(|e| {
+                        format!(
+                            "- [{}] {}: {}",
+                            e.scope,
+                            e.key,
+                            truncate_chars(&e.content, 200)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
                 _ => String::new(),
             }
         } else {
@@ -344,7 +359,11 @@ impl LifecycleProcess {
              If no consolidation is needed, output exactly: NO_CHANGES",
             name = self.agent_name,
             mem = snippet,
-            sql = if sqlite_entries.is_empty() { "(none)" } else { &sqlite_entries },
+            sql = if sqlite_entries.is_empty() {
+                "(none)"
+            } else {
+                &sqlite_entries
+            },
         );
 
         let (text, cost) = self.chat(&prompt, 2000, 0.2).await?;
@@ -358,10 +377,20 @@ impl LifecycleProcess {
             } else {
                 std::fs::write(&memory_path, &content)?;
                 // Store summary in SQLite.
-                if let ProcessKind::MemoryConsolidation { memory: Some(ref mem) } = self.kind {
+                if let ProcessKind::MemoryConsolidation {
+                    memory: Some(ref mem),
+                } = self.kind
+                {
                     let key = format!("mem-reflect-{}", Utc::now().timestamp());
-                    let _ = mem.store(&key, "Memory consolidated by lifecycle engine",
-                        MemoryCategory::Fact, MemoryScope::Entity, None).await;
+                    let _ = mem
+                        .store(
+                            &key,
+                            "Memory consolidated by lifecycle engine",
+                            MemoryCategory::Fact,
+                            MemoryScope::Entity,
+                            None,
+                        )
+                        .await;
                 }
                 format!("consolidated MEMORY.md ({} chars)", content.len())
             }
@@ -376,7 +405,8 @@ impl LifecycleProcess {
     // ── Evolution ───────────────────────────────────────────
 
     async fn run_evolution(&mut self, dry_run: bool) -> Result<(String, f64)> {
-        let persona = std::fs::read_to_string(self.agent_dir.join("PERSONA.md")).unwrap_or_default();
+        let persona =
+            std::fs::read_to_string(self.agent_dir.join("PERSONA.md")).unwrap_or_default();
         let identity_path = self.agent_dir.join("IDENTITY.md");
         let identity = std::fs::read_to_string(&identity_path).unwrap_or_default();
         let memory = std::fs::read_to_string(self.agent_dir.join("MEMORY.md")).unwrap_or_default();
@@ -415,8 +445,16 @@ impl LifecycleProcess {
             persona = truncate_chars(&persona, 2000),
             identity = truncate_chars(&identity, 1500),
             memory = truncate_chars(&memory, 1500),
-            emo = if emo_ctx.is_empty() { "(none)".to_string() } else { truncate_chars(&emo_ctx, 500) },
-            evolution = if evolution.is_empty() { "(none)".to_string() } else { truncate_chars(&evolution, 2000) },
+            emo = if emo_ctx.is_empty() {
+                "(none)".to_string()
+            } else {
+                truncate_chars(&emo_ctx, 500)
+            },
+            evolution = if evolution.is_empty() {
+                "(none)".to_string()
+            } else {
+                truncate_chars(&evolution, 2000)
+            },
         );
 
         let (text, cost) = self.chat(&prompt, 2000, 0.3).await?;
@@ -434,15 +472,19 @@ impl LifecycleProcess {
                     if full.len() + entry.len() > 4000 {
                         // Truncate at clean paragraph boundary.
                         let keep_from = full.len().saturating_sub(3000);
-                        let cut = full[keep_from..].find("\n\n")
+                        let cut = full[keep_from..]
+                            .find("\n\n")
                             .map(|p| keep_from + p + 2)
                             .unwrap_or(keep_from);
                         full = format!(
                             "*(earlier entries consolidated)*\n\n{}\n\n{}",
-                            &full[cut..], entry
+                            &full[cut..],
+                            entry
                         );
                     } else {
-                        if !full.is_empty() { full.push_str("\n\n"); }
+                        if !full.is_empty() {
+                            full.push_str("\n\n");
+                        }
                         full.push_str(&entry);
                     }
                     std::fs::write(&evolution_path, &full)?;
@@ -452,7 +494,10 @@ impl LifecycleProcess {
 
             if let Some(new_identity) = parse_file_update(&text, "IDENTITY.md") {
                 if dry_run {
-                    changes.push(format!("IDENTITY.md (dry run, {} chars)", new_identity.len()));
+                    changes.push(format!(
+                        "IDENTITY.md (dry run, {} chars)",
+                        new_identity.len()
+                    ));
                 } else {
                     std::fs::write(&identity_path, &new_identity)?;
                     changes.push("IDENTITY.md".to_string());
@@ -474,7 +519,13 @@ impl LifecycleProcess {
 
     async fn run_proactive_scan(&mut self, dry_run: bool) -> Result<(String, f64)> {
         // Check if cross-project mode.
-        let is_cross = matches!(&self.kind, ProcessKind::ProactiveScan { cross_project: true, .. });
+        let is_cross = matches!(
+            &self.kind,
+            ProcessKind::ProactiveScan {
+                cross_project: true,
+                ..
+            }
+        );
 
         if is_cross {
             return self.run_cross_project_ideation(dry_run).await;
@@ -510,8 +561,10 @@ impl LifecycleProcess {
 
         self.persist_last_run();
         Ok((
-            format!("scanned {} projects, created {} tasks, proposed {} ideas",
-                project_count, total_created, total_proposed),
+            format!(
+                "scanned {} projects, created {} tasks, proposed {} ideas",
+                project_count, total_created, total_proposed
+            ),
             total_cost,
         ))
     }
@@ -521,7 +574,12 @@ impl LifecycleProcess {
         let (proj_name, proj_prefix, proj_dir, repo_path) = match &self.kind {
             ProcessKind::ProactiveScan { projects, .. } => {
                 let p = &projects[idx];
-                (p.name.clone(), p.prefix.clone(), p.project_dir.clone(), p.repo_path.clone())
+                (
+                    p.name.clone(),
+                    p.prefix.clone(),
+                    p.project_dir.clone(),
+                    p.repo_path.clone(),
+                )
             }
             _ => unreachable!(),
         };
@@ -530,7 +588,8 @@ impl LifecycleProcess {
         let mut improvement_reg = ImprovementRegistry::load(&registry_path);
 
         let agents_md = std::fs::read_to_string(proj_dir.join("AGENTS.md")).unwrap_or_default();
-        let knowledge_md = std::fs::read_to_string(proj_dir.join("KNOWLEDGE.md")).unwrap_or_default();
+        let knowledge_md =
+            std::fs::read_to_string(proj_dir.join("KNOWLEDGE.md")).unwrap_or_default();
 
         // Non-blocking git log.
         let git_log = if let Some(ref rp) = repo_path {
@@ -546,8 +605,16 @@ impl LifecycleProcess {
             String::new()
         };
 
-        let prev: Vec<String> = improvement_reg.improvements.iter()
-            .map(|i| format!("- [{}] {}", serde_json::to_string(&i.status).unwrap_or_default(), i.subject))
+        let prev: Vec<String> = improvement_reg
+            .improvements
+            .iter()
+            .map(|i| {
+                format!(
+                    "- [{}] {}",
+                    serde_json::to_string(&i.status).unwrap_or_default(),
+                    i.subject
+                )
+            })
             .collect();
 
         let prompt = format!(
@@ -574,11 +641,17 @@ impl LifecycleProcess {
              Confidence: <0.0-1.0>\n\
              END PROPOSAL\n\n\
              If nothing needed, output exactly: NO_GAPS",
-            name = proj_name, prefix = proj_prefix, agent = self.agent_name,
+            name = proj_name,
+            prefix = proj_prefix,
+            agent = self.agent_name,
             agents = truncate_chars(&agents_md, 2000),
             knowledge = truncate_chars(&knowledge_md, 2000),
             git = truncate_chars(&git_log, 1000),
-            prev = if prev.is_empty() { "(none)".to_string() } else { prev.join("\n") },
+            prev = if prev.is_empty() {
+                "(none)".to_string()
+            } else {
+                prev.join("\n")
+            },
         );
 
         let (text, cost) = self.chat(&prompt, 1500, 0.2).await?;
@@ -591,11 +664,20 @@ impl LifecycleProcess {
         let mut created = 0;
         let mut proposed = 0;
 
-        let ProcessKind::ProactiveScan { ref registry, ref dispatch_bus, ref system_leader, .. } = self.kind
-        else { unreachable!() };
+        let ProcessKind::ProactiveScan {
+            ref registry,
+            ref dispatch_bus,
+            ref system_leader,
+            ..
+        } = self.kind
+        else {
+            unreachable!()
+        };
 
         for p in proposals {
-            if improvement_reg.already_proposed(&p.subject) { continue; }
+            if improvement_reg.already_proposed(&p.subject) {
+                continue;
+            }
 
             if dry_run {
                 info!(agent=%self.agent_name, project=%proj_name, subject=%p.subject,
@@ -605,7 +687,10 @@ impl LifecycleProcess {
             }
 
             if p.confidence >= 0.7 {
-                match registry.assign(&proj_name, &p.subject, &p.description).await {
+                match registry
+                    .assign(&proj_name, &p.subject, &p.description)
+                    .await
+                {
                     Ok(task) => {
                         info!(agent=%self.agent_name, project=%proj_name, task=%task.id,
                             confidence=p.confidence, "proactive scan: auto-created task");
@@ -617,10 +702,13 @@ impl LifecycleProcess {
                 }
             } else {
                 let dispatch = Dispatch::new_typed(
-                    &self.agent_name, system_leader,
+                    &self.agent_name,
+                    system_leader,
                     DispatchKind::TaskProposal {
-                        project: proj_name.clone(), prefix: proj_prefix.clone(),
-                        subject: p.subject.clone(), description: p.description.clone(),
+                        project: proj_name.clone(),
+                        prefix: proj_prefix.clone(),
+                        subject: p.subject.clone(),
+                        description: p.description.clone(),
                         confidence: p.confidence,
                         reasoning: format!("Proactive scan by {}", self.agent_name),
                     },
@@ -637,23 +725,34 @@ impl LifecycleProcess {
 
     async fn run_cross_project_ideation(&mut self, dry_run: bool) -> Result<(String, f64)> {
         let memory = std::fs::read_to_string(self.agent_dir.join("MEMORY.md")).unwrap_or_default();
-        let evolution = std::fs::read_to_string(self.agent_dir.join("EVOLUTION.md")).unwrap_or_default();
+        let evolution =
+            std::fs::read_to_string(self.agent_dir.join("EVOLUTION.md")).unwrap_or_default();
 
         // Load ideas registry for anti-spam.
         let ideas_path = self.agent_dir.join(".sigil/improvements.json");
         let mut reg = ImprovementRegistry::load(&ideas_path);
 
         let ProcessKind::ProactiveScan {
-            ref project_knowledge, ref dispatch_bus, ref system_leader, ..
+            ref project_knowledge,
+            ref dispatch_bus,
+            ref system_leader,
+            ..
         } = self.kind
-        else { unreachable!() };
+        else {
+            unreachable!()
+        };
 
-        let knowledge_summary: String = project_knowledge.iter()
+        let knowledge_summary: String = project_knowledge
+            .iter()
             .map(|(name, k)| format!("### {name}\n{}", truncate_chars(k, 500)))
-            .collect::<Vec<_>>().join("\n\n");
+            .collect::<Vec<_>>()
+            .join("\n\n");
 
-        let prev: Vec<String> = reg.improvements.iter()
-            .map(|i| format!("- {}", i.subject)).collect();
+        let prev: Vec<String> = reg
+            .improvements
+            .iter()
+            .map(|i| format!("- {}", i.subject))
+            .collect();
 
         let prompt = format!(
             "You are the creative ideation system for agent '{name}'.\n\n\
@@ -679,7 +778,11 @@ impl LifecycleProcess {
             memory = truncate_chars(&memory, 1000),
             evolution = truncate_chars(&evolution, 500),
             knowledge = truncate_chars(&knowledge_summary, 2000),
-            prev = if prev.is_empty() { "(none)".to_string() } else { prev.join("\n") },
+            prev = if prev.is_empty() {
+                "(none)".to_string()
+            } else {
+                prev.join("\n")
+            },
         );
 
         let (text, cost) = self.chat(&prompt, 1500, 0.5).await?;
@@ -693,7 +796,9 @@ impl LifecycleProcess {
         let mut dispatched = 0;
 
         for p in proposals {
-            if reg.already_proposed(&p.subject) { continue; }
+            if reg.already_proposed(&p.subject) {
+                continue;
+            }
 
             if dry_run {
                 info!(agent=%self.agent_name, subject=%p.subject, "DRY RUN: would dispatch idea");
@@ -702,10 +807,13 @@ impl LifecycleProcess {
             }
 
             let dispatch = Dispatch::new_typed(
-                &self.agent_name, system_leader,
+                &self.agent_name,
+                system_leader,
                 DispatchKind::TaskProposal {
-                    project: String::new(), prefix: String::new(),
-                    subject: p.subject.clone(), description: p.description.clone(),
+                    project: String::new(),
+                    prefix: String::new(),
+                    subject: p.subject.clone(),
+                    description: p.description.clone(),
                     confidence: p.confidence,
                     reasoning: format!("Creative ideation by {}", self.agent_name),
                 },
@@ -735,7 +843,6 @@ pub struct LifecycleEngine {
     pub cost_ledger: Option<Arc<CostLedger>>,
     pub dry_run: bool,
 }
-
 
 impl LifecycleEngine {
     pub fn new() -> Self {
@@ -768,9 +875,17 @@ impl LifecycleEngine {
         let dry_run = self.dry_run;
 
         for process in self.processes.iter_mut() {
-            let bond = self.bond_levels.get(&process.agent_name).copied().unwrap_or(0);
-            if bond < process.required_bond() { continue; }
-            if !process.is_due() { continue; }
+            let bond = self
+                .bond_levels
+                .get(&process.agent_name)
+                .copied()
+                .unwrap_or(0);
+            if bond < process.required_bond() {
+                continue;
+            }
+            if !process.is_due() {
+                continue;
+            }
 
             let name = process.process_name().to_string();
             let agent = process.agent_name.clone();
@@ -792,13 +907,20 @@ impl LifecycleEngine {
                         let _ = ledger.record(entry);
                     }
                     results.push(LifecycleResult {
-                        agent, process: name, summary, cost_usd: cost, error: None,
+                        agent,
+                        process: name,
+                        summary,
+                        cost_usd: cost,
+                        error: None,
                     });
                 }
                 Err(e) => {
                     results.push(LifecycleResult {
-                        agent, process: name, summary: String::new(),
-                        cost_usd: 0.0, error: Some(e.to_string()),
+                        agent,
+                        process: name,
+                        summary: String::new(),
+                        cost_usd: 0.0,
+                        error: Some(e.to_string()),
                     });
                 }
             }
@@ -809,7 +931,9 @@ impl LifecycleEngine {
 
     /// Get process states for IPC / status display.
     pub fn status(&self) -> serde_json::Value {
-        let processes: Vec<serde_json::Value> = self.processes.iter()
+        let processes: Vec<serde_json::Value> = self
+            .processes
+            .iter()
             .map(|p| {
                 let bond = self.bond_levels.get(&p.agent_name).copied().unwrap_or(0);
                 serde_json::json!({
@@ -847,7 +971,9 @@ pub struct LifecycleResult {
 // ──────────────────────────────────────────────────────────────
 
 fn truncate_chars(s: &str, max: usize) -> String {
-    if s.len() <= max { return s.to_string(); }
+    if s.len() <= max {
+        return s.to_string();
+    }
     let safe = max.saturating_sub(30);
     let cut = s[..safe].rfind('\n').unwrap_or(safe);
     format!("{}\n[...truncated]", &s[..cut])
@@ -861,7 +987,11 @@ fn parse_file_update(text: &str, filename: &str) -> Option<String> {
     let after = after.strip_prefix('\n').unwrap_or(after);
     let end = after.find(&end_marker)?;
     let content = after[..end].trim().to_string();
-    if content.is_empty() { None } else { Some(content) }
+    if content.is_empty() {
+        None
+    } else {
+        Some(content)
+    }
 }
 
 fn parse_block(text: &str, block_name: &str) -> Option<String> {
@@ -872,7 +1002,11 @@ fn parse_block(text: &str, block_name: &str) -> Option<String> {
     let after = after.strip_prefix('\n').unwrap_or(after);
     let end = after.find(&end_marker)?;
     let content = after[..end].trim().to_string();
-    if content.is_empty() { None } else { Some(content) }
+    if content.is_empty() {
+        None
+    } else {
+        Some(content)
+    }
 }
 
 struct Proposal {
@@ -886,9 +1020,13 @@ fn parse_proposals(text: &str) -> Vec<Proposal> {
     let mut pos = 0;
     while pos < text.len() {
         let remaining = &text[pos..];
-        let Some(start) = remaining.find("PROPOSAL:") else { break };
+        let Some(start) = remaining.find("PROPOSAL:") else {
+            break;
+        };
         let after = &remaining[start + 9..];
-        let Some(end) = after.find("END PROPOSAL") else { break };
+        let Some(end) = after.find("END PROPOSAL") else {
+            break;
+        };
         if let Some(p) = parse_proposal_block(&after[..end]) {
             proposals.push(p);
         }
@@ -905,22 +1043,34 @@ fn parse_proposal_block(block: &str) -> Option<Proposal> {
 
     for line in block.lines() {
         let line = line.trim();
-        if line.is_empty() { continue; }
+        if line.is_empty() {
+            continue;
+        }
         if let Some(val) = line.strip_prefix("Subject:") {
-            subject = val.trim().to_string(); in_description = false;
+            subject = val.trim().to_string();
+            in_description = false;
         } else if let Some(val) = line.strip_prefix("Description:") {
             let val = val.trim();
-            if !val.is_empty() { description_lines.push(val.to_string()); }
+            if !val.is_empty() {
+                description_lines.push(val.to_string());
+            }
             in_description = true;
         } else if let Some(val) = line.strip_prefix("Confidence:") {
-            confidence = val.trim().parse().unwrap_or(0.0); in_description = false;
+            confidence = val.trim().parse().unwrap_or(0.0);
+            in_description = false;
         } else if in_description {
             description_lines.push(line.to_string());
         }
     }
 
-    if subject.is_empty() || confidence < 0.5 { return None; }
-    Some(Proposal { subject, description: description_lines.join(" "), confidence })
+    if subject.is_empty() || confidence < 0.5 {
+        return None;
+    }
+    Some(Proposal {
+        subject,
+        description: description_lines.join(" "),
+        confidence,
+    })
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -949,7 +1099,10 @@ mod tests {
     #[test]
     fn test_parse_file_update() {
         let text = "UPDATE MEMORY.md:\nLine 1\nLine 2\nEND MEMORY.md";
-        assert_eq!(parse_file_update(text, "MEMORY.md"), Some("Line 1\nLine 2".to_string()));
+        assert_eq!(
+            parse_file_update(text, "MEMORY.md"),
+            Some("Line 1\nLine 2".to_string())
+        );
     }
 
     #[test]
@@ -960,7 +1113,10 @@ mod tests {
     #[test]
     fn test_parse_block() {
         let text = "EVOLUTION_ENTRY:\n## 2026-03-03\nGrew wiser.\nEND EVOLUTION_ENTRY";
-        assert_eq!(parse_block(text, "EVOLUTION_ENTRY"), Some("## 2026-03-03\nGrew wiser.".to_string()));
+        assert_eq!(
+            parse_block(text, "EVOLUTION_ENTRY"),
+            Some("## 2026-03-03\nGrew wiser.".to_string())
+        );
     }
 
     #[test]
@@ -981,14 +1137,18 @@ mod tests {
 
     #[test]
     fn test_parse_proposals_low_confidence_filtered() {
-        let text = "PROPOSAL:\nSubject: Maybe\nDescription: Unclear.\nConfidence: 0.3\nEND PROPOSAL";
+        let text =
+            "PROPOSAL:\nSubject: Maybe\nDescription: Unclear.\nConfidence: 0.3\nEND PROPOSAL";
         assert!(parse_proposals(text).is_empty());
     }
 
     #[test]
     fn test_improvement_registry_dedup() {
         let mut reg = ImprovementRegistry::default();
-        reg.add("Add monitoring for API endpoints", ImprovementStatus::Proposed);
+        reg.add(
+            "Add monitoring for API endpoints",
+            ImprovementStatus::Proposed,
+        );
         assert!(reg.already_proposed("Add monitoring for API endpoints"));
         assert!(!reg.already_proposed("Something completely different"));
     }
@@ -1030,7 +1190,10 @@ mod tests {
         reg.save(&path).unwrap();
         let loaded = ImprovementRegistry::load(&path);
         assert_eq!(loaded.improvements.len(), 1);
-        assert_eq!(loaded.improvements[0].status, ImprovementStatus::TaskCreated);
+        assert_eq!(
+            loaded.improvements[0].status,
+            ImprovementStatus::TaskCreated
+        );
     }
 
     #[test]

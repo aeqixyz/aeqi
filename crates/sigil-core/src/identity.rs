@@ -153,9 +153,7 @@ impl Identity {
 
     /// Check if any identity files are loaded.
     pub fn is_loaded(&self) -> bool {
-        self.persona.is_some()
-            || self.identity.is_some()
-            || self.agents.is_some()
+        self.persona.is_some() || self.identity.is_some() || self.agents.is_some()
     }
 }
 

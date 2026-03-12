@@ -3,8 +3,8 @@ use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sigil_core::traits::{
-    ChatRequest, ChatResponse, Message, MessageContent, ContentPart,
-    Provider, Role, StopReason, ToolCall, ToolSpec, Usage,
+    ChatRequest, ChatResponse, ContentPart, Message, MessageContent, Provider, Role, StopReason,
+    ToolCall, ToolSpec, Usage,
 };
 use tracing::debug;
 
@@ -25,7 +25,11 @@ impl AnthropicProvider {
             .build()
             .expect("failed to build HTTP client");
 
-        Self { client, api_key, default_model }
+        Self {
+            client,
+            api_key,
+            default_model,
+        }
     }
 }
 
@@ -70,7 +74,11 @@ enum AnthropicContent {
     #[serde(rename = "text")]
     Text { text: String },
     #[serde(rename = "tool_use")]
-    ToolUse { id: String, name: String, input: serde_json::Value },
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
 }
 
 #[derive(Deserialize)]
@@ -108,47 +116,50 @@ fn convert_messages(messages: &[Message]) -> (Option<String>, Vec<AnthropicMessa
                     });
                 }
             }
-            Role::Assistant => {
-                match &msg.content {
-                    MessageContent::Text(text) => {
-                        converted.push(AnthropicMessage {
-                            role: "assistant".to_string(),
-                            content: serde_json::Value::String(text.clone()),
-                        });
-                    }
-                    MessageContent::Parts(parts) => {
-                        let mut content_blocks = Vec::new();
-                        for part in parts {
-                            match part {
-                                ContentPart::Text { text } => {
-                                    content_blocks.push(serde_json::json!({
-                                        "type": "text",
-                                        "text": text,
-                                    }));
-                                }
-                                ContentPart::ToolUse { id, name, input } => {
-                                    content_blocks.push(serde_json::json!({
-                                        "type": "tool_use",
-                                        "id": id,
-                                        "name": name,
-                                        "input": input,
-                                    }));
-                                }
-                                _ => {}
-                            }
-                        }
-                        converted.push(AnthropicMessage {
-                            role: "assistant".to_string(),
-                            content: serde_json::Value::Array(content_blocks),
-                        });
-                    }
+            Role::Assistant => match &msg.content {
+                MessageContent::Text(text) => {
+                    converted.push(AnthropicMessage {
+                        role: "assistant".to_string(),
+                        content: serde_json::Value::String(text.clone()),
+                    });
                 }
-            }
+                MessageContent::Parts(parts) => {
+                    let mut content_blocks = Vec::new();
+                    for part in parts {
+                        match part {
+                            ContentPart::Text { text } => {
+                                content_blocks.push(serde_json::json!({
+                                    "type": "text",
+                                    "text": text,
+                                }));
+                            }
+                            ContentPart::ToolUse { id, name, input } => {
+                                content_blocks.push(serde_json::json!({
+                                    "type": "tool_use",
+                                    "id": id,
+                                    "name": name,
+                                    "input": input,
+                                }));
+                            }
+                            _ => {}
+                        }
+                    }
+                    converted.push(AnthropicMessage {
+                        role: "assistant".to_string(),
+                        content: serde_json::Value::Array(content_blocks),
+                    });
+                }
+            },
             Role::Tool => {
                 if let MessageContent::Parts(parts) = &msg.content {
                     let mut content_blocks = Vec::new();
                     for part in parts {
-                        if let ContentPart::ToolResult { tool_use_id, content, is_error } = part {
+                        if let ContentPart::ToolResult {
+                            tool_use_id,
+                            content,
+                            is_error,
+                        } = part
+                        {
                             content_blocks.push(serde_json::json!({
                                 "type": "tool_result",
                                 "tool_use_id": tool_use_id,
@@ -170,11 +181,14 @@ fn convert_messages(messages: &[Message]) -> (Option<String>, Vec<AnthropicMessa
 }
 
 fn convert_tools(tools: &[ToolSpec]) -> Vec<AnthropicTool> {
-    tools.iter().map(|t| AnthropicTool {
-        name: t.name.clone(),
-        description: t.description.clone(),
-        input_schema: t.input_schema.clone(),
-    }).collect()
+    tools
+        .iter()
+        .map(|t| AnthropicTool {
+            name: t.name.clone(),
+            description: t.description.clone(),
+            input_schema: t.input_schema.clone(),
+        })
+        .collect()
 }
 
 #[async_trait]
@@ -194,13 +208,18 @@ impl Provider for AnthropicProvider {
             messages,
             max_tokens: request.max_tokens,
             system,
-            temperature: if request.temperature > 0.0 { Some(request.temperature) } else { None },
+            temperature: if request.temperature > 0.0 {
+                Some(request.temperature)
+            } else {
+                None
+            },
             tools,
         };
 
         debug!("sending request to Anthropic API");
 
-        let response = self.client
+        let response = self
+            .client
             .post(ANTHROPIC_API_URL)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", API_VERSION)
@@ -220,8 +239,8 @@ impl Provider for AnthropicProvider {
             anyhow::bail!("Anthropic API error ({}): {}", status, body);
         }
 
-        let api_response: AnthropicResponse = serde_json::from_str(&body)
-            .context("failed to parse Anthropic response")?;
+        let api_response: AnthropicResponse =
+            serde_json::from_str(&body).context("failed to parse Anthropic response")?;
 
         let mut content_text = None;
         let mut tool_calls = Vec::new();
@@ -260,11 +279,14 @@ impl Provider for AnthropicProvider {
         })
     }
 
-    fn name(&self) -> &str { "anthropic" }
+    fn name(&self) -> &str {
+        "anthropic"
+    }
 
     async fn health_check(&self) -> Result<()> {
         // Try a minimal request.
-        let response = self.client
+        let response = self
+            .client
             .post(ANTHROPIC_API_URL)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", API_VERSION)

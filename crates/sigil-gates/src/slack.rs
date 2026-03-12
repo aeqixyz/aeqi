@@ -58,7 +58,8 @@ impl Channel for SlackChannel {
         let mut shutdown_rx = self.shutdown_rx.clone();
 
         tokio::spawn(async move {
-            let mut last_ts: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+            let mut last_ts: std::collections::HashMap<String, String> =
+                std::collections::HashMap::new();
             let mut backoff_secs: u64 = 5;
             const MAX_BACKOFF_SECS: u64 = 60;
             info!("Slack polling started");
@@ -71,10 +72,7 @@ impl Channel for SlackChannel {
                 let mut had_error = false;
 
                 for channel_id in &channel_ids {
-                    let mut params = vec![
-                        ("channel", channel_id.as_str()),
-                        ("limit", "10"),
-                    ];
+                    let mut params = vec![("channel", channel_id.as_str()), ("limit", "10")];
 
                     let oldest_binding;
                     if let Some(ts) = last_ts.get(channel_id) {
@@ -83,7 +81,8 @@ impl Channel for SlackChannel {
                     }
 
                     let url = format!("{}/conversations.history", SLACK_API);
-                    match client.get(&url)
+                    match client
+                        .get(&url)
                         .header("Authorization", format!("Bearer {}", token))
                         .query(&params)
                         .send()
@@ -91,31 +90,35 @@ impl Channel for SlackChannel {
                     {
                         Ok(response) => {
                             if let Ok(slack_resp) = response.json::<SlackResponse>().await
-                                && slack_resp.ok {
-                                    for msg in slack_resp.messages.unwrap_or_default().iter().rev() {
-                                        if msg.bot_id.is_some() {
-                                            continue;
-                                        }
+                                && slack_resp.ok
+                            {
+                                for msg in slack_resp.messages.unwrap_or_default().iter().rev() {
+                                    if msg.bot_id.is_some() {
+                                        continue;
+                                    }
 
-                                        last_ts.insert(channel_id.clone(), msg.ts.clone());
+                                    last_ts.insert(channel_id.clone(), msg.ts.clone());
 
-                                        if let Some(ref text) = msg.text {
-                                            let incoming = IncomingMessage {
-                                                channel: "slack".to_string(),
-                                                sender: msg.user.clone().unwrap_or_else(|| "unknown".to_string()),
-                                                text: text.clone(),
-                                                metadata: serde_json::json!({
-                                                    "channel_id": channel_id,
-                                                    "ts": msg.ts,
-                                                }),
-                                            };
+                                    if let Some(ref text) = msg.text {
+                                        let incoming = IncomingMessage {
+                                            channel: "slack".to_string(),
+                                            sender: msg
+                                                .user
+                                                .clone()
+                                                .unwrap_or_else(|| "unknown".to_string()),
+                                            text: text.clone(),
+                                            metadata: serde_json::json!({
+                                                "channel_id": channel_id,
+                                                "ts": msg.ts,
+                                            }),
+                                        };
 
-                                            if tx.send(incoming).await.is_err() {
-                                                return;
-                                            }
+                                        if tx.send(incoming).await.is_err() {
+                                            return;
                                         }
                                     }
                                 }
+                            }
                         }
                         Err(e) => {
                             error!(error = %e, channel = %channel_id, backoff_secs, "Slack polling error");
@@ -142,12 +145,15 @@ impl Channel for SlackChannel {
     }
 
     async fn send(&self, message: OutgoingMessage) -> Result<()> {
-        let channel_id = message.metadata.get("channel_id")
+        let channel_id = message
+            .metadata
+            .get("channel_id")
             .and_then(|v| v.as_str())
             .context("missing channel_id in metadata")?;
 
         let url = format!("{}/chat.postMessage", SLACK_API);
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.token))
             .json(&serde_json::json!({
@@ -166,7 +172,9 @@ impl Channel for SlackChannel {
         Ok(())
     }
 
-    fn name(&self) -> &str { "slack" }
+    fn name(&self) -> &str {
+        "slack"
+    }
 
     async fn stop(&self) -> Result<()> {
         let _ = self.shutdown.send(true);

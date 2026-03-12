@@ -1,7 +1,7 @@
+use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sigil_tasks::TaskId;
-use anyhow::{Context, Result};
 use std::path::Path;
 use tracing::info;
 
@@ -30,11 +30,14 @@ impl Operation {
         Self {
             id,
             name: name.to_string(),
-            tasks: tasks.into_iter().map(|(task_id, project)| OperationTask {
-                task_id,
-                project,
-                closed: false,
-            }).collect(),
+            tasks: tasks
+                .into_iter()
+                .map(|(task_id, project)| OperationTask {
+                    task_id,
+                    project,
+                    closed: false,
+                })
+                .collect(),
             created_at: Utc::now(),
             closed_at: None,
         }
@@ -131,16 +134,18 @@ impl OperationStore {
 
     /// List active (unclosed) operations.
     pub fn active(&self) -> Vec<&Operation> {
-        self.operations.iter().filter(|c| c.closed_at.is_none()).collect()
+        self.operations
+            .iter()
+            .filter(|c| c.closed_at.is_none())
+            .collect()
     }
 
     /// Remove completed operations older than the specified days.
     pub fn cleanup(&mut self, max_age_days: i64) -> Result<usize> {
         let cutoff = Utc::now() - chrono::Duration::days(max_age_days);
         let before = self.operations.len();
-        self.operations.retain(|c| {
-            c.closed_at.map(|t| t > cutoff).unwrap_or(true)
-        });
+        self.operations
+            .retain(|c| c.closed_at.map(|t| t > cutoff).unwrap_or(true));
         let removed = before - self.operations.len();
         if removed > 0 {
             self.save()?;

@@ -22,7 +22,8 @@ pub fn infer_dependencies(tasks: &[&Task], threshold: f64) -> Vec<InferredDepend
     let mut deps = Vec::new();
 
     // Extract entities for each task.
-    let entities: Vec<Vec<String>> = tasks.iter()
+    let entities: Vec<Vec<String>> = tasks
+        .iter()
         .map(|t| extract_entities(&t.subject, &t.description))
         .collect();
 
@@ -33,7 +34,12 @@ pub fn infer_dependencies(tasks: &[&Task], threshold: f64) -> Vec<InferredDepend
                 && confidence >= threshold
             {
                 let (from, to) = determine_direction(tasks[i], tasks[j]);
-                deps.push(InferredDependency { from, to, reason, confidence });
+                deps.push(InferredDependency {
+                    from,
+                    to,
+                    reason,
+                    confidence,
+                });
             }
         }
     }
@@ -47,15 +53,24 @@ fn extract_entities(subject: &str, description: &str) -> Vec<String> {
     let combined = format!("{subject} {description}");
     let mut entities = Vec::new();
 
-    for word in combined.split(|c: char| c.is_whitespace() || c == ',' || c == ';' || c == '(' || c == ')') {
-        let word = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '.' && c != '/');
+    for word in
+        combined.split(|c: char| c.is_whitespace() || c == ',' || c == ';' || c == '(' || c == ')')
+    {
+        let word =
+            word.trim_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '.' && c != '/');
         if word.is_empty() || word.len() < 3 {
             continue;
         }
 
         // File paths: contains / or ends with common extensions
-        if word.contains('/') || word.ends_with(".rs") || word.ends_with(".ts") || word.ends_with(".py")
-            || word.ends_with(".js") || word.ends_with(".toml") || word.ends_with(".json") {
+        if word.contains('/')
+            || word.ends_with(".rs")
+            || word.ends_with(".ts")
+            || word.ends_with(".py")
+            || word.ends_with(".js")
+            || word.ends_with(".toml")
+            || word.ends_with(".json")
+        {
             entities.push(word.to_lowercase());
             continue;
         }
@@ -67,8 +82,11 @@ fn extract_entities(subject: &str, description: &str) -> Vec<String> {
         }
 
         // PascalCase / camelCase identifiers (has mixed case, no spaces)
-        if word.chars().any(|c| c.is_uppercase()) && word.chars().any(|c| c.is_lowercase())
-            && word.chars().all(|c| c.is_alphanumeric()) && word.len() >= 4 {
+        if word.chars().any(|c| c.is_uppercase())
+            && word.chars().any(|c| c.is_lowercase())
+            && word.chars().all(|c| c.is_alphanumeric())
+            && word.len() >= 4
+        {
             entities.push(word.to_lowercase());
             continue;
         }
@@ -93,7 +111,14 @@ fn entity_overlap(a: &[String], b: &[String]) -> Option<(f64, String)> {
 
     let total = (a.len() + b.len()) as f64 / 2.0;
     let confidence = shared.len() as f64 / total;
-    let reason = format!("shared entities: {}", shared.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "));
+    let reason = format!(
+        "shared entities: {}",
+        shared
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
 
     Some((confidence.min(1.0), reason))
 }
@@ -101,8 +126,19 @@ fn entity_overlap(a: &[String], b: &[String]) -> Option<(f64, String)> {
 /// Determine dependency direction between two tasks.
 /// Heuristic: "create/setup/init" tasks come before "test/verify/deploy" tasks.
 fn determine_direction(a: &Task, b: &Task) -> (TaskId, TaskId) {
-    let create_words = ["create", "setup", "init", "add", "implement", "build", "define", "configure"];
-    let test_words = ["test", "verify", "validate", "check", "deploy", "review", "document"];
+    let create_words = [
+        "create",
+        "setup",
+        "init",
+        "add",
+        "implement",
+        "build",
+        "define",
+        "configure",
+    ];
+    let test_words = [
+        "test", "verify", "validate", "check", "deploy", "review", "document",
+    ];
 
     let a_subject = a.subject.to_lowercase();
     let b_subject = b.subject.to_lowercase();
@@ -131,7 +167,7 @@ fn determine_direction(a: &Task, b: &Task) -> (TaskId, TaskId) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::task::{Task, TaskId, TaskStatus, Priority};
+    use crate::task::{Priority, Task, TaskId, TaskStatus};
 
     fn make_task(id: &str, subject: &str, description: &str) -> Task {
         Task {
@@ -158,13 +194,19 @@ mod tests {
 
     #[test]
     fn test_extract_entities_file_paths() {
-        let entities = extract_entities("Fix bug in src/auth.rs", "The auth module at src/auth.rs has issues");
+        let entities = extract_entities(
+            "Fix bug in src/auth.rs",
+            "The auth module at src/auth.rs has issues",
+        );
         assert!(entities.contains(&"src/auth.rs".to_string()));
     }
 
     #[test]
     fn test_extract_entities_function_names() {
-        let entities = extract_entities("Refactor validate_token", "Update the validate_token function");
+        let entities = extract_entities(
+            "Refactor validate_token",
+            "Update the validate_token function",
+        );
         assert!(entities.contains(&"validate_token".to_string()));
     }
 
@@ -203,14 +245,21 @@ mod tests {
         // Should not have both directions
         for dep in &deps {
             let reverse_exists = deps.iter().any(|d| d.from == dep.to && d.to == dep.from);
-            assert!(!reverse_exists, "bidirectional dependency detected (would create cycle)");
+            assert!(
+                !reverse_exists,
+                "bidirectional dependency detected (would create cycle)"
+            );
         }
     }
 
     #[test]
     fn test_no_deps_between_unrelated() {
         let t1 = make_task("t-001", "Fix login page CSS", "Adjust button colors");
-        let t2 = make_task("t-002", "Optimize database queries", "Add indexes to users table");
+        let t2 = make_task(
+            "t-002",
+            "Optimize database queries",
+            "Add indexes to users table",
+        );
 
         let tasks: Vec<&Task> = vec![&t1, &t2];
         let deps = infer_dependencies(&tasks, 0.3);

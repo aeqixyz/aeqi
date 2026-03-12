@@ -39,9 +39,7 @@ pub(crate) async fn cmd_cron(config_path: &Option<PathBuf>, action: CronAction) 
             } else if let Some(expr) = schedule {
                 CronSchedule::Cron { expr }
             } else {
-                anyhow::bail!(
-                    "specify --schedule \"0 9 * * *\" or --at \"2026-02-22T15:00:00Z\""
-                );
+                anyhow::bail!("specify --schedule \"0 9 * * *\" or --at \"2026-02-22T15:00:00Z\"");
             };
 
             let job = ScheduledJob {

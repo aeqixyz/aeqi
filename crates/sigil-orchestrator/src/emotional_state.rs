@@ -210,6 +210,9 @@ mod tests {
     #[test]
     fn test_path_for_agent() {
         let path = EmotionalState::path_for_agent(std::path::Path::new("/home/dev/agents/alpha"));
-        assert_eq!(path, std::path::PathBuf::from("/home/dev/agents/alpha/.sigil/emotional_state.json"));
+        assert_eq!(
+            path,
+            std::path::PathBuf::from("/home/dev/agents/alpha/.sigil/emotional_state.json")
+        );
     }
 }

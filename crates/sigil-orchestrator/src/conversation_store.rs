@@ -97,7 +97,12 @@ impl ConversationStore {
 
     /// Get messages for a chat with offset-based pagination.
     /// Offset 0 = most recent, offset N = skip N newest messages.
-    pub async fn recent_with_offset(&self, chat_id: i64, limit: usize, offset: usize) -> Result<Vec<ConversationMessage>> {
+    pub async fn recent_with_offset(
+        &self,
+        chat_id: i64,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<ConversationMessage>> {
         let db = self.db.lock().await;
         let mut stmt = db.prepare(
             "SELECT chat_id, role, content, timestamp FROM conversations \
@@ -111,13 +116,11 @@ impl ConversationStore {
                     chat_id: row.get(0)?,
                     role: row.get(1)?,
                     content: row.get(2)?,
-                    timestamp: row
-                        .get::<_, String>(3)
-                        .map(|s| {
-                            DateTime::parse_from_rfc3339(&s)
-                                .map(|dt| dt.with_timezone(&Utc))
-                                .unwrap_or_else(|_| Utc::now())
-                        })?,
+                    timestamp: row.get::<_, String>(3).map(|s| {
+                        DateTime::parse_from_rfc3339(&s)
+                            .map(|dt| dt.with_timezone(&Utc))
+                            .unwrap_or_else(|_| Utc::now())
+                    })?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -171,7 +174,12 @@ impl ConversationStore {
     }
 
     /// Store a summary and mark older messages as summarized.
-    pub async fn save_summary(&self, chat_id: i64, summary: &str, keep_recent: usize) -> Result<()> {
+    pub async fn save_summary(
+        &self,
+        chat_id: i64,
+        summary: &str,
+        keep_recent: usize,
+    ) -> Result<()> {
         let db = self.db.lock().await;
         let now = Utc::now().to_rfc3339();
 
@@ -253,7 +261,6 @@ impl ConversationStore {
 /// Bottom 4 bits reserved for channel-type tag.
 const JS_SAFE_MASK: u64 = 0x1F_FFFF_FFFF_FFF0;
 
-
 /// Deterministic chat ID for a department channel within a company.
 pub fn department_chat_id(project_name: &str, department: &str) -> i64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
@@ -273,7 +280,6 @@ pub fn agency_chat_id() -> i64 {
     }
     (hash & JS_SAFE_MASK | 3) as i64
 }
-
 
 /// Channel metadata returned by `list_channels`.
 #[derive(Debug, Clone)]
@@ -406,7 +412,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let store = ConversationStore::open(&dir.path().join("conv.db")).unwrap();
 
-        store.ensure_channel(100, "company", "myproject").await.unwrap();
+        store
+            .ensure_channel(100, "company", "myproject")
+            .await
+            .unwrap();
         store.ensure_channel(200, "dm", "akira").await.unwrap();
 
         let channels = store.list_channels().await.unwrap();
@@ -445,5 +454,4 @@ mod tests {
         let msgs = store.recent(100, 10).await.unwrap();
         assert_eq!(msgs.len(), 2);
     }
-
 }

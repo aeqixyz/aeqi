@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use sigil_core::traits::{ToolResult, ToolSpec};
 use sigil_core::traits::Tool;
+use sigil_core::traits::{ToolResult, ToolSpec};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -13,7 +13,10 @@ pub struct GitWorktreeTool {
 
 impl GitWorktreeTool {
     pub fn new(repo_root: PathBuf, worktree_root: PathBuf) -> Self {
-        Self { repo_root, worktree_root }
+        Self {
+            repo_root,
+            worktree_root,
+        }
     }
 
     fn run_git(&self, args: &[&str]) -> Result<String> {
@@ -36,13 +39,15 @@ impl GitWorktreeTool {
 #[async_trait]
 impl Tool for GitWorktreeTool {
     async fn execute(&self, args: serde_json::Value) -> Result<ToolResult> {
-        let action = args.get("action")
+        let action = args
+            .get("action")
             .and_then(|v| v.as_str())
             .unwrap_or("list");
 
         match action {
             "create" => {
-                let branch = args.get("branch")
+                let branch = args
+                    .get("branch")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing branch name"))?;
 
@@ -51,13 +56,16 @@ impl Tool for GitWorktreeTool {
 
                 let result = self.run_git(&["worktree", "add", &path_str, "-b", branch]);
                 match result {
-                    Ok(output) => Ok(ToolResult::success(format!("Created worktree at {path_str}\n{output}"))),
+                    Ok(output) => Ok(ToolResult::success(format!(
+                        "Created worktree at {path_str}\n{output}"
+                    ))),
                     Err(e) => Ok(ToolResult::error(format!("Failed to create worktree: {e}"))),
                 }
             }
 
             "remove" => {
-                let branch = args.get("branch")
+                let branch = args
+                    .get("branch")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing branch name"))?;
 
@@ -69,22 +77,21 @@ impl Tool for GitWorktreeTool {
                     Ok(_) => {
                         // Also delete the branch.
                         let _ = self.run_git(&["branch", "-d", branch]);
-                        Ok(ToolResult::success(format!("Removed worktree and branch: {branch}")))
+                        Ok(ToolResult::success(format!(
+                            "Removed worktree and branch: {branch}"
+                        )))
                     }
                     Err(e) => Ok(ToolResult::error(format!("Failed to remove worktree: {e}"))),
                 }
             }
 
-            "list" => {
-                match self.run_git(&["worktree", "list", "--porcelain"]) {
-                    Ok(output) => Ok(ToolResult::success(output)),
-                    Err(e) => Ok(ToolResult::error(format!("Failed to list worktrees: {e}"))),
-                }
-            }
+            "list" => match self.run_git(&["worktree", "list", "--porcelain"]) {
+                Ok(output) => Ok(ToolResult::success(output)),
+                Err(e) => Ok(ToolResult::error(format!("Failed to list worktrees: {e}"))),
+            },
 
             "status" => {
-                let branch = args.get("branch")
-                    .and_then(|v| v.as_str());
+                let branch = args.get("branch").and_then(|v| v.as_str());
 
                 let dir = if let Some(b) = branch {
                     self.worktree_root.join(b)
@@ -106,17 +113,18 @@ impl Tool for GitWorktreeTool {
             }
 
             "merge" => {
-                let branch = args.get("branch")
+                let branch = args
+                    .get("branch")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing branch name"))?;
-                let target = args.get("target")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("dev");
+                let target = args.get("target").and_then(|v| v.as_str()).unwrap_or("dev");
 
                 // Checkout target, merge branch.
                 self.run_git(&["checkout", target])?;
                 match self.run_git(&["merge", branch]) {
-                    Ok(output) => Ok(ToolResult::success(format!("Merged {branch} into {target}\n{output}"))),
+                    Ok(output) => Ok(ToolResult::success(format!(
+                        "Merged {branch} into {target}\n{output}"
+                    ))),
                     Err(e) => {
                         // Try to recover.
                         let _ = self.run_git(&["merge", "--abort"]);
@@ -125,14 +133,17 @@ impl Tool for GitWorktreeTool {
                 }
             }
 
-            other => Ok(ToolResult::error(format!("Unknown action: {other}. Use: create, remove, list, status, merge"))),
+            other => Ok(ToolResult::error(format!(
+                "Unknown action: {other}. Use: create, remove, list, status, merge"
+            ))),
         }
     }
 
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "git_worktree".to_string(),
-            description: "Manage git worktrees: create, remove, list, status, or merge branches.".to_string(),
+            description: "Manage git worktrees: create, remove, list, status, or merge branches."
+                .to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -149,5 +160,7 @@ impl Tool for GitWorktreeTool {
         }
     }
 
-    fn name(&self) -> &str { "git_worktree" }
+    fn name(&self) -> &str {
+        "git_worktree"
+    }
 }

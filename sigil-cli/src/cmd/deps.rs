@@ -26,7 +26,10 @@ pub(crate) async fn cmd_deps(
         for dep in &suggestions {
             println!(
                 "  {} → {} (confidence: {:.0}%)\n    Reason: {}\n",
-                dep.from, dep.to, dep.confidence * 100.0, dep.reason,
+                dep.from,
+                dep.to,
+                dep.confidence * 100.0,
+                dep.reason,
             );
         }
         println!("Use --apply {threshold:.1} to auto-apply these dependencies.");

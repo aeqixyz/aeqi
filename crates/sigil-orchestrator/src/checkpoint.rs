@@ -85,20 +85,25 @@ impl AgentCheckpoint {
     /// Uses write-to-temp + rename pattern to avoid partial writes on crash.
     pub fn write(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create checkpoint dir: {}", parent.display()))?;
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!("failed to create checkpoint dir: {}", parent.display())
+            })?;
         }
 
-        let json = serde_json::to_string_pretty(self)
-            .context("failed to serialize checkpoint")?;
+        let json = serde_json::to_string_pretty(self).context("failed to serialize checkpoint")?;
 
         // Write to temp file first, then rename for atomicity.
         let tmp_path = path.with_extension("tmp");
         std::fs::write(&tmp_path, &json)
             .with_context(|| format!("failed to write temp checkpoint: {}", tmp_path.display()))?;
 
-        std::fs::rename(&tmp_path, path)
-            .with_context(|| format!("failed to rename checkpoint: {} -> {}", tmp_path.display(), path.display()))?;
+        std::fs::rename(&tmp_path, path).with_context(|| {
+            format!(
+                "failed to rename checkpoint: {} -> {}",
+                tmp_path.display(),
+                path.display()
+            )
+        })?;
 
         debug!(path = %path.display(), "checkpoint written");
         Ok(())
@@ -263,10 +268,7 @@ mod tests {
         let checkpoint = AgentCheckpoint {
             task_id: Some("sg-042".to_string()),
             worker_name: Some("sigil-worker-1".to_string()),
-            modified_files: vec![
-                "src/main.rs".to_string(),
-                "Cargo.toml".to_string(),
-            ],
+            modified_files: vec!["src/main.rs".to_string(), "Cargo.toml".to_string()],
             last_commit: Some("abc123def456".to_string()),
             branch: Some("feat/gupp-checkpoint".to_string()),
             worktree_path: Some("/home/dev/worktrees/feat/test".to_string()),
@@ -351,7 +353,8 @@ mod tests {
 
     #[test]
     fn test_checkpoint_path_for_task() {
-        let path = AgentCheckpoint::path_for_task(Path::new("/home/dev/projects/project-d"), "sg-001");
+        let path =
+            AgentCheckpoint::path_for_task(Path::new("/home/dev/projects/project-d"), "sg-001");
         assert_eq!(
             path,
             PathBuf::from("/home/dev/projects/project-d/.sigil/checkpoints/sg-001.json")
@@ -363,10 +366,7 @@ mod tests {
         let checkpoint = AgentCheckpoint {
             task_id: Some("sg-042".to_string()),
             worker_name: Some("sigil-worker-1".to_string()),
-            modified_files: vec![
-                "src/main.rs".to_string(),
-                "Cargo.toml".to_string(),
-            ],
+            modified_files: vec!["src/main.rs".to_string(), "Cargo.toml".to_string()],
             last_commit: Some("abc123def456".to_string()),
             branch: Some("feat/gupp-checkpoint".to_string()),
             worktree_path: Some("/home/dev/worktrees/feat/test".to_string()),
@@ -473,6 +473,11 @@ mod tests {
         assert!(!checkpoint.last_commit.as_ref().unwrap().is_empty());
         assert!(checkpoint.branch.is_some());
         assert!(!checkpoint.modified_files.is_empty());
-        assert!(checkpoint.modified_files.iter().any(|f| f.contains("hello.txt")));
+        assert!(
+            checkpoint
+                .modified_files
+                .iter()
+                .any(|f| f.contains("hello.txt"))
+        );
     }
 }

@@ -190,7 +190,6 @@ impl Task {
 
     /// Is this task ready to work on? (pending + no unresolved dependencies)
     pub fn is_ready(&self, resolved: &dyn Fn(&TaskId) -> bool) -> bool {
-        self.status == TaskStatus::Pending
-            && self.depends_on.iter().all(resolved)
+        self.status == TaskStatus::Pending && self.depends_on.iter().all(resolved)
     }
 }

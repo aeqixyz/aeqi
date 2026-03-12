@@ -62,12 +62,21 @@ impl PorkbunTool {
     }
 
     fn format_response(resp: Value) -> ToolResult {
-        let status = resp.get("status").and_then(|s| s.as_str()).unwrap_or("UNKNOWN");
+        let status = resp
+            .get("status")
+            .and_then(|s| s.as_str())
+            .unwrap_or("UNKNOWN");
         if status == "SUCCESS" {
             ToolResult::success(serde_json::to_string_pretty(&resp).unwrap_or_default())
         } else {
-            let msg = resp.get("message").and_then(|m| m.as_str()).unwrap_or("unknown error");
-            ToolResult::error(format!("Porkbun error: {msg}\n{}", serde_json::to_string_pretty(&resp).unwrap_or_default()))
+            let msg = resp
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("unknown error");
+            ToolResult::error(format!(
+                "Porkbun error: {msg}\n{}",
+                serde_json::to_string_pretty(&resp).unwrap_or_default()
+            ))
         }
     }
 }
@@ -87,7 +96,9 @@ impl sigil_core::traits::Tool for PorkbunTool {
             }
 
             "check_availability" => {
-                let domain = args.get("domain").and_then(|v| v.as_str())
+                let domain = args
+                    .get("domain")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing 'domain'"))?;
                 let body = self.merge_body(json!({ "domain": domain }));
                 self.post("/domain/checkAvailability", body).await?
@@ -107,7 +118,9 @@ impl sigil_core::traits::Tool for PorkbunTool {
             }
 
             "buy_domain" => {
-                let domain = args.get("domain").and_then(|v| v.as_str())
+                let domain = args
+                    .get("domain")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing 'domain'"))?;
                 let years = args.get("years").and_then(|v| v.as_u64()).unwrap_or(1);
                 let body = self.merge_body(json!({
@@ -118,18 +131,25 @@ impl sigil_core::traits::Tool for PorkbunTool {
             }
 
             "list_dns" => {
-                let domain = args.get("domain").and_then(|v| v.as_str())
+                let domain = args
+                    .get("domain")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing 'domain'"))?;
                 let body = self.auth_body();
                 self.post(&format!("/dns/retrieve/{domain}"), body).await?
             }
 
             "create_dns" => {
-                let domain = args.get("domain").and_then(|v| v.as_str())
+                let domain = args
+                    .get("domain")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing 'domain'"))?;
-                let record_type = args.get("type").and_then(|v| v.as_str())
-                    .ok_or_else(|| anyhow::anyhow!("missing 'type' (A, AAAA, MX, CNAME, TXT, etc.)"))?;
-                let content = args.get("content").and_then(|v| v.as_str())
+                let record_type = args.get("type").and_then(|v| v.as_str()).ok_or_else(|| {
+                    anyhow::anyhow!("missing 'type' (A, AAAA, MX, CNAME, TXT, etc.)")
+                })?;
+                let content = args
+                    .get("content")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing 'content'"))?;
                 let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let ttl = args.get("ttl").and_then(|v| v.as_str()).unwrap_or("600");
@@ -145,13 +165,21 @@ impl sigil_core::traits::Tool for PorkbunTool {
             }
 
             "edit_dns" => {
-                let domain = args.get("domain").and_then(|v| v.as_str())
+                let domain = args
+                    .get("domain")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing 'domain'"))?;
-                let id = args.get("id").and_then(|v| v.as_str())
+                let id = args
+                    .get("id")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing 'id'"))?;
-                let record_type = args.get("type").and_then(|v| v.as_str())
+                let record_type = args
+                    .get("type")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing 'type'"))?;
-                let content = args.get("content").and_then(|v| v.as_str())
+                let content = args
+                    .get("content")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing 'content'"))?;
                 let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let ttl = args.get("ttl").and_then(|v| v.as_str()).unwrap_or("600");
@@ -167,42 +195,67 @@ impl sigil_core::traits::Tool for PorkbunTool {
             }
 
             "delete_dns" => {
-                let domain = args.get("domain").and_then(|v| v.as_str())
+                let domain = args
+                    .get("domain")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing 'domain'"))?;
-                let id = args.get("id").and_then(|v| v.as_str())
+                let id = args
+                    .get("id")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing 'id'"))?;
                 let body = self.auth_body();
-                self.post(&format!("/dns/delete/{domain}/{id}"), body).await?
+                self.post(&format!("/dns/delete/{domain}/{id}"), body)
+                    .await?
             }
 
             "list_email_forwards" => {
-                let domain = args.get("domain").and_then(|v| v.as_str())
+                let domain = args
+                    .get("domain")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing 'domain'"))?;
                 let body = self.auth_body();
-                self.post(&format!("/domain/getEmailForwarding/{domain}"), body).await?
+                self.post(&format!("/domain/getEmailForwarding/{domain}"), body)
+                    .await?
             }
 
             "create_email_forward" => {
-                let domain = args.get("domain").and_then(|v| v.as_str())
+                let domain = args
+                    .get("domain")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing 'domain'"))?;
-                let alias = args.get("alias").and_then(|v| v.as_str())
+                let alias = args
+                    .get("alias")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing 'alias' (the local part before @)"))?;
-                let destination = args.get("destination").and_then(|v| v.as_str())
-                    .ok_or_else(|| anyhow::anyhow!("missing 'destination' (target email address)"))?;
+                let destination = args
+                    .get("destination")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("missing 'destination' (target email address)")
+                    })?;
                 let body = self.merge_body(json!({
                     "alias": alias,
                     "destination": destination,
                 }));
-                self.post(&format!("/domain/addEmailForwarding/{domain}"), body).await?
+                self.post(&format!("/domain/addEmailForwarding/{domain}"), body)
+                    .await?
             }
 
             "delete_email_forward" => {
-                let domain = args.get("domain").and_then(|v| v.as_str())
+                let domain = args
+                    .get("domain")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing 'domain'"))?;
-                let id = args.get("id").and_then(|v| v.as_str())
+                let id = args
+                    .get("id")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing 'id'"))?;
                 let body = self.auth_body();
-                self.post(&format!("/domain/deleteEmailForwarding/{domain}/{id}"), body).await?
+                self.post(
+                    &format!("/domain/deleteEmailForwarding/{domain}/{id}"),
+                    body,
+                )
+                .await?
             }
 
             other => {

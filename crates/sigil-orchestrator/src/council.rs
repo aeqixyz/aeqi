@@ -62,7 +62,9 @@ impl Council {
     pub async fn record_response(&self, topic_id: &str, agent: &str, response: &str) -> bool {
         let mut topics = self.topics.lock().await;
         if let Some(topic) = topics.get_mut(topic_id) {
-            topic.responses.insert(agent.to_string(), response.to_string());
+            topic
+                .responses
+                .insert(agent.to_string(), response.to_string());
             topic.responses.len() == topic.agents.len()
         } else {
             false
@@ -132,7 +134,10 @@ impl Council {
             let mut handles = Vec::new();
             for (config, agent_dir) in advisor_configs {
                 let advisor_name = config.name.clone();
-                let advisor_model = config.model.clone().unwrap_or_else(|| "claude-sonnet-4-6".to_string());
+                let advisor_model = config
+                    .model
+                    .clone()
+                    .unwrap_or_else(|| "claude-sonnet-4-6".to_string());
                 let advisor_identity = Identity::load(agent_dir, None).unwrap_or_default();
                 let prompt = round_prompt.clone();
                 let repo = agent_dir.clone();
@@ -170,7 +175,8 @@ impl Council {
 
             // Store this round.
             {
-                let round_map: HashMap<String, String> = round_responses.iter()
+                let round_map: HashMap<String, String> = round_responses
+                    .iter()
                     .map(|(n, t)| (n.clone(), t.clone()))
                     .collect();
                 let mut topics = self.topics.lock().await;
@@ -212,21 +218,24 @@ impl Council {
             message, council_input
         );
 
-        let lead_executor = ClaudeCodeExecutor::new(
-            lead_repo.to_path_buf(),
-            lead_model.to_string(),
-            15,
-            None,
-        );
+        let lead_executor =
+            ClaudeCodeExecutor::new(lead_repo.to_path_buf(), lead_model.to_string(), 15, None);
 
-        let synthesis = match lead_executor.execute(lead_identity, &synthesis_context).await {
+        let synthesis = match lead_executor
+            .execute(lead_identity, &synthesis_context)
+            .await
+        {
             Ok(result) => {
                 info!(topic = %topic_id, cost = result.total_cost_usd, "council synthesis complete");
                 result.result_text
             }
             Err(e) => {
                 warn!(topic = %topic_id, error = %e, "council synthesis failed");
-                format!("Council debate collected {} round(s) but synthesis failed: {}", all_rounds.len(), e)
+                format!(
+                    "Council debate collected {} round(s) but synthesis failed: {}",
+                    all_rounds.len(),
+                    e
+                )
             }
         };
 
@@ -250,13 +259,19 @@ mod tests {
     async fn test_council_topic_lifecycle() {
         let council = Council::new();
 
-        let topic_id = council.open_topic("test question", vec!["beta".into(), "delta".into()]).await;
+        let topic_id = council
+            .open_topic("test question", vec!["beta".into(), "delta".into()])
+            .await;
         assert!(topic_id.starts_with("council-"));
 
-        let all_done = council.record_response(&topic_id, "beta", "risk analysis here").await;
+        let all_done = council
+            .record_response(&topic_id, "beta", "risk analysis here")
+            .await;
         assert!(!all_done);
 
-        let all_done = council.record_response(&topic_id, "delta", "architecture note").await;
+        let all_done = council
+            .record_response(&topic_id, "delta", "architecture note")
+            .await;
         assert!(all_done);
 
         let topic = council.get_topic(&topic_id).await.unwrap();

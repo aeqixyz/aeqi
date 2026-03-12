@@ -8,8 +8,8 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, warn};
 
-use crate::hybrid::{merge_scores, mmr_rerank, ScoredResult};
-use crate::vector::{bytes_to_vec, cosine_similarity, vec_to_bytes, VectorStore};
+use crate::hybrid::{ScoredResult, merge_scores, mmr_rerank};
+use crate::vector::{VectorStore, bytes_to_vec, cosine_similarity, vec_to_bytes};
 
 struct MemRow {
     id: String,
@@ -71,7 +71,10 @@ impl SqliteMemory {
         Self::migrate(&conn)?;
 
         // Migrate legacy 'realm' scope to 'system'.
-        conn.execute("UPDATE memories SET scope = 'system' WHERE scope = 'realm'", [])?;
+        conn.execute(
+            "UPDATE memories SET scope = 'system' WHERE scope = 'realm'",
+            [],
+        )?;
 
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(scope);
@@ -162,7 +165,9 @@ impl SqliteMemory {
 
         // Rename companion_id → entity_id (for DBs created before the rename).
         let has_companion: bool = conn
-            .prepare("SELECT COUNT(*) FROM pragma_table_info('memories') WHERE name='companion_id'")?
+            .prepare(
+                "SELECT COUNT(*) FROM pragma_table_info('memories') WHERE name='companion_id'",
+            )?
             .query_row([], |row| row.get(0))?;
         if has_companion {
             conn.execute_batch(
@@ -202,7 +207,7 @@ impl SqliteMemory {
 
     /// Compute SHA256 hash of content for embedding cache lookup.
     fn content_hash(content: &str) -> String {
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(content.as_bytes());
         format!("{:x}", hasher.finalize())
@@ -228,7 +233,11 @@ impl SqliteMemory {
         (-lambda * age_days).exp()
     }
 
-    fn bm25_search(conn: &Connection, query: &MemoryQuery, limit: usize) -> Result<Vec<(MemRow, f64)>> {
+    fn bm25_search(
+        conn: &Connection,
+        query: &MemoryQuery,
+        limit: usize,
+    ) -> Result<Vec<(MemRow, f64)>> {
         let fts_query = query
             .text
             .split_whitespace()
@@ -267,7 +276,8 @@ impl SqliteMemory {
         );
 
         params.push(Box::new(limit as i64));
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
         let mut stmt = conn.prepare(&sql)?;
 
         let rows = stmt
@@ -281,7 +291,19 @@ impl SqliteMemory {
                 let created_at: String = row.get(6)?;
                 let session_id: Option<String> = row.get(7)?;
                 let bm25: f64 = row.get(8)?;
-                Ok((MemRow { id, key, content, cat_str, scope_str, entity_id, created_at, session_id }, bm25))
+                Ok((
+                    MemRow {
+                        id,
+                        key,
+                        content,
+                        cat_str,
+                        scope_str,
+                        entity_id,
+                        created_at,
+                        session_id,
+                    },
+                    bm25,
+                ))
             })?
             .filter_map(|r| r.ok())
             .collect();
@@ -322,8 +344,11 @@ impl SqliteMemory {
              WHERE {where_clause}"
         );
 
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-        let Ok(mut stmt) = conn.prepare(&sql) else { return vec![]; };
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let Ok(mut stmt) = conn.prepare(&sql) else {
+            return vec![];
+        };
 
         let mut results: Vec<(String, f32)> = stmt
             .query_map(param_refs.as_slice(), |row| {
@@ -361,8 +386,13 @@ impl SqliteMemory {
             "SELECT id, key, content, category, scope, entity_id, created_at, session_id
              FROM memories WHERE id IN ({placeholders})"
         );
-        let params: Vec<&dyn rusqlite::types::ToSql> = ids.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
-        let Ok(mut stmt) = conn.prepare(&sql) else { return vec![]; };
+        let params: Vec<&dyn rusqlite::types::ToSql> = ids
+            .iter()
+            .map(|s| s as &dyn rusqlite::types::ToSql)
+            .collect();
+        let Ok(mut stmt) = conn.prepare(&sql) else {
+            return vec![];
+        };
         stmt.query_map(params.as_slice(), |row| {
             Ok(MemRow {
                 id: row.get(0)?,
@@ -389,9 +419,16 @@ impl SqliteMemory {
             .map(|(i, _)| format!("?{}", i + 1))
             .collect::<Vec<_>>()
             .join(",");
-        let sql = format!("SELECT memory_id, embedding FROM memory_embeddings WHERE memory_id IN ({placeholders})");
-        let params: Vec<&dyn rusqlite::types::ToSql> = ids.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
-        let Ok(mut stmt) = conn.prepare(&sql) else { return HashMap::new(); };
+        let sql = format!(
+            "SELECT memory_id, embedding FROM memory_embeddings WHERE memory_id IN ({placeholders})"
+        );
+        let params: Vec<&dyn rusqlite::types::ToSql> = ids
+            .iter()
+            .map(|s| s as &dyn rusqlite::types::ToSql)
+            .collect();
+        let Ok(mut stmt) = conn.prepare(&sql) else {
+            return HashMap::new();
+        };
         stmt.query_map(params.as_slice(), |row| {
             let mid: String = row.get(0)?;
             let bytes: Vec<u8> = row.get(1)?;
@@ -425,7 +462,7 @@ impl SqliteMemory {
     }
 
     pub fn has_recent_duplicate(&self, content: &str, hours: u32) -> bool {
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(content.as_bytes());
         let hash = format!("{:x}", hasher.finalize());
@@ -509,7 +546,9 @@ impl Memory for SqliteMemory {
 
         let id = uuid::Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
-        let cat = serde_json::to_string(&category)?.trim_matches('"').to_string();
+        let cat = serde_json::to_string(&category)?
+            .trim_matches('"')
+            .to_string();
         let scope_str = scope.to_string();
 
         {
@@ -618,27 +657,40 @@ impl Memory for SqliteMemory {
                     self.row_to_entry(row, raw, query)
                 })
                 .collect();
-            entries.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            entries.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             return Ok(entries);
         }
 
         // Phase 4: hybrid merge.
         // Normalize BM25 scores (negate FTS5 scores which are negative).
-        let kw_pairs: Vec<(String, f64)> = bm25_rows.iter()
+        let kw_pairs: Vec<(String, f64)> = bm25_rows
+            .iter()
             .map(|(row, bm25)| (row.id.clone(), -bm25))
             .collect();
-        let vec_pairs: Vec<(String, f64)> = vector_scores.iter()
+        let vec_pairs: Vec<(String, f64)> = vector_scores
+            .iter()
             .map(|(id, sim)| (id.clone(), *sim as f64))
             .collect();
 
-        let merged = merge_scores(&kw_pairs, &vec_pairs, self.keyword_weight, self.vector_weight);
+        let merged = merge_scores(
+            &kw_pairs,
+            &vec_pairs,
+            self.keyword_weight,
+            self.vector_weight,
+        );
 
         // Phase 5: fetch any IDs that appear in vector results but not BM25.
-        let bm25_map: HashMap<String, &MemRow> = bm25_rows.iter()
+        let bm25_map: HashMap<String, &MemRow> = bm25_rows
+            .iter()
             .map(|(row, _)| (row.id.clone(), row))
             .collect();
 
-        let missing_ids: Vec<String> = merged.iter()
+        let missing_ids: Vec<String> = merged
+            .iter()
             .take(query.top_k * 2)
             .filter(|r| !bm25_map.contains_key(&r.memory_id))
             .map(|r| r.memory_id.clone())
@@ -657,7 +709,8 @@ impl Memory for SqliteMemory {
         // Phase 6: build MemoryEntry for each merged result, applying temporal decay.
         let mut scored: Vec<(ScoredResult, MemoryEntry)> = Vec::new();
         for sr in merged.into_iter().take(query.top_k * 2) {
-            let row_ref = bm25_map.get(&sr.memory_id)
+            let row_ref = bm25_map
+                .get(&sr.memory_id)
                 .map(|r| MemRow {
                     id: r.id.clone(),
                     key: r.key.clone(),
@@ -668,24 +721,31 @@ impl Memory for SqliteMemory {
                     created_at: r.created_at.clone(),
                     session_id: r.session_id.clone(),
                 })
-                .or_else(|| extra_rows.get(&sr.memory_id).map(|r| MemRow {
-                    id: r.id.clone(),
-                    key: r.key.clone(),
-                    content: r.content.clone(),
-                    cat_str: r.cat_str.clone(),
-                    scope_str: r.scope_str.clone(),
-                    entity_id: r.entity_id.clone(),
-                    created_at: r.created_at.clone(),
-                    session_id: r.session_id.clone(),
-                }));
+                .or_else(|| {
+                    extra_rows.get(&sr.memory_id).map(|r| MemRow {
+                        id: r.id.clone(),
+                        key: r.key.clone(),
+                        content: r.content.clone(),
+                        cat_str: r.cat_str.clone(),
+                        scope_str: r.scope_str.clone(),
+                        entity_id: r.entity_id.clone(),
+                        created_at: r.created_at.clone(),
+                        session_id: r.session_id.clone(),
+                    })
+                });
 
             if let Some(row) = row_ref
-                && let Some(entry) = self.row_to_entry(row, sr.combined_score, query) {
-                    scored.push((sr, entry));
-                }
+                && let Some(entry) = self.row_to_entry(row, sr.combined_score, query)
+            {
+                scored.push((sr, entry));
+            }
         }
 
-        scored.sort_by(|a, b| b.1.score.partial_cmp(&a.1.score).unwrap_or(std::cmp::Ordering::Equal));
+        scored.sort_by(|a, b| {
+            b.1.score
+                .partial_cmp(&a.1.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Phase 7: MMR rerank using embedding similarity between candidates.
         let candidate_ids: Vec<String> = scored.iter().map(|(_, e)| e.id.clone()).collect();
@@ -694,22 +754,21 @@ impl Memory for SqliteMemory {
             Self::load_embeddings_for_ids(&conn, &candidate_ids)
         };
 
-        let scored_results: Vec<ScoredResult> = scored.iter()
-            .map(|(sr, _)| sr.clone())
-            .collect();
+        let scored_results: Vec<ScoredResult> = scored.iter().map(|(sr, _)| sr.clone()).collect();
 
-        let reranked = mmr_rerank(&scored_results, query.top_k, self.mmr_lambda, |id_a, id_b| {
-            match (embedding_cache.get(id_a), embedding_cache.get(id_b)) {
+        let reranked = mmr_rerank(
+            &scored_results,
+            query.top_k,
+            self.mmr_lambda,
+            |id_a, id_b| match (embedding_cache.get(id_a), embedding_cache.get(id_b)) {
                 (Some(a), Some(b)) => cosine_similarity(a, b) as f64,
                 _ => 0.0,
-            }
-        });
+            },
+        );
 
         // Phase 8: build final result in MMR order.
-        let entry_map: HashMap<String, MemoryEntry> = scored
-            .into_iter()
-            .map(|(_, e)| (e.id.clone(), e))
-            .collect();
+        let entry_map: HashMap<String, MemoryEntry> =
+            scored.into_iter().map(|(_, e)| (e.id.clone(), e)).collect();
 
         let result = reranked
             .into_iter()
@@ -726,7 +785,10 @@ impl Memory for SqliteMemory {
     async fn delete(&self, id: &str) -> Result<()> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("lock: {e}"))?;
         conn.execute("DELETE FROM memories WHERE id = ?1", rusqlite::params![id])?;
-        conn.execute("DELETE FROM memory_embeddings WHERE memory_id = ?1", rusqlite::params![id])?;
+        conn.execute(
+            "DELETE FROM memory_embeddings WHERE memory_id = ?1",
+            rusqlite::params![id],
+        )?;
         Ok(())
     }
 
@@ -745,15 +807,33 @@ mod tests {
         let db_path = dir.path().join("test_memory.db");
         let mem = SqliteMemory::open(&db_path, 30.0).unwrap();
 
-        mem.store("login-flow", "The login uses JWT tokens with 24h expiry", MemoryCategory::Fact, MemoryScope::Domain, None)
-            .await
-            .unwrap();
-        mem.store("deploy-process", "Deploy by merging to dev branch, auto-deploys", MemoryCategory::Procedure, MemoryScope::Domain, None)
-            .await
-            .unwrap();
-        mem.store("db-config", "PostgreSQL on port 5432 with TimescaleDB", MemoryCategory::Fact, MemoryScope::Domain, None)
-            .await
-            .unwrap();
+        mem.store(
+            "login-flow",
+            "The login uses JWT tokens with 24h expiry",
+            MemoryCategory::Fact,
+            MemoryScope::Domain,
+            None,
+        )
+        .await
+        .unwrap();
+        mem.store(
+            "deploy-process",
+            "Deploy by merging to dev branch, auto-deploys",
+            MemoryCategory::Procedure,
+            MemoryScope::Domain,
+            None,
+        )
+        .await
+        .unwrap();
+        mem.store(
+            "db-config",
+            "PostgreSQL on port 5432 with TimescaleDB",
+            MemoryCategory::Fact,
+            MemoryScope::Domain,
+            None,
+        )
+        .await
+        .unwrap();
 
         let results = mem
             .search(&MemoryQuery::new("login JWT", 10))
@@ -763,10 +843,7 @@ mod tests {
         assert!(results[0].content.contains("JWT"));
         assert_eq!(results[0].scope, MemoryScope::Domain);
 
-        let results = mem
-            .search(&MemoryQuery::new("deploy", 10))
-            .await
-            .unwrap();
+        let results = mem.search(&MemoryQuery::new("deploy", 10)).await.unwrap();
         assert!(!results.is_empty());
         assert!(results[0].content.contains("deploy"));
     }
@@ -777,12 +854,33 @@ mod tests {
         let db_path = dir.path().join("test_entity.db");
         let mem = SqliteMemory::open(&db_path, 30.0).unwrap();
 
-        mem.store("shared-fact", "The API runs on port 8080", MemoryCategory::Fact, MemoryScope::Domain, None)
-            .await.unwrap();
-        mem.store("guardian-note", "Risk tolerance is low for this user", MemoryCategory::Preference, MemoryScope::Entity, Some("guardian-001"))
-            .await.unwrap();
-        mem.store("librarian-note", "User prefers detailed explanations", MemoryCategory::Preference, MemoryScope::Entity, Some("librarian-001"))
-            .await.unwrap();
+        mem.store(
+            "shared-fact",
+            "The API runs on port 8080",
+            MemoryCategory::Fact,
+            MemoryScope::Domain,
+            None,
+        )
+        .await
+        .unwrap();
+        mem.store(
+            "guardian-note",
+            "Risk tolerance is low for this user",
+            MemoryCategory::Preference,
+            MemoryScope::Entity,
+            Some("guardian-001"),
+        )
+        .await
+        .unwrap();
+        mem.store(
+            "librarian-note",
+            "User prefers detailed explanations",
+            MemoryCategory::Preference,
+            MemoryScope::Entity,
+            Some("librarian-001"),
+        )
+        .await
+        .unwrap();
 
         let guardian_query = MemoryQuery::new("risk tolerance", 10).with_entity("guardian-001");
         let results = mem.search(&guardian_query).await.unwrap();
@@ -805,10 +903,24 @@ mod tests {
         let db_path = dir.path().join("test_system.db");
         let mem = SqliteMemory::open(&db_path, 30.0).unwrap();
 
-        mem.store("strategic-pref", "Always prefer Rust over Python for new services", MemoryCategory::Preference, MemoryScope::System, None)
-            .await.unwrap();
-        mem.store("domain-fact", "The trading engine uses 50us tick", MemoryCategory::Fact, MemoryScope::Domain, None)
-            .await.unwrap();
+        mem.store(
+            "strategic-pref",
+            "Always prefer Rust over Python for new services",
+            MemoryCategory::Preference,
+            MemoryScope::System,
+            None,
+        )
+        .await
+        .unwrap();
+        mem.store(
+            "domain-fact",
+            "The trading engine uses 50us tick",
+            MemoryCategory::Fact,
+            MemoryScope::Domain,
+            None,
+        )
+        .await
+        .unwrap();
 
         let system_query = MemoryQuery::new("Rust Python", 10).with_scope(MemoryScope::System);
         let results = mem.search(&system_query).await.unwrap();
@@ -836,8 +948,9 @@ mod tests {
                     session_id TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT
-                );"
-            ).unwrap();
+                );",
+            )
+            .unwrap();
             conn.execute(
                 "INSERT INTO memories (id, key, content, category, created_at) VALUES ('old-1', 'test', 'old data', 'fact', '2025-01-01T00:00:00Z')",
                 [],
@@ -851,10 +964,20 @@ mod tests {
         assert_eq!(results[0].scope, MemoryScope::Domain);
         assert!(results[0].entity_id.is_none());
 
-        mem.store("new-fact", "New data with scope", MemoryCategory::Fact, MemoryScope::Entity, Some("comp-1"))
-            .await.unwrap();
+        mem.store(
+            "new-fact",
+            "New data with scope",
+            MemoryCategory::Fact,
+            MemoryScope::Entity,
+            Some("comp-1"),
+        )
+        .await
+        .unwrap();
 
-        let results = mem.search(&MemoryQuery::new("New data scope", 10).with_entity("comp-1")).await.unwrap();
+        let results = mem
+            .search(&MemoryQuery::new("New data scope", 10).with_entity("comp-1"))
+            .await
+            .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].entity_id.as_deref(), Some("comp-1"));
     }
@@ -865,8 +988,16 @@ mod tests {
         let db_path = dir.path().join("test_delete.db");
         let mem = SqliteMemory::open(&db_path, 30.0).unwrap();
 
-        let id = mem.store("key", "content", MemoryCategory::Fact, MemoryScope::Domain, None)
-            .await.unwrap();
+        let id = mem
+            .store(
+                "key",
+                "content",
+                MemoryCategory::Fact,
+                MemoryScope::Domain,
+                None,
+            )
+            .await
+            .unwrap();
 
         mem.delete(&id).await.unwrap();
 
@@ -897,7 +1028,8 @@ mod tests {
     #[async_trait]
     impl sigil_core::traits::Embedder for MockEmbedder {
         async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
-            self.call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.call_count
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             // Deterministic: fill vector based on text length.
             let val = (text.len() as f32) / 100.0;
             Ok(vec![val; self.dimensions])
@@ -920,8 +1052,16 @@ mod tests {
             .unwrap();
 
         // Store first memory — should call embedder.
-        let _id1 = mem.store("key-1", "identical content for embedding", MemoryCategory::Fact, MemoryScope::Domain, None)
-            .await.unwrap();
+        let _id1 = mem
+            .store(
+                "key-1",
+                "identical content for embedding",
+                MemoryCategory::Fact,
+                MemoryScope::Domain,
+                None,
+            )
+            .await
+            .unwrap();
         assert_eq!(embedder.calls(), 1, "first store should call embedder");
 
         // Store second memory with IDENTICAL content — should NOT call embedder (cache hit).
@@ -939,12 +1079,18 @@ mod tests {
             let hash = SqliteMemory::content_hash("identical content for embedding");
 
             // Verify the hash was stored.
-            let stored_hash: Option<String> = conn.query_row(
-                "SELECT content_hash FROM memory_embeddings LIMIT 1",
-                [],
-                |row| row.get(0),
-            ).ok();
-            assert_eq!(stored_hash, Some(hash.clone()), "content_hash should be stored");
+            let stored_hash: Option<String> = conn
+                .query_row(
+                    "SELECT content_hash FROM memory_embeddings LIMIT 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .ok();
+            assert_eq!(
+                stored_hash,
+                Some(hash.clone()),
+                "content_hash should be stored"
+            );
 
             // Verify lookup_embedding_by_hash finds it.
             let cached = SqliteMemory::lookup_embedding_by_hash(&conn, &hash);
@@ -964,19 +1110,42 @@ mod tests {
             .unwrap();
 
         // Store two memories with different content — both should call embedder.
-        let _id1 = mem.store("key-1", "first unique content", MemoryCategory::Fact, MemoryScope::Domain, None)
-            .await.unwrap();
-        let _id2 = mem.store("key-2", "second unique content", MemoryCategory::Fact, MemoryScope::Domain, None)
-            .await.unwrap();
+        let _id1 = mem
+            .store(
+                "key-1",
+                "first unique content",
+                MemoryCategory::Fact,
+                MemoryScope::Domain,
+                None,
+            )
+            .await
+            .unwrap();
+        let _id2 = mem
+            .store(
+                "key-2",
+                "second unique content",
+                MemoryCategory::Fact,
+                MemoryScope::Domain,
+                None,
+            )
+            .await
+            .unwrap();
 
-        assert_eq!(embedder.calls(), 2, "different content should call embedder each time");
+        assert_eq!(
+            embedder.calls(),
+            2,
+            "different content should call embedder each time"
+        );
 
         // Verify both have different hashes stored.
         {
             let conn = mem.conn.lock().unwrap();
             let hash1 = SqliteMemory::content_hash("first unique content");
             let hash2 = SqliteMemory::content_hash("second unique content");
-            assert_ne!(hash1, hash2, "different content should have different hashes");
+            assert_ne!(
+                hash1, hash2,
+                "different content should have different hashes"
+            );
 
             let cached1 = SqliteMemory::lookup_embedding_by_hash(&conn, &hash1);
             let cached2 = SqliteMemory::lookup_embedding_by_hash(&conn, &hash2);
@@ -1020,8 +1189,9 @@ mod tests {
                     memory_id TEXT PRIMARY KEY,
                     embedding BLOB NOT NULL,
                     dimensions INTEGER NOT NULL
-                );"
-            ).unwrap();
+                );",
+            )
+            .unwrap();
         }
 
         // Opening should auto-migrate and add content_hash column.

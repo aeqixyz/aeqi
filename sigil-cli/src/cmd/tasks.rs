@@ -152,11 +152,7 @@ pub(crate) async fn cmd_tasks(
     Ok(())
 }
 
-pub(crate) async fn cmd_close(
-    config_path: &Option<PathBuf>,
-    id: &str,
-    reason: &str,
-) -> Result<()> {
+pub(crate) async fn cmd_close(config_path: &Option<PathBuf>, id: &str, reason: &str) -> Result<()> {
     let (config, _) = load_config(config_path)?;
 
     let prefix = id.split('-').next().unwrap_or("");

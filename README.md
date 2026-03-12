@@ -1,5 +1,7 @@
 # Sigil
 
+[![CI](https://github.com/0xAEQI/sigil/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/0xAEQI/sigil/actions/workflows/ci.yml)
+
 Rust workspace for building an AI agent orchestration harness.
 
 Sigil currently has two real execution paths:

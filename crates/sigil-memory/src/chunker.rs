@@ -145,10 +145,13 @@ mod tests {
         let chunks = chunk_text(&text, "test.md", 100, 20);
         // With overlap, later chunks should share some text with earlier ones.
         if chunks.len() >= 2 {
-            let last_words_of_first: Vec<&str> = chunks[0].text.split_whitespace().rev().take(3).collect();
-            let first_words_of_second: Vec<&str> = chunks[1].text.split_whitespace().take(10).collect();
+            let last_words_of_first: Vec<&str> =
+                chunks[0].text.split_whitespace().rev().take(3).collect();
+            let first_words_of_second: Vec<&str> =
+                chunks[1].text.split_whitespace().take(10).collect();
             // There should be some overlap.
-            let has_overlap = last_words_of_first.iter()
+            let has_overlap = last_words_of_first
+                .iter()
                 .any(|w| first_words_of_second.contains(w));
             assert!(has_overlap, "Expected overlap between chunks");
         }

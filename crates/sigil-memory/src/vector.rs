@@ -34,7 +34,8 @@ pub fn vec_to_bytes(v: &[f32]) -> Vec<u8> {
 
 /// Deserialize f32 vector from little-endian bytes.
 pub fn bytes_to_vec(bytes: &[u8]) -> Vec<f32> {
-    bytes.chunks_exact(4)
+    bytes
+        .chunks_exact(4)
         .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
         .collect()
 }
@@ -62,7 +63,8 @@ impl VectorStore {
                 dimensions INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_embed_id ON memory_embeddings(memory_id);",
-        ).context("failed to create embeddings table")?;
+        )
+        .context("failed to create embeddings table")?;
         Ok(())
     }
 
@@ -110,9 +112,7 @@ impl VectorStore {
     pub fn search(&self, query: &[f32], top_k: usize) -> Result<Vec<VectorResult>> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("lock: {e}"))?;
 
-        let mut stmt = conn.prepare(
-            "SELECT memory_id, embedding FROM memory_embeddings"
-        )?;
+        let mut stmt = conn.prepare("SELECT memory_id, embedding FROM memory_embeddings")?;
 
         let mut results: Vec<VectorResult> = stmt
             .query_map([], |row| {
@@ -124,12 +124,19 @@ impl VectorStore {
             .map(|(memory_id, bytes)| {
                 let embedding = bytes_to_vec(&bytes);
                 let similarity = cosine_similarity(query, &embedding);
-                VectorResult { memory_id, similarity }
+                VectorResult {
+                    memory_id,
+                    similarity,
+                }
             })
             .collect();
 
         // Sort by similarity descending.
-        results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            b.similarity
+                .partial_cmp(&a.similarity)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         results.truncate(top_k);
 
         Ok(results)

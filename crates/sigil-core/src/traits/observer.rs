@@ -5,13 +5,34 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// Event types for observability.
 #[derive(Debug, Clone)]
 pub enum Event {
-    AgentStart { agent_name: String },
-    AgentEnd { agent_name: String, iterations: u32 },
-    LlmRequest { model: String, tokens: u32 },
-    LlmResponse { model: String, prompt_tokens: u32, completion_tokens: u32 },
-    ToolCall { tool_name: String, duration_ms: u64 },
-    ToolError { tool_name: String, error: String },
-    Custom { name: String, data: Value },
+    AgentStart {
+        agent_name: String,
+    },
+    AgentEnd {
+        agent_name: String,
+        iterations: u32,
+    },
+    LlmRequest {
+        model: String,
+        tokens: u32,
+    },
+    LlmResponse {
+        model: String,
+        prompt_tokens: u32,
+        completion_tokens: u32,
+    },
+    ToolCall {
+        tool_name: String,
+        duration_ms: u64,
+    },
+    ToolError {
+        tool_name: String,
+        error: String,
+    },
+    Custom {
+        name: String,
+        data: Value,
+    },
 }
 
 /// Observability trait for metrics, logging, tracing.
@@ -34,16 +55,26 @@ impl Observer for LogObserver {
             Event::AgentStart { agent_name } => {
                 tracing::info!(agent = %agent_name, "agent started");
             }
-            Event::AgentEnd { agent_name, iterations } => {
+            Event::AgentEnd {
+                agent_name,
+                iterations,
+            } => {
                 tracing::info!(agent = %agent_name, iterations, "agent completed");
             }
             Event::LlmRequest { model, tokens } => {
                 tracing::debug!(model = %model, tokens, "LLM request");
             }
-            Event::LlmResponse { model, prompt_tokens, completion_tokens } => {
+            Event::LlmResponse {
+                model,
+                prompt_tokens,
+                completion_tokens,
+            } => {
                 tracing::debug!(model = %model, prompt_tokens, completion_tokens, "LLM response");
             }
-            Event::ToolCall { tool_name, duration_ms } => {
+            Event::ToolCall {
+                tool_name,
+                duration_ms,
+            } => {
                 tracing::debug!(tool = %tool_name, duration_ms, "tool executed");
             }
             Event::ToolError { tool_name, error } => {
@@ -145,13 +176,20 @@ impl Observer for PrometheusObserver {
             Event::LlmRequest { .. } => {
                 self.llm_requests.fetch_add(1, Ordering::Relaxed);
             }
-            Event::LlmResponse { prompt_tokens, completion_tokens, .. } => {
-                self.llm_prompt_tokens.fetch_add(*prompt_tokens as u64, Ordering::Relaxed);
-                self.llm_completion_tokens.fetch_add(*completion_tokens as u64, Ordering::Relaxed);
+            Event::LlmResponse {
+                prompt_tokens,
+                completion_tokens,
+                ..
+            } => {
+                self.llm_prompt_tokens
+                    .fetch_add(*prompt_tokens as u64, Ordering::Relaxed);
+                self.llm_completion_tokens
+                    .fetch_add(*completion_tokens as u64, Ordering::Relaxed);
             }
             Event::ToolCall { duration_ms, .. } => {
                 self.tool_calls.fetch_add(1, Ordering::Relaxed);
-                self.tool_duration_ms.fetch_add(*duration_ms, Ordering::Relaxed);
+                self.tool_duration_ms
+                    .fetch_add(*duration_ms, Ordering::Relaxed);
             }
             Event::ToolError { .. } => {
                 self.tool_errors.fetch_add(1, Ordering::Relaxed);

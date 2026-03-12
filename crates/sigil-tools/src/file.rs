@@ -21,9 +21,7 @@ impl FileReadTool {
             self.workspace.join(path)
         };
 
-        let canonical = resolved
-            .canonicalize()
-            .unwrap_or_else(|_| resolved.clone());
+        let canonical = resolved.canonicalize().unwrap_or_else(|_| resolved.clone());
 
         let workspace_canonical = self
             .workspace
@@ -113,9 +111,7 @@ impl FileWriteTool {
         };
 
         // For writes, the file may not exist yet; check parent directory.
-        let parent = resolved
-            .parent()
-            .unwrap_or(&resolved);
+        let parent = resolved.parent().unwrap_or(&resolved);
 
         let parent_canonical = parent
             .canonicalize()
@@ -160,11 +156,12 @@ impl sigil_core::traits::Tool for FileWriteTool {
 
         // Create parent directories if needed.
         if let Some(parent) = resolved.parent()
-            && let Err(e) = tokio::fs::create_dir_all(parent).await {
-                return Ok(ToolResult::error(format!(
-                    "failed to create directories: {e}"
-                )));
-            }
+            && let Err(e) = tokio::fs::create_dir_all(parent).await
+        {
+            return Ok(ToolResult::error(format!(
+                "failed to create directories: {e}"
+            )));
+        }
 
         match tokio::fs::write(&resolved, content).await {
             Ok(()) => Ok(ToolResult::success(format!(
@@ -182,7 +179,8 @@ impl sigil_core::traits::Tool for FileWriteTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "write_file".to_string(),
-            description: "Write content to a file. Creates parent directories if needed.".to_string(),
+            description: "Write content to a file. Creates parent directories if needed."
+                .to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -219,10 +217,7 @@ impl ListDirTool {
 #[async_trait]
 impl sigil_core::traits::Tool for ListDirTool {
     async fn execute(&self, args: serde_json::Value) -> Result<ToolResult> {
-        let path = args
-            .get("path")
-            .and_then(|v| v.as_str())
-            .unwrap_or(".");
+        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
 
         let resolved = if Path::new(path).is_absolute() {
             PathBuf::from(path)

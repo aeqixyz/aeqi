@@ -56,7 +56,8 @@ impl Channel for DiscordChannel {
         let mut shutdown_rx = self.shutdown_rx.clone();
 
         tokio::spawn(async move {
-            let mut last_message_ids: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+            let mut last_message_ids: std::collections::HashMap<String, String> =
+                std::collections::HashMap::new();
             let mut backoff_secs: u64 = 5;
             const MAX_BACKOFF_SECS: u64 = 60;
             info!("Discord polling started");
@@ -69,7 +70,8 @@ impl Channel for DiscordChannel {
                 let mut had_error = false;
                 for channel_id in &channel_ids {
                     let url = format!("{}/channels/{}/messages?limit=10", DISCORD_API, channel_id);
-                    let mut req = client.get(&url)
+                    let mut req = client
+                        .get(&url)
                         .header("Authorization", format!("Bot {}", token));
 
                     if let Some(after) = last_message_ids.get(channel_id) {
@@ -128,12 +130,15 @@ impl Channel for DiscordChannel {
     }
 
     async fn send(&self, message: OutgoingMessage) -> Result<()> {
-        let channel_id = message.metadata.get("channel_id")
+        let channel_id = message
+            .metadata
+            .get("channel_id")
             .and_then(|v| v.as_str())
             .context("missing channel_id in metadata")?;
 
         let url = format!("{}/channels/{}/messages", DISCORD_API, channel_id);
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bot {}", self.token))
             .json(&serde_json::json!({
@@ -151,7 +156,9 @@ impl Channel for DiscordChannel {
         Ok(())
     }
 
-    fn name(&self) -> &str { "discord" }
+    fn name(&self) -> &str {
+        "discord"
+    }
 
     async fn stop(&self) -> Result<()> {
         let _ = self.shutdown.send(true);

@@ -70,7 +70,10 @@ impl Skill {
         if base_identity.is_empty() {
             self.prompt.system.clone()
         } else {
-            format!("{}\n\n---\n\n# Skill: {}\n\n{}", base_identity, self.skill.name, self.prompt.system)
+            format!(
+                "{}\n\n---\n\n# Skill: {}\n\n{}",
+                base_identity, self.skill.name, self.prompt.system
+            )
         }
     }
 

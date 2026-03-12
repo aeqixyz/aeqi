@@ -66,13 +66,27 @@ impl FailureAnalysis {
                     suggested_approach = Some(approach);
                 }
             } else if let Some(rest) = line.strip_prefix("TOOLS:") {
-                failed_tools = rest.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                failed_tools = rest
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
             } else if let Some(rest) = line.strip_prefix("CONTEXT:") {
-                missing_context_hints = rest.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                missing_context_hints = rest
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
             }
         }
 
-        Self { mode, reasoning, suggested_approach, failed_tools, missing_context_hints }
+        Self {
+            mode,
+            reasoning,
+            suggested_approach,
+            failed_tools,
+            missing_context_hints,
+        }
     }
 
     /// Enrich a task description based on the failure analysis.
@@ -122,7 +136,7 @@ impl FailureAnalysis {
             }
             FailureMode::BudgetExhausted => {
                 enrichment.push_str(
-                    "\n**Budget exhausted.** This task requires a budget increase to continue.\n"
+                    "\n**Budget exhausted.** This task requires a budget increase to continue.\n",
                 );
             }
             FailureMode::Unknown => {
@@ -160,9 +174,15 @@ mod tests {
         let analysis = FailureAnalysis::parse(text);
         assert_eq!(analysis.mode, FailureMode::MissingContext);
         assert_eq!(analysis.reasoning, "Could not find the config file");
-        assert_eq!(analysis.suggested_approach, Some("Check /etc directory".to_string()));
+        assert_eq!(
+            analysis.suggested_approach,
+            Some("Check /etc directory".to_string())
+        );
         assert_eq!(analysis.failed_tools, vec!["file_read"]);
-        assert_eq!(analysis.missing_context_hints, vec!["config path", "environment variables"]);
+        assert_eq!(
+            analysis.missing_context_hints,
+            vec!["config path", "environment variables"]
+        );
     }
 
     #[test]

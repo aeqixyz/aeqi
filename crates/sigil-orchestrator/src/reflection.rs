@@ -1,7 +1,9 @@
 use anyhow::Result;
 use chrono::Utc;
-use sigil_core::traits::{ChatRequest, Memory, MemoryCategory, MemoryScope, Message, MessageContent, Provider, Role};
 use serde::{Deserialize, Serialize};
+use sigil_core::traits::{
+    ChatRequest, Memory, MemoryCategory, MemoryScope, Message, MessageContent, Provider, Role,
+};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -17,12 +19,7 @@ const TRACKED_FILES: &[&str] = &[
 ];
 
 /// Files the LLM is allowed to update (output side).
-const UPDATABLE_FILES: &[&str] = &[
-    "MEMORY.md",
-    "HEARTBEAT.md",
-    "IDENTITY.md",
-    "PREFERENCES.md",
-];
+const UPDATABLE_FILES: &[&str] = &["MEMORY.md", "HEARTBEAT.md", "IDENTITY.md", "PREFERENCES.md"];
 
 /// Max characters fed to the LLM across all identity files.
 const MAX_INPUT_CHARS: usize = 6000;
@@ -41,9 +38,10 @@ struct ReflectionState {
 impl ReflectionState {
     fn load(path: &Path) -> Self {
         if let Ok(content) = std::fs::read_to_string(path)
-            && let Ok(state) = serde_json::from_str(&content) {
-                return state;
-            }
+            && let Ok(state) = serde_json::from_str(&content)
+        {
+            return state;
+        }
         Self::default()
     }
 
@@ -127,10 +125,11 @@ impl Reflection {
         for filename in TRACKED_FILES {
             let path = self.project_dir.join(filename);
             if let Ok(content) = std::fs::read_to_string(&path)
-                && !content.trim().is_empty() {
-                    current_fingerprints.insert(filename.to_string(), fnv1a(&content));
-                    file_contents.insert(filename.to_string(), content);
-                }
+                && !content.trim().is_empty()
+            {
+                current_fingerprints.insert(filename.to_string(), fnv1a(&content));
+                file_contents.insert(filename.to_string(), content);
+            }
         }
 
         // Also read MEMORY.md even though it's not tracked for drift.
@@ -138,9 +137,10 @@ impl Reflection {
             if !file_contents.contains_key(*filename) {
                 let path = self.project_dir.join(filename);
                 if let Ok(content) = std::fs::read_to_string(&path)
-                    && !content.trim().is_empty() {
-                        file_contents.insert(filename.to_string(), content);
-                    }
+                    && !content.trim().is_empty()
+                {
+                    file_contents.insert(filename.to_string(), content);
+                }
             }
         }
 
@@ -171,13 +171,11 @@ impl Reflection {
             )
             .with_scope(MemoryScope::Domain);
             match mem.search(&query).await {
-                Ok(entries) if !entries.is_empty() => {
-                    entries
-                        .iter()
-                        .map(|e| format!("- [{}] {}: {}", e.scope, e.key, e.content))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                }
+                Ok(entries) if !entries.is_empty() => entries
+                    .iter()
+                    .map(|e| format!("- [{}] {}: {}", e.scope, e.key, e.content))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
                 _ => String::new(),
             }
         } else {
@@ -269,7 +267,13 @@ impl Reflection {
             );
             let key = format!("reflection-{}", Utc::now().timestamp());
             if let Err(e) = mem
-                .store(&key, &summary_text, MemoryCategory::Fact, MemoryScope::Domain, None)
+                .store(
+                    &key,
+                    &summary_text,
+                    MemoryCategory::Fact,
+                    MemoryScope::Domain,
+                    None,
+                )
                 .await
             {
                 warn!(project = %self.project_name, error = %e, "failed to store reflection insight in SQLite");
@@ -288,7 +292,11 @@ impl Reflection {
 }
 
 /// Build the reflection prompt from the current identity files.
-fn build_prompt(project_name: &str, files: &HashMap<String, String>, sqlite_insights: &str) -> String {
+fn build_prompt(
+    project_name: &str,
+    files: &HashMap<String, String>,
+    sqlite_insights: &str,
+) -> String {
     let mut prompt = format!(
         "You are the self-reflection system for the '{project_name}' agent. \
          Your task: review the current identity files for drift, staleness, or missing \
@@ -399,7 +407,10 @@ mod tests {
     fn test_parse_updates_single() {
         let text = "UPDATE MEMORY.md:\nLine 1\nLine 2\nEND MEMORY.md";
         let updates = parse_updates(text);
-        assert_eq!(updates.get("MEMORY.md").map(|s| s.as_str()), Some("Line 1\nLine 2"));
+        assert_eq!(
+            updates.get("MEMORY.md").map(|s| s.as_str()),
+            Some("Line 1\nLine 2")
+        );
     }
 
     #[test]
@@ -436,14 +447,10 @@ mod tests {
         let mut fp2 = HashMap::new();
         fp2.insert("PERSONA.md".to_string(), fnv1a("modified content"));
 
-        let drift = fp1
-            .iter()
-            .any(|(k, v)| fp2.get(k) != Some(v));
+        let drift = fp1.iter().any(|(k, v)| fp2.get(k) != Some(v));
         assert!(drift);
 
-        let no_drift = fp1
-            .iter()
-            .all(|(k, v)| fp2.get(k) == Some(v));
+        let no_drift = fp1.iter().all(|(k, v)| fp2.get(k) == Some(v));
         assert!(!no_drift);
     }
 }

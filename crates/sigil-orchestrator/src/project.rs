@@ -1,7 +1,7 @@
 use anyhow::Result;
-use sigil_tasks::TaskBoard;
 use sigil_core::config::ProjectConfig;
 use sigil_core::identity::Identity;
+use sigil_tasks::TaskBoard;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
@@ -24,7 +24,11 @@ pub struct Project {
 
 impl Project {
     /// Create a project from configuration.
-    pub fn from_config(config: &ProjectConfig, project_dir: &std::path::Path, default_model: &str) -> Result<Self> {
+    pub fn from_config(
+        config: &ProjectConfig,
+        project_dir: &std::path::Path,
+        default_model: &str,
+    ) -> Result<Self> {
         // Load project-only files (AGENTS.md, KNOWLEDGE.md, HEARTBEAT.md).
         // Uses load_from_dir since projects don't have agent personality.
         let project_identity = Identity::load_from_dir(project_dir).unwrap_or_default();
@@ -43,7 +47,10 @@ impl Project {
             prefix: config.prefix.clone(),
             repo: PathBuf::from(&config.repo),
             worktree_root,
-            model: config.model.clone().unwrap_or_else(|| default_model.to_string()),
+            model: config
+                .model
+                .clone()
+                .unwrap_or_else(|| default_model.to_string()),
             max_workers: config.max_workers,
             worker_timeout_secs: config.worker_timeout_secs,
             project_identity,

@@ -74,11 +74,22 @@ impl PreflightAssessment {
             } else if let Some(rest) = line.strip_prefix("CONFIDENCE:") {
                 confidence = rest.trim().parse().unwrap_or(0.5);
             } else if let Some(rest) = line.strip_prefix("RISKS:") {
-                risks = rest.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                risks = rest
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
             }
         }
 
-        Self { approach, estimated_difficulty: difficulty, estimated_cost_usd: cost, estimated_turns: turns, confidence, risks }
+        Self {
+            approach,
+            estimated_difficulty: difficulty,
+            estimated_cost_usd: cost,
+            estimated_turns: turns,
+            confidence,
+            risks,
+        }
     }
 
     /// Evaluate the assessment against constraints. Returns a verdict.

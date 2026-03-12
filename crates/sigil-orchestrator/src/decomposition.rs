@@ -3,9 +3,9 @@
 //! Automatically decomposes missions into a task DAG with dependencies and
 //! critical path identification. Tasks on the critical path get elevated priority.
 
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sigil_tasks::{Priority, TaskBoard, TaskId};
-use anyhow::Result;
 
 /// A decomposed sub-task with dependency references.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,7 +53,11 @@ impl DecompositionResult {
         let mut current_deps: Vec<usize> = Vec::new();
         let mut current_labels: Vec<String> = Vec::new();
 
-        let flush = |tasks: &mut Vec<DecomposedTask>, subject: &mut String, desc: &mut String, deps: &mut Vec<usize>, labels: &mut Vec<String>| {
+        let flush = |tasks: &mut Vec<DecomposedTask>,
+                     subject: &mut String,
+                     desc: &mut String,
+                     deps: &mut Vec<usize>,
+                     labels: &mut Vec<String>| {
             if !subject.is_empty() {
                 tasks.push(DecomposedTask {
                     subject: std::mem::take(subject),
@@ -68,30 +72,48 @@ impl DecompositionResult {
         for line in text.lines() {
             let line = line.trim();
             if line == "---" {
-                flush(&mut tasks, &mut current_subject, &mut current_desc, &mut current_deps, &mut current_labels);
+                flush(
+                    &mut tasks,
+                    &mut current_subject,
+                    &mut current_desc,
+                    &mut current_deps,
+                    &mut current_labels,
+                );
             } else if let Some(rest) = line.strip_prefix("TASK:") {
                 current_subject = rest.trim().to_string();
             } else if let Some(rest) = line.strip_prefix("DESC:") {
                 current_desc = rest.trim().to_string();
             } else if let Some(rest) = line.strip_prefix("DEPS:") {
-                current_deps = rest.split(',')
+                current_deps = rest
+                    .split(',')
                     .map(|s| s.trim())
                     .filter(|s| !s.is_empty())
                     .filter_map(|s| s.parse::<usize>().ok())
                     .collect();
             } else if let Some(rest) = line.strip_prefix("LABELS:") {
-                current_labels = rest.split(',')
+                current_labels = rest
+                    .split(',')
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
             }
         }
         // Flush last task.
-        flush(&mut tasks, &mut current_subject, &mut current_desc, &mut current_deps, &mut current_labels);
+        flush(
+            &mut tasks,
+            &mut current_subject,
+            &mut current_desc,
+            &mut current_deps,
+            &mut current_labels,
+        );
 
         let critical_path = Self::compute_critical_path(&tasks);
 
-        Self { tasks, critical_path, cost_usd: 0.0 }
+        Self {
+            tasks,
+            critical_path,
+            cost_usd: 0.0,
+        }
     }
 
     /// Compute the critical path (longest chain of dependencies).
@@ -131,14 +153,21 @@ impl DecompositionResult {
 
     /// Materialize decomposed tasks into a TaskBoard, wiring dependencies.
     /// Returns the created task IDs.
-    pub fn materialize(&mut self, board: &mut TaskBoard, prefix: &str, mission_id: &str) -> Result<Vec<TaskId>> {
+    pub fn materialize(
+        &mut self,
+        board: &mut TaskBoard,
+        prefix: &str,
+        mission_id: &str,
+    ) -> Result<Vec<TaskId>> {
         let mut created_ids: Vec<TaskId> = Vec::new();
 
         // Validate no cycles in depends_on_indices.
         for (i, task) in self.tasks.iter().enumerate() {
             for &dep in &task.depends_on_indices {
                 if dep >= i {
-                    anyhow::bail!("dependency cycle detected: task {i} depends on task {dep} (not yet created)");
+                    anyhow::bail!(
+                        "dependency cycle detected: task {i} depends on task {dep} (not yet created)"
+                    );
                 }
             }
         }

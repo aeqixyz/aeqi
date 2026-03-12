@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use chacha20poly1305::{
-    aead::{Aead, KeyInit},
     ChaCha20Poly1305, Nonce,
+    aead::{Aead, KeyInit},
 };
 use rand::Rng;
 use std::collections::HashMap;
@@ -21,25 +21,19 @@ impl SecretStore {
 
         let key_path = path.join(".key");
         let key = if key_path.exists() {
-            let encoded = std::fs::read_to_string(&key_path)
-                .context("failed to read secret store key")?;
-            let decoded = base64::Engine::decode(
-                &base64::engine::general_purpose::STANDARD,
-                encoded.trim(),
-            )
-            .context("failed to decode secret store key")?;
+            let encoded =
+                std::fs::read_to_string(&key_path).context("failed to read secret store key")?;
+            let decoded =
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded.trim())
+                    .context("failed to decode secret store key")?;
             let mut key = [0u8; 32];
             key.copy_from_slice(&decoded);
             key
         } else {
             let mut key = [0u8; 32];
             rand::rng().fill(&mut key);
-            let encoded = base64::Engine::encode(
-                &base64::engine::general_purpose::STANDARD,
-                key,
-            );
-            std::fs::write(&key_path, &encoded)
-                .context("failed to write secret store key")?;
+            let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, key);
+            std::fs::write(&key_path, &encoded).context("failed to write secret store key")?;
 
             // Restrict permissions on the key file.
             #[cfg(unix)]
@@ -75,10 +69,7 @@ impl SecretStore {
         data.extend_from_slice(&nonce_bytes);
         data.extend_from_slice(&ciphertext);
 
-        let encoded = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            &data,
-        );
+        let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
 
         let file_path = self.path.join(format!("{name}.enc"));
         std::fs::write(&file_path, &encoded)
@@ -99,11 +90,9 @@ impl SecretStore {
         let encoded = std::fs::read_to_string(&file_path)
             .with_context(|| format!("secret not found: {name}"))?;
 
-        let data = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            encoded.trim(),
-        )
-        .context("failed to decode secret")?;
+        let data =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded.trim())
+                .context("failed to decode secret")?;
 
         if data.len() < 12 {
             anyhow::bail!("corrupt secret: {name}");

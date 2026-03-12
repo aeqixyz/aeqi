@@ -5,8 +5,8 @@
 //! then maps to relevant advisor agents.
 
 use anyhow::Result;
-use sigil_core::config::{AgentRole, PeerAgentConfig};
 use serde::{Deserialize, Serialize};
+use sigil_core::config::{AgentRole, PeerAgentConfig};
 use std::collections::HashMap;
 use std::time::Instant;
 use tracing::{info, warn};
@@ -87,7 +87,9 @@ impl AgentRouter {
             .collect();
 
         // Build dynamic classification rules from agent expertise.
-        let mut rules = String::from("Classification rules:\n- \"casual\": Simple chat, greetings, personal talk -> no advisors needed\n");
+        let mut rules = String::from(
+            "Classification rules:\n- \"casual\": Simple chat, greetings, personal talk -> no advisors needed\n",
+        );
         for agent in available_agents {
             if agent.role != AgentRole::Advisor || agent.expertise.is_empty() {
                 continue;
@@ -124,7 +126,8 @@ Use empty array for "casual" messages. Only include advisors whose expertise is 
             "temperature": 0.0
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post("https://openrouter.ai/api/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
@@ -135,51 +138,49 @@ Use empty array for "casual" messages. Only include advisors whose expertise is 
         let classify_ms = start.elapsed().as_millis() as u64;
 
         let decision = match response {
-            Ok(resp) => {
-                match resp.json::<serde_json::Value>().await {
-                    Ok(v) => {
-                        let text = v
-                            .pointer("/choices/0/message/content")
-                            .and_then(|c| c.as_str())
-                            .unwrap_or("")
-                            .trim();
+            Ok(resp) => match resp.json::<serde_json::Value>().await {
+                Ok(v) => {
+                    let text = v
+                        .pointer("/choices/0/message/content")
+                        .and_then(|c| c.as_str())
+                        .unwrap_or("")
+                        .trim();
 
-                        let clean = text
-                            .strip_prefix("```json")
-                            .or_else(|| text.strip_prefix("```"))
-                            .unwrap_or(text)
-                            .strip_suffix("```")
-                            .unwrap_or(text)
-                            .trim();
+                    let clean = text
+                        .strip_prefix("```json")
+                        .or_else(|| text.strip_prefix("```"))
+                        .unwrap_or(text)
+                        .strip_suffix("```")
+                        .unwrap_or(text)
+                        .trim();
 
-                        match serde_json::from_str::<ClassifierOutput>(clean) {
-                            Ok(parsed) => {
-                                info!(
-                                    category = %parsed.category,
-                                    advisors = ?parsed.advisors,
-                                    ms = classify_ms,
-                                    "message classified"
-                                );
-                                parsed
-                            }
-                            Err(e) => {
-                                warn!(error = %e, raw = %text, "classifier parse failed, defaulting to casual");
-                                ClassifierOutput {
-                                    category: "casual".to_string(),
-                                    advisors: Vec::new(),
-                                }
-                            }
+                    match serde_json::from_str::<ClassifierOutput>(clean) {
+                        Ok(parsed) => {
+                            info!(
+                                category = %parsed.category,
+                                advisors = ?parsed.advisors,
+                                ms = classify_ms,
+                                "message classified"
+                            );
+                            parsed
                         }
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "classifier response parse failed");
-                        ClassifierOutput {
-                            category: "casual".to_string(),
-                            advisors: Vec::new(),
+                        Err(e) => {
+                            warn!(error = %e, raw = %text, "classifier parse failed, defaulting to casual");
+                            ClassifierOutput {
+                                category: "casual".to_string(),
+                                advisors: Vec::new(),
+                            }
                         }
                     }
                 }
-            }
+                Err(e) => {
+                    warn!(error = %e, "classifier response parse failed");
+                    ClassifierOutput {
+                        category: "casual".to_string(),
+                        advisors: Vec::new(),
+                    }
+                }
+            },
             Err(e) => {
                 warn!(error = %e, "classifier request failed, defaulting to leader-only");
                 ClassifierOutput {
@@ -206,10 +207,11 @@ Use empty array for "casual" messages. Only include advisors whose expertise is 
                 }
                 let key = (chat_id, name.clone());
                 if let Some(last) = self.last_invoked.get(&key)
-                    && now.duration_since(*last).as_secs() < self.cooldown_secs {
-                        info!(agent = %name, chat_id, "advisor on cooldown for this chat, skipping");
-                        return false;
-                    }
+                    && now.duration_since(*last).as_secs() < self.cooldown_secs
+                {
+                    info!(agent = %name, chat_id, "advisor on cooldown for this chat, skipping");
+                    return false;
+                }
                 true
             })
             .collect();

@@ -3,8 +3,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 use tracing::{debug, info, warn};
 
-use sigil_core::traits::{Channel, OutgoingMessage};
 use crate::registry::ProjectRegistry;
+use sigil_core::traits::{Channel, OutgoingMessage};
 
 /// Session alarm and progress heartbeat system.
 ///
@@ -55,8 +55,7 @@ impl SessionTracker {
             let (total_working, total_pending, active_projects) = aggregate_status(&status);
             let is_active = total_working > 0 || total_pending > 0;
 
-            let can_send = last_sent
-                .is_none_or(|t| t.elapsed() >= self.min_flood_interval);
+            let can_send = last_sent.is_none_or(|t| t.elapsed() >= self.min_flood_interval);
 
             // Determine message (priority order: deadline > transition > periodic).
             let msg: Option<String> = if can_send {
@@ -77,7 +76,11 @@ impl SessionTracker {
                     Some(format!(
                         "🚀 Workers awakened — {} {} queued across {}. Session: {}.",
                         total_pending + total_working,
-                        if total_pending + total_working == 1 { "task" } else { "tasks" },
+                        if total_pending + total_working == 1 {
+                            "task"
+                        } else {
+                            "tasks"
+                        },
                         active_projects,
                         fmt_duration(elapsed)
                     ))
@@ -92,22 +95,24 @@ impl SessionTracker {
 
                 // 4. Periodic check-in while active.
                 } else if is_active
-                    && last_checkin
-                        .is_none_or(|t| t.elapsed() >= self.checkin_interval)
+                    && last_checkin.is_none_or(|t| t.elapsed() >= self.checkin_interval)
                 {
                     last_checkin = Some(Instant::now());
                     Some(format!(
                         "⏱ Sprint check-in: {} {} working across {}. Session: {}.",
                         total_working,
-                        if total_working == 1 { "worker" } else { "workers" },
+                        if total_working == 1 {
+                            "worker"
+                        } else {
+                            "workers"
+                        },
                         active_projects,
                         fmt_duration(elapsed)
                     ))
 
                 // 5. Periodic idle alarm — "come back" reminder.
                 } else if !is_active
-                    && last_alarm
-                        .is_none_or(|t| t.elapsed() >= self.alarm_interval)
+                    && last_alarm.is_none_or(|t| t.elapsed() >= self.alarm_interval)
                 {
                     last_alarm = Some(Instant::now());
                     Some(format!(
@@ -147,9 +152,7 @@ impl SessionTracker {
 }
 
 /// Summarise total working/pending counts and active project names.
-fn aggregate_status(
-    status: &crate::registry::RegistryStatus,
-) -> (usize, usize, String) {
+fn aggregate_status(status: &crate::registry::RegistryStatus) -> (usize, usize, String) {
     let mut total_working = 0usize;
     let mut total_pending = 0usize;
     let mut active_names: Vec<&str> = Vec::new();

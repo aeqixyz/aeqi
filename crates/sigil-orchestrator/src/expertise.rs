@@ -79,12 +79,17 @@ impl ExpertiseLedger {
                  ON sigil_expertise(task_domain);",
         )?;
 
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     /// Record a task outcome for an agent.
     pub fn record(&self, entry: &ExpertiseRecord) -> Result<()> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
         let outcome_str = serde_json::to_value(entry.outcome)
             .ok()
             .and_then(|v| v.as_str().map(String::from))
@@ -109,7 +114,10 @@ impl ExpertiseLedger {
     /// Rank agents for a given domain using Wilson score lower bound.
     /// Returns agents sorted by confidence-weighted success rate (best first).
     pub fn rank_for_domain(&self, domain: &str) -> Result<Vec<AgentScore>> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
 
         let mut stmt = conn.prepare(
             "SELECT agent_name,
@@ -121,25 +129,42 @@ impl ExpertiseLedger {
              GROUP BY agent_name",
         )?;
 
-        let mut scores: Vec<AgentScore> = stmt.query_map(rusqlite::params![domain], |row| {
-            let agent_name: String = row.get(0)?;
-            let total: u32 = row.get(1)?;
-            let successes: u32 = row.get(2)?;
-            let avg_cost: f64 = row.get(3)?;
-            Ok((agent_name, total, successes, avg_cost))
-        })?
-        .filter_map(|r| r.ok())
-        .map(|(agent_name, total, successes, avg_cost)| {
-            let success_rate = if total > 0 { successes as f64 / total as f64 } else { 0.0 };
-            let confidence = wilson_lower_bound(successes, total);
-            AgentScore { agent_name, success_rate, avg_cost, total_tasks: total, confidence }
-        })
-        .collect();
+        let mut scores: Vec<AgentScore> = stmt
+            .query_map(rusqlite::params![domain], |row| {
+                let agent_name: String = row.get(0)?;
+                let total: u32 = row.get(1)?;
+                let successes: u32 = row.get(2)?;
+                let avg_cost: f64 = row.get(3)?;
+                Ok((agent_name, total, successes, avg_cost))
+            })?
+            .filter_map(|r| r.ok())
+            .map(|(agent_name, total, successes, avg_cost)| {
+                let success_rate = if total > 0 {
+                    successes as f64 / total as f64
+                } else {
+                    0.0
+                };
+                let confidence = wilson_lower_bound(successes, total);
+                AgentScore {
+                    agent_name,
+                    success_rate,
+                    avg_cost,
+                    total_tasks: total,
+                    confidence,
+                }
+            })
+            .collect();
 
         // Sort by Wilson confidence (highest first), break ties by avg cost (lowest first).
         scores.sort_by(|a, b| {
-            b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.avg_cost.partial_cmp(&b.avg_cost).unwrap_or(std::cmp::Ordering::Equal))
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    a.avg_cost
+                        .partial_cmp(&b.avg_cost)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
         });
 
         Ok(scores)
@@ -147,14 +172,19 @@ impl ExpertiseLedger {
 
     /// Check if an agent should be deprioritized for a domain (>60% failure rate, >3 attempts).
     pub fn is_deprioritized(&self, agent: &str, domain: &str) -> Result<bool> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
 
-        let (total, failures): (u32, u32) = conn.query_row(
-            "SELECT COUNT(*), SUM(CASE WHEN outcome != 'done' THEN 1 ELSE 0 END)
+        let (total, failures): (u32, u32) = conn
+            .query_row(
+                "SELECT COUNT(*), SUM(CASE WHEN outcome != 'done' THEN 1 ELSE 0 END)
              FROM sigil_expertise WHERE agent_name = ?1 AND task_domain = ?2",
-            rusqlite::params![agent, domain],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        ).unwrap_or((0, 0));
+                rusqlite::params![agent, domain],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap_or((0, 0));
 
         Ok(total > 3 && (failures as f64 / total as f64) > 0.6)
     }
@@ -164,12 +194,26 @@ impl ExpertiseLedger {
     pub fn extract_domain(labels: &[String], subject: &str) -> String {
         // Check for domain-specific labels first.
         for label in labels {
-            if !label.starts_with("escalation:") && label != "escalated" && label != "escalated-system" && label != "escalated-human" {
+            if !label.starts_with("escalation:")
+                && label != "escalated"
+                && label != "escalated-system"
+                && label != "escalated-human"
+            {
                 return label.to_lowercase();
             }
         }
         // Fall back to first meaningful word from subject.
-        let stop_words = ["fix", "add", "update", "implement", "create", "remove", "the", "a", "an"];
+        let stop_words = [
+            "fix",
+            "add",
+            "update",
+            "implement",
+            "create",
+            "remove",
+            "the",
+            "a",
+            "an",
+        ];
         for word in subject.split_whitespace() {
             let lower = word.to_lowercase();
             let clean: String = lower.chars().filter(|c| c.is_alphanumeric()).collect();
@@ -211,15 +255,17 @@ mod tests {
     }
 
     fn record(ledger: &ExpertiseLedger, agent: &str, domain: &str, outcome: TaskOutcomeKind) {
-        ledger.record(&ExpertiseRecord {
-            agent_name: agent.to_string(),
-            task_domain: domain.to_string(),
-            outcome,
-            cost_usd: 0.01,
-            duration_secs: 60.0,
-            turns: 5,
-            timestamp: Utc::now(),
-        }).unwrap();
+        ledger
+            .record(&ExpertiseRecord {
+                agent_name: agent.to_string(),
+                task_domain: domain.to_string(),
+                outcome,
+                cost_usd: 0.01,
+                duration_secs: 60.0,
+                turns: 5,
+                timestamp: Utc::now(),
+            })
+            .unwrap();
     }
 
     #[test]
@@ -227,12 +273,20 @@ mod tests {
         let (ledger, _dir) = temp_ledger();
 
         // Agent A: 10 done + 2 failed = 83% success
-        for _ in 0..10 { record(&ledger, "agent-a", "rust", TaskOutcomeKind::Done); }
-        for _ in 0..2 { record(&ledger, "agent-a", "rust", TaskOutcomeKind::Failed); }
+        for _ in 0..10 {
+            record(&ledger, "agent-a", "rust", TaskOutcomeKind::Done);
+        }
+        for _ in 0..2 {
+            record(&ledger, "agent-a", "rust", TaskOutcomeKind::Failed);
+        }
 
         // Agent B: 5 done + 5 failed = 50% success
-        for _ in 0..5 { record(&ledger, "agent-b", "rust", TaskOutcomeKind::Done); }
-        for _ in 0..5 { record(&ledger, "agent-b", "rust", TaskOutcomeKind::Failed); }
+        for _ in 0..5 {
+            record(&ledger, "agent-b", "rust", TaskOutcomeKind::Done);
+        }
+        for _ in 0..5 {
+            record(&ledger, "agent-b", "rust", TaskOutcomeKind::Failed);
+        }
 
         let scores = ledger.rank_for_domain("rust").unwrap();
         assert_eq!(scores.len(), 2);
@@ -253,7 +307,9 @@ mod tests {
 
         // 4 tasks, 3 failed (75% failure rate, > threshold of 60%)
         record(&ledger, "bad-agent", "python", TaskOutcomeKind::Done);
-        for _ in 0..3 { record(&ledger, "bad-agent", "python", TaskOutcomeKind::Failed); }
+        for _ in 0..3 {
+            record(&ledger, "bad-agent", "python", TaskOutcomeKind::Failed);
+        }
 
         assert!(ledger.is_deprioritized("bad-agent", "python").unwrap());
         assert!(!ledger.is_deprioritized("bad-agent", "rust").unwrap());
@@ -261,8 +317,14 @@ mod tests {
 
     #[test]
     fn test_extract_domain() {
-        assert_eq!(ExpertiseLedger::extract_domain(&["database".to_string()], "Fix login"), "database");
-        assert_eq!(ExpertiseLedger::extract_domain(&[], "Fix authentication bug"), "authentication");
+        assert_eq!(
+            ExpertiseLedger::extract_domain(&["database".to_string()], "Fix login"),
+            "database"
+        );
+        assert_eq!(
+            ExpertiseLedger::extract_domain(&[], "Fix authentication bug"),
+            "authentication"
+        );
         assert_eq!(ExpertiseLedger::extract_domain(&[], "Add the a"), "general");
     }
 
@@ -271,6 +333,9 @@ mod tests {
         // 3/3 should rank lower than 50/55 despite higher success rate
         let small = wilson_lower_bound(3, 3);
         let large = wilson_lower_bound(50, 55);
-        assert!(large > small, "50/55 ({large}) should rank higher than 3/3 ({small})");
+        assert!(
+            large > small,
+            "50/55 ({large}) should rank higher than 3/3 ({small})"
+        );
     }
 }

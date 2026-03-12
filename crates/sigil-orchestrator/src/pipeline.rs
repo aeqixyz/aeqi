@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use sigil_tasks::{TaskId, TaskBoard};
+use sigil_tasks::{TaskBoard, TaskId};
 use std::collections::HashMap;
 use std::path::Path;
 

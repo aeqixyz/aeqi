@@ -15,48 +15,60 @@ pub struct ScoredResult {
 /// Merge keyword (BM25) results with vector similarity results.
 /// `keyword_weight` + `vector_weight` should sum to 1.0.
 pub fn merge_scores(
-    keyword_results: &[(String, f64)],   // (memory_id, bm25_score)
-    vector_results: &[(String, f64)],     // (memory_id, cosine_similarity)
+    keyword_results: &[(String, f64)], // (memory_id, bm25_score)
+    vector_results: &[(String, f64)],  // (memory_id, cosine_similarity)
     keyword_weight: f64,
     vector_weight: f64,
 ) -> Vec<ScoredResult> {
     let mut scores: HashMap<String, ScoredResult> = HashMap::new();
 
     // Normalize keyword scores to [0, 1].
-    let max_kw = keyword_results.iter()
+    let max_kw = keyword_results
+        .iter()
         .map(|(_, s)| *s)
         .fold(0.0f64, f64::max);
     let norm_kw = if max_kw > 0.0 { max_kw } else { 1.0 };
 
     for (id, score) in keyword_results {
         let normalized = score / norm_kw;
-        scores.entry(id.clone()).or_insert_with(|| ScoredResult {
-            memory_id: id.clone(),
-            keyword_score: 0.0,
-            vector_score: 0.0,
-            combined_score: 0.0,
-        }).keyword_score = normalized;
+        scores
+            .entry(id.clone())
+            .or_insert_with(|| ScoredResult {
+                memory_id: id.clone(),
+                keyword_score: 0.0,
+                vector_score: 0.0,
+                combined_score: 0.0,
+            })
+            .keyword_score = normalized;
     }
 
     // Vector scores are already in [0, 1] (cosine similarity).
     for (id, score) in vector_results {
-        scores.entry(id.clone()).or_insert_with(|| ScoredResult {
-            memory_id: id.clone(),
-            keyword_score: 0.0,
-            vector_score: 0.0,
-            combined_score: 0.0,
-        }).vector_score = *score;
+        scores
+            .entry(id.clone())
+            .or_insert_with(|| ScoredResult {
+                memory_id: id.clone(),
+                keyword_score: 0.0,
+                vector_score: 0.0,
+                combined_score: 0.0,
+            })
+            .vector_score = *score;
     }
 
     // Compute combined scores.
-    let mut results: Vec<ScoredResult> = scores.into_values()
+    let mut results: Vec<ScoredResult> = scores
+        .into_values()
         .map(|mut r| {
             r.combined_score = keyword_weight * r.keyword_score + vector_weight * r.vector_score;
             r
         })
         .collect();
 
-    results.sort_by(|a, b| b.combined_score.partial_cmp(&a.combined_score).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| {
+        b.combined_score
+            .partial_cmp(&a.combined_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     results
 }
 
@@ -95,7 +107,8 @@ where
             let relevance = candidate.combined_score;
 
             // Max similarity to already-selected items.
-            let max_sim = selected.iter()
+            let max_sim = selected
+                .iter()
                 .map(|s| similarity_fn(&candidate.memory_id, &s.memory_id))
                 .fold(0.0f64, f64::max);
 
@@ -123,14 +136,8 @@ mod tests {
 
     #[test]
     fn test_merge_scores() {
-        let kw = vec![
-            ("mem-1".to_string(), 5.0),
-            ("mem-2".to_string(), 3.0),
-        ];
-        let vec_results = vec![
-            ("mem-1".to_string(), 0.9),
-            ("mem-3".to_string(), 0.8),
-        ];
+        let kw = vec![("mem-1".to_string(), 5.0), ("mem-2".to_string(), 3.0)];
+        let vec_results = vec![("mem-1".to_string(), 0.9), ("mem-3".to_string(), 0.8)];
 
         let merged = merge_scores(&kw, &vec_results, 0.4, 0.6);
         assert!(!merged.is_empty());
@@ -141,9 +148,24 @@ mod tests {
     #[test]
     fn test_mmr_diversifies() {
         let candidates = vec![
-            ScoredResult { memory_id: "a".to_string(), keyword_score: 0.9, vector_score: 0.9, combined_score: 0.9 },
-            ScoredResult { memory_id: "b".to_string(), keyword_score: 0.85, vector_score: 0.85, combined_score: 0.85 },
-            ScoredResult { memory_id: "c".to_string(), keyword_score: 0.5, vector_score: 0.5, combined_score: 0.5 },
+            ScoredResult {
+                memory_id: "a".to_string(),
+                keyword_score: 0.9,
+                vector_score: 0.9,
+                combined_score: 0.9,
+            },
+            ScoredResult {
+                memory_id: "b".to_string(),
+                keyword_score: 0.85,
+                vector_score: 0.85,
+                combined_score: 0.85,
+            },
+            ScoredResult {
+                memory_id: "c".to_string(),
+                keyword_score: 0.5,
+                vector_score: 0.5,
+                combined_score: 0.5,
+            },
         ];
 
         // Similarity: a and b are very similar, c is different.

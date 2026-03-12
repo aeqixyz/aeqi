@@ -3,8 +3,8 @@ use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sigil_core::traits::{
-    ChatRequest, ChatResponse, Message, MessageContent, ContentPart,
-    Provider, Role, StopReason, ToolCall, ToolSpec, Usage,
+    ChatRequest, ChatResponse, ContentPart, Message, MessageContent, Provider, Role, StopReason,
+    ToolCall, ToolSpec, Usage,
 };
 use tracing::debug;
 
@@ -22,7 +22,11 @@ impl OllamaProvider {
             .build()
             .expect("failed to build HTTP client");
 
-        Self { client, base_url, default_model }
+        Self {
+            client,
+            base_url,
+            default_model,
+        }
     }
 
     /// Default localhost URL.
@@ -96,24 +100,21 @@ struct OllamaResponse {
 }
 
 fn convert_messages(messages: &[Message]) -> Vec<OllamaMessage> {
-    messages.iter().filter_map(|msg| {
-        match msg.role {
-            Role::System => {
-                msg.content.as_text().map(|text| OllamaMessage {
+    messages
+        .iter()
+        .filter_map(|msg| {
+            match msg.role {
+                Role::System => msg.content.as_text().map(|text| OllamaMessage {
                     role: "system".to_string(),
                     content: text.to_string(),
                     tool_calls: None,
-                })
-            }
-            Role::User => {
-                msg.content.as_text().map(|text| OllamaMessage {
+                }),
+                Role::User => msg.content.as_text().map(|text| OllamaMessage {
                     role: "user".to_string(),
                     content: text.to_string(),
                     tool_calls: None,
-                })
-            }
-            Role::Assistant => {
-                match &msg.content {
+                }),
+                Role::Assistant => match &msg.content {
                     MessageContent::Text(text) => Some(OllamaMessage {
                         role: "assistant".to_string(),
                         content: text.clone(),
@@ -139,43 +140,54 @@ fn convert_messages(messages: &[Message]) -> Vec<OllamaMessage> {
                         Some(OllamaMessage {
                             role: "assistant".to_string(),
                             content: text,
-                            tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+                            tool_calls: if tool_calls.is_empty() {
+                                None
+                            } else {
+                                Some(tool_calls)
+                            },
                         })
+                    }
+                },
+                Role::Tool => {
+                    // Ollama expects tool responses as user messages with the result.
+                    if let MessageContent::Parts(parts) = &msg.content {
+                        let content: String = parts
+                            .iter()
+                            .filter_map(|p| {
+                                if let ContentPart::ToolResult { content, .. } = p {
+                                    Some(content.as_str())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        Some(OllamaMessage {
+                            role: "tool".to_string(),
+                            content,
+                            tool_calls: None,
+                        })
+                    } else {
+                        None
                     }
                 }
             }
-            Role::Tool => {
-                // Ollama expects tool responses as user messages with the result.
-                if let MessageContent::Parts(parts) = &msg.content {
-                    let content: String = parts.iter().filter_map(|p| {
-                        if let ContentPart::ToolResult { content, .. } = p {
-                            Some(content.as_str())
-                        } else {
-                            None
-                        }
-                    }).collect::<Vec<_>>().join("\n");
-                    Some(OllamaMessage {
-                        role: "tool".to_string(),
-                        content,
-                        tool_calls: None,
-                    })
-                } else {
-                    None
-                }
-            }
-        }
-    }).collect()
+        })
+        .collect()
 }
 
 fn convert_tools(tools: &[ToolSpec]) -> Vec<OllamaTool> {
-    tools.iter().map(|t| OllamaTool {
-        tool_type: "function".to_string(),
-        function: OllamaFunction {
-            name: t.name.clone(),
-            description: t.description.clone(),
-            parameters: t.input_schema.clone(),
-        },
-    }).collect()
+    tools
+        .iter()
+        .map(|t| OllamaTool {
+            tool_type: "function".to_string(),
+            function: OllamaFunction {
+                name: t.name.clone(),
+                description: t.description.clone(),
+                parameters: t.input_schema.clone(),
+            },
+        })
+        .collect()
 }
 
 #[async_trait]
@@ -196,7 +208,11 @@ impl Provider for OllamaProvider {
             stream: false,
             tools,
             options: Some(OllamaOptions {
-                temperature: if request.temperature > 0.0 { Some(request.temperature) } else { None },
+                temperature: if request.temperature > 0.0 {
+                    Some(request.temperature)
+                } else {
+                    None
+                },
                 num_predict: Some(request.max_tokens),
             }),
         };
@@ -204,7 +220,8 @@ impl Provider for OllamaProvider {
         let url = format!("{}/api/chat", self.base_url);
         debug!(url = %url, "sending request to Ollama");
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .json(&api_request)
             .send()
@@ -218,8 +235,8 @@ impl Provider for OllamaProvider {
             anyhow::bail!("Ollama API error ({}): {}", status, body);
         }
 
-        let api_response: OllamaResponse = serde_json::from_str(&body)
-            .context("failed to parse Ollama response")?;
+        let api_response: OllamaResponse =
+            serde_json::from_str(&body).context("failed to parse Ollama response")?;
 
         let content = if api_response.message.content.is_empty() {
             None
@@ -227,7 +244,9 @@ impl Provider for OllamaProvider {
             Some(api_response.message.content.clone())
         };
 
-        let tool_calls = api_response.message.tool_calls
+        let tool_calls = api_response
+            .message
+            .tool_calls
             .unwrap_or_default()
             .into_iter()
             .enumerate()
@@ -255,7 +274,9 @@ impl Provider for OllamaProvider {
         })
     }
 
-    fn name(&self) -> &str { "ollama" }
+    fn name(&self) -> &str {
+        "ollama"
+    }
 
     async fn health_check(&self) -> Result<()> {
         let url = format!("{}/api/tags", self.base_url);

@@ -85,7 +85,9 @@ impl Template {
             if path.extension().is_some_and(|e| e == "toml") {
                 match Self::load(&path) {
                     Ok(f) => templates.push(f),
-                    Err(e) => tracing::warn!(path = %path.display(), error = %e, "skipping template"),
+                    Err(e) => {
+                        tracing::warn!(path = %path.display(), error = %e, "skipping template")
+                    }
                 }
             }
         }

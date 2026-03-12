@@ -17,9 +17,7 @@ pub(crate) async fn cmd_secrets(
             .map(PathBuf::from)
             .unwrap_or_else(|| config.data_dir().join("secrets"))
     } else {
-        dirs::home_dir()
-            .unwrap_or_default()
-            .join(".sigil/secrets")
+        dirs::home_dir().unwrap_or_default().join(".sigil/secrets")
     };
     let store = SecretStore::open(&store_path)?;
 

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use sigil_core::traits::{ToolResult, ToolSpec, Observer, LogObserver, Provider, Tool};
+use sigil_core::traits::{LogObserver, Observer, Provider, Tool, ToolResult, ToolSpec};
 use sigil_core::{Agent, AgentConfig, Identity};
 use std::sync::Arc;
 
@@ -20,29 +20,39 @@ impl DelegateTool {
         identity: Identity,
         model: String,
     ) -> Self {
-        Self { provider, tools, identity, model }
+        Self {
+            provider,
+            tools,
+            identity,
+            model,
+        }
     }
 }
 
 #[async_trait]
 impl Tool for DelegateTool {
     async fn execute(&self, args: serde_json::Value) -> Result<ToolResult> {
-        let prompt = args.get("prompt")
+        let prompt = args
+            .get("prompt")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing prompt"))?;
-        let max_iterations = args.get("max_iterations")
+        let max_iterations = args
+            .get("max_iterations")
             .and_then(|v| v.as_u64())
             .unwrap_or(10) as u32;
-        let agent_name = args.get("name")
+        let agent_name = args
+            .get("name")
             .and_then(|v| v.as_str())
             .unwrap_or("delegate");
 
         // Filter tools if an allowlist is specified.
         let tools = if let Some(allow) = args.get("tools").and_then(|v| v.as_array()) {
-            let allowed: Vec<String> = allow.iter()
+            let allowed: Vec<String> = allow
+                .iter()
                 .filter_map(|v| v.as_str().map(String::from))
                 .collect();
-            self.tools.iter()
+            self.tools
+                .iter()
                 .filter(|t| allowed.contains(&t.name().to_string()))
                 .cloned()
                 .collect()
@@ -93,5 +103,7 @@ impl Tool for DelegateTool {
         }
     }
 
-    fn name(&self) -> &str { "delegate" }
+    fn name(&self) -> &str {
+        "delegate"
+    }
 }

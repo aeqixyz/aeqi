@@ -66,14 +66,15 @@ impl TaskBoard {
                     // Track max sequence for this prefix.
                     let prefix = task.id.prefix().to_string();
                     if task.id.depth() == 0
-                        && let Some(seq_str) = task.id.0.split('-').nth(1) {
-                            // Handle dotted children: take only the root part.
-                            let root_seq = seq_str.split('.').next().unwrap_or(seq_str);
-                            if let Ok(seq) = root_seq.parse::<u32>() {
-                                let entry = self.sequences.entry(prefix).or_insert(0);
-                                *entry = (*entry).max(seq);
-                            }
+                        && let Some(seq_str) = task.id.0.split('-').nth(1)
+                    {
+                        // Handle dotted children: take only the root part.
+                        let root_seq = seq_str.split('.').next().unwrap_or(seq_str);
+                        if let Ok(seq) = root_seq.parse::<u32>() {
+                            let entry = self.sequences.entry(prefix).or_insert(0);
+                            *entry = (*entry).max(seq);
                         }
+                    }
                     self.tasks.insert(task.id.0.clone(), task);
                 }
                 Err(e) => {
@@ -145,9 +146,7 @@ impl TaskBoard {
         let child_count = self
             .tasks
             .values()
-            .filter(|b| {
-                b.id.parent().as_ref() == Some(parent_id)
-            })
+            .filter(|b| b.id.parent().as_ref() == Some(parent_id))
             .count() as u32;
 
         let id = parent_id.child(child_count + 1);
@@ -202,22 +201,34 @@ impl TaskBoard {
     }
 
     fn cascade_parent_close(&mut self, child_id: &TaskId) {
-        let Some(parent_id) = child_id.parent() else { return };
-        let Some(parent) = self.tasks.get(&parent_id.0) else { return };
-        if parent.is_closed() { return; }
+        let Some(parent_id) = child_id.parent() else {
+            return;
+        };
+        let Some(parent) = self.tasks.get(&parent_id.0) else {
+            return;
+        };
+        if parent.is_closed() {
+            return;
+        }
 
-        let children: Vec<String> = self.tasks.values()
+        let children: Vec<String> = self
+            .tasks
+            .values()
             .filter(|b| b.id.parent().as_ref() == Some(&parent_id))
             .map(|b| b.id.0.clone())
             .collect();
 
-        if children.is_empty() { return; }
+        if children.is_empty() {
+            return;
+        }
 
-        let all_closed = children.iter()
+        let all_closed = children
+            .iter()
             .all(|cid| self.tasks.get(cid).is_some_and(|b| b.is_closed()));
 
         if all_closed {
-            let child_summaries: Vec<String> = children.iter()
+            let child_summaries: Vec<String> = children
+                .iter()
                 .filter_map(|cid| {
                     self.tasks.get(cid).map(|b| {
                         let reason = b.closed_reason.as_deref().unwrap_or("completed");
@@ -226,7 +237,11 @@ impl TaskBoard {
                 })
                 .collect();
 
-            let reason = format!("All {} steps completed:\n{}", children.len(), child_summaries.join("\n"));
+            let reason = format!(
+                "All {} steps completed:\n{}",
+                children.len(),
+                child_summaries.join("\n")
+            );
 
             if let Err(e) = self.update(&parent_id.0, |b| {
                 b.status = TaskStatus::Done;
@@ -305,9 +320,8 @@ impl TaskBoard {
 
     /// Get all tasks that are ready (pending + all deps resolved).
     pub fn ready(&self) -> Vec<&Task> {
-        let resolved = |id: &TaskId| -> bool {
-            self.tasks.get(&id.0).is_some_and(|b| b.is_closed())
-        };
+        let resolved =
+            |id: &TaskId| -> bool { self.tasks.get(&id.0).is_some_and(|b| b.is_closed()) };
 
         let mut ready: Vec<&Task> = self
             .tasks
@@ -470,7 +484,10 @@ impl TaskBoard {
 
     /// Create a new mission.
     pub fn create_mission(&mut self, prefix: &str, name: &str) -> Result<Mission> {
-        let seq = self.mission_sequences.entry(prefix.to_string()).or_insert(0);
+        let seq = self
+            .mission_sequences
+            .entry(prefix.to_string())
+            .or_insert(0);
         *seq += 1;
         let id = Mission::make_id(prefix, *seq);
 
@@ -562,10 +579,11 @@ impl TaskBoard {
     // ── Dependency Inference ─────────────────────────────────────
 
     /// Suggest dependencies between open tasks based on entity overlap.
-    pub fn suggest_dependencies(&self, threshold: f64) -> Vec<crate::dependency_inference::InferredDependency> {
-        let open_tasks: Vec<&Task> = self.tasks.values()
-            .filter(|t| !t.is_closed())
-            .collect();
+    pub fn suggest_dependencies(
+        &self,
+        threshold: f64,
+    ) -> Vec<crate::dependency_inference::InferredDependency> {
+        let open_tasks: Vec<&Task> = self.tasks.values().filter(|t| !t.is_closed()).collect();
         crate::dependency_inference::infer_dependencies(&open_tasks, threshold)
     }
 
@@ -708,10 +726,12 @@ mod tests {
         {
             let mut store = TaskBoard::open(dir.path()).unwrap();
             store.create("as", "Task 1").unwrap();
-            store.update("as-001", |b| {
-                b.status = TaskStatus::InProgress;
-                b.assignee = Some("worker-1".to_string());
-            }).unwrap();
+            store
+                .update("as-001", |b| {
+                    b.status = TaskStatus::InProgress;
+                    b.assignee = Some("worker-1".to_string());
+                })
+                .unwrap();
         }
 
         // Reopen — load_file deduplicates by last-write-wins.
@@ -730,9 +750,11 @@ mod tests {
         store.create("as", "Task 1").unwrap();
         // Multiple updates = multiple append lines.
         for i in 0..5 {
-            store.update("as-001", |b| {
-                b.subject = format!("Task 1 v{}", i + 1);
-            }).unwrap();
+            store
+                .update("as-001", |b| {
+                    b.subject = format!("Task 1 v{}", i + 1);
+                })
+                .unwrap();
         }
 
         // Before reload, file has 6 lines (1 create + 5 updates).
@@ -765,7 +787,15 @@ mod tests {
 
         store.close(&c3.id.0, "shipped").unwrap();
         assert_eq!(store.get(&parent.id.0).unwrap().status, TaskStatus::Done);
-        assert!(store.get(&parent.id.0).unwrap().closed_reason.as_ref().unwrap().contains("3 steps"));
+        assert!(
+            store
+                .get(&parent.id.0)
+                .unwrap()
+                .closed_reason
+                .as_ref()
+                .unwrap()
+                .contains("3 steps")
+        );
     }
 
     #[test]
@@ -777,7 +807,10 @@ mod tests {
 
         store.close(&child.id.0, "done").unwrap();
         assert_eq!(store.get(&parent.id.0).unwrap().status, TaskStatus::Done);
-        assert_eq!(store.get(&grandparent.id.0).unwrap().status, TaskStatus::Done);
+        assert_eq!(
+            store.get(&grandparent.id.0).unwrap().status,
+            TaskStatus::Done
+        );
     }
 
     #[test]
@@ -802,14 +835,18 @@ mod tests {
         let m = store.create_mission("as", "Auth Overhaul").unwrap();
 
         let t1 = store.create("as", "Add JWT validation").unwrap();
-        store.update(&t1.id.0, |t| {
-            t.mission_id = Some(m.id.clone());
-        }).unwrap();
+        store
+            .update(&t1.id.0, |t| {
+                t.mission_id = Some(m.id.clone());
+            })
+            .unwrap();
 
         let t2 = store.create("as", "Add refresh tokens").unwrap();
-        store.update(&t2.id.0, |t| {
-            t.mission_id = Some(m.id.clone());
-        }).unwrap();
+        store
+            .update(&t2.id.0, |t| {
+                t.mission_id = Some(m.id.clone());
+            })
+            .unwrap();
 
         // Unrelated task, no mission.
         store.create("as", "Fix typo").unwrap();
@@ -824,14 +861,18 @@ mod tests {
         let m = store.create_mission("as", "Deploy Pipeline").unwrap();
 
         let t1 = store.create("as", "Build").unwrap();
-        store.update(&t1.id.0, |t| {
-            t.mission_id = Some(m.id.clone());
-        }).unwrap();
+        store
+            .update(&t1.id.0, |t| {
+                t.mission_id = Some(m.id.clone());
+            })
+            .unwrap();
 
         let t2 = store.create("as", "Test").unwrap();
-        store.update(&t2.id.0, |t| {
-            t.mission_id = Some(m.id.clone());
-        }).unwrap();
+        store
+            .update(&t2.id.0, |t| {
+                t.mission_id = Some(m.id.clone());
+            })
+            .unwrap();
 
         // Close first task — mission should NOT auto-close.
         store.close(&t1.id.0, "built").unwrap();

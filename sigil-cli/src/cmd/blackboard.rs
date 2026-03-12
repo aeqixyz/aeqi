@@ -13,7 +13,11 @@ pub(crate) async fn cmd_blackboard(
     let data_dir = config.data_dir();
     let bb_path = PathBuf::from(&data_dir).join("blackboard.db");
     let orch = &config.orchestrator;
-    let bb = Blackboard::open(&bb_path, orch.blackboard_transient_ttl_hours, orch.blackboard_durable_ttl_days)?;
+    let bb = Blackboard::open(
+        &bb_path,
+        orch.blackboard_transient_ttl_hours,
+        orch.blackboard_durable_ttl_days,
+    )?;
 
     match action {
         BlackboardAction::List { project, limit } => {
@@ -23,7 +27,11 @@ pub(crate) async fn cmd_blackboard(
                 return Ok(());
             }
             for entry in &entries {
-                let tags_str = if entry.tags.is_empty() { "-".to_string() } else { entry.tags.join(", ") };
+                let tags_str = if entry.tags.is_empty() {
+                    "-".to_string()
+                } else {
+                    entry.tags.join(", ")
+                };
                 println!(
                     "[{}] {} ({:?}) by {} | tags: {} | {}",
                     entry.created_at.format("%Y-%m-%d %H:%M"),
@@ -35,15 +43,29 @@ pub(crate) async fn cmd_blackboard(
                 );
             }
         }
-        BlackboardAction::Post { project, key, content, tags, durability } => {
+        BlackboardAction::Post {
+            project,
+            key,
+            content,
+            tags,
+            durability,
+        } => {
             let dur = match durability.as_str() {
                 "durable" => EntryDurability::Durable,
                 _ => EntryDurability::Transient,
             };
             let entry = bb.post(&key, &content, "cli", &project, &tags, dur)?;
-            println!("Posted {} (expires {})", entry.key, entry.expires_at.format("%Y-%m-%d %H:%M"));
+            println!(
+                "Posted {} (expires {})",
+                entry.key,
+                entry.expires_at.format("%Y-%m-%d %H:%M")
+            );
         }
-        BlackboardAction::Query { project, tags, limit } => {
+        BlackboardAction::Query {
+            project,
+            tags,
+            limit,
+        } => {
             let entries = bb.query(&project, &tags, limit)?;
             if entries.is_empty() {
                 println!("No matching entries.");

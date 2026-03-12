@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc, Datelike, Timelike};
+use chrono::{DateTime, Datelike, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tracing::info;
@@ -34,9 +34,7 @@ impl CronSchedule {
     pub fn is_due(&self, last_run: Option<&DateTime<Utc>>) -> bool {
         let now = Utc::now();
         match self {
-            CronSchedule::Once { at } => {
-                last_run.is_none() && now >= *at
-            }
+            CronSchedule::Once { at } => last_run.is_none() && now >= *at,
             CronSchedule::Cron { expr } => {
                 match parse_simple_cron(expr) {
                     Some(matcher) => {
@@ -139,8 +137,7 @@ impl ScheduleStore {
         if path.exists() {
             let content = std::fs::read_to_string(path)
                 .with_context(|| format!("failed to read cron store: {}", path.display()))?;
-            store.jobs = serde_json::from_str(&content)
-                .unwrap_or_default();
+            store.jobs = serde_json::from_str(&content).unwrap_or_default();
         }
 
         Ok(store)

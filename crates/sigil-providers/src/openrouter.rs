@@ -73,7 +73,10 @@ impl OpenRouterProvider {
             .context("failed to send image generation request to OpenRouter")?;
 
         let status = response.status();
-        let body = response.text().await.context("failed to read image response body")?;
+        let body = response
+            .text()
+            .await
+            .context("failed to read image response body")?;
 
         if !status.is_success() {
             if let Ok(err) = serde_json::from_str::<ApiError>(&body) {
@@ -273,61 +276,58 @@ fn convert_messages(messages: &[sigil_core::traits::Message]) -> Vec<ApiMessage>
                     tool_call_id: None,
                 });
             }
-            Role::Assistant => {
-                match &msg.content {
-                    MessageContent::Text(t) => {
-                        api_messages.push(ApiMessage {
-                            role: "assistant".to_string(),
-                            content: Some(serde_json::Value::String(t.clone())),
-                            tool_calls: None,
-                            tool_call_id: None,
-                        });
-                    }
-                    MessageContent::Parts(parts) => {
-                        let text: Option<String> = {
-                            let texts: Vec<&str> = parts
-                                .iter()
-                                .filter_map(|p| match p {
-                                    ContentPart::Text { text } => Some(text.as_str()),
-                                    _ => None,
-                                })
-                                .collect();
-                            if texts.is_empty() {
-                                None
-                            } else {
-                                Some(texts.join(""))
-                            }
-                        };
-
-                        let tool_calls: Vec<ApiToolCall> = parts
+            Role::Assistant => match &msg.content {
+                MessageContent::Text(t) => {
+                    api_messages.push(ApiMessage {
+                        role: "assistant".to_string(),
+                        content: Some(serde_json::Value::String(t.clone())),
+                        tool_calls: None,
+                        tool_call_id: None,
+                    });
+                }
+                MessageContent::Parts(parts) => {
+                    let text: Option<String> = {
+                        let texts: Vec<&str> = parts
                             .iter()
                             .filter_map(|p| match p {
-                                ContentPart::ToolUse { id, name, input } => Some(ApiToolCall {
-                                    id: id.clone(),
-                                    r#type: "function".to_string(),
-                                    function: ApiToolCallFunction {
-                                        name: name.clone(),
-                                        arguments: serde_json::to_string(input)
-                                            .unwrap_or_default(),
-                                    },
-                                }),
+                                ContentPart::Text { text } => Some(text.as_str()),
                                 _ => None,
                             })
                             .collect();
+                        if texts.is_empty() {
+                            None
+                        } else {
+                            Some(texts.join(""))
+                        }
+                    };
 
-                        api_messages.push(ApiMessage {
-                            role: "assistant".to_string(),
-                            content: text.map(serde_json::Value::String),
-                            tool_calls: if tool_calls.is_empty() {
-                                None
-                            } else {
-                                Some(tool_calls)
-                            },
-                            tool_call_id: None,
-                        });
-                    }
+                    let tool_calls: Vec<ApiToolCall> = parts
+                        .iter()
+                        .filter_map(|p| match p {
+                            ContentPart::ToolUse { id, name, input } => Some(ApiToolCall {
+                                id: id.clone(),
+                                r#type: "function".to_string(),
+                                function: ApiToolCallFunction {
+                                    name: name.clone(),
+                                    arguments: serde_json::to_string(input).unwrap_or_default(),
+                                },
+                            }),
+                            _ => None,
+                        })
+                        .collect();
+
+                    api_messages.push(ApiMessage {
+                        role: "assistant".to_string(),
+                        content: text.map(serde_json::Value::String),
+                        tool_calls: if tool_calls.is_empty() {
+                            None
+                        } else {
+                            Some(tool_calls)
+                        },
+                        tool_call_id: None,
+                    });
                 }
-            }
+            },
             Role::Tool => {
                 // Tool results: each ToolResult part becomes a separate message.
                 if let MessageContent::Parts(parts) = &msg.content {
@@ -409,7 +409,10 @@ impl Provider for OpenRouterProvider {
             .context("failed to send request to OpenRouter")?;
 
         let status = response.status();
-        let body = response.text().await.context("failed to read response body")?;
+        let body = response
+            .text()
+            .await
+            .context("failed to read response body")?;
 
         if !status.is_success() {
             if let Ok(err) = serde_json::from_str::<ApiError>(&body) {
@@ -461,10 +464,13 @@ impl Provider for OpenRouterProvider {
             }
         };
 
-        let usage = api_response.usage.map(|u| Usage {
-            prompt_tokens: u.prompt_tokens,
-            completion_tokens: u.completion_tokens,
-        }).unwrap_or_default();
+        let usage = api_response
+            .usage
+            .map(|u| Usage {
+                prompt_tokens: u.prompt_tokens,
+                completion_tokens: u.completion_tokens,
+            })
+            .unwrap_or_default();
 
         Ok(ChatResponse {
             content: choice.message.content,

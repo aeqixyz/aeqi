@@ -6,14 +6,14 @@
 //!
 //! Key types: [`Task`], [`TaskBoard`], [`Mission`], [`TaskQuery`].
 
-pub mod task;
-pub mod mission;
-pub mod store;
-pub mod query;
 pub mod dependency_inference;
+pub mod mission;
+pub mod query;
+pub mod store;
+pub mod task;
 
-pub use task::{Checkpoint, Task, TaskId, TaskStatus, Priority};
-pub use mission::Mission;
-pub use store::TaskBoard;
-pub use query::TaskQuery;
 pub use dependency_inference::{InferredDependency, infer_dependencies};
+pub use mission::Mission;
+pub use query::TaskQuery;
+pub use store::TaskBoard;
+pub use task::{Checkpoint, Priority, Task, TaskId, TaskStatus};

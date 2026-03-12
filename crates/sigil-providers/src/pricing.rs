@@ -15,33 +15,153 @@ impl ModelPrice {
 
 static PRICING: &[(&str, ModelPrice)] = &[
     // Claude (Anthropic direct + OpenRouter)
-    ("claude-opus-4", ModelPrice { prompt_per_mtok: 15.0, completion_per_mtok: 75.0 }),
-    ("claude-sonnet-4", ModelPrice { prompt_per_mtok: 3.0, completion_per_mtok: 15.0 }),
-    ("claude-haiku-4", ModelPrice { prompt_per_mtok: 0.80, completion_per_mtok: 4.0 }),
-    ("claude-3.5-sonnet", ModelPrice { prompt_per_mtok: 3.0, completion_per_mtok: 15.0 }),
-    ("claude-3-haiku", ModelPrice { prompt_per_mtok: 0.25, completion_per_mtok: 1.25 }),
+    (
+        "claude-opus-4",
+        ModelPrice {
+            prompt_per_mtok: 15.0,
+            completion_per_mtok: 75.0,
+        },
+    ),
+    (
+        "claude-sonnet-4",
+        ModelPrice {
+            prompt_per_mtok: 3.0,
+            completion_per_mtok: 15.0,
+        },
+    ),
+    (
+        "claude-haiku-4",
+        ModelPrice {
+            prompt_per_mtok: 0.80,
+            completion_per_mtok: 4.0,
+        },
+    ),
+    (
+        "claude-3.5-sonnet",
+        ModelPrice {
+            prompt_per_mtok: 3.0,
+            completion_per_mtok: 15.0,
+        },
+    ),
+    (
+        "claude-3-haiku",
+        ModelPrice {
+            prompt_per_mtok: 0.25,
+            completion_per_mtok: 1.25,
+        },
+    ),
     // OpenRouter routed
-    ("anthropic/claude-opus", ModelPrice { prompt_per_mtok: 15.0, completion_per_mtok: 75.0 }),
-    ("anthropic/claude-sonnet", ModelPrice { prompt_per_mtok: 3.0, completion_per_mtok: 15.0 }),
-    ("anthropic/claude-haiku", ModelPrice { prompt_per_mtok: 0.80, completion_per_mtok: 4.0 }),
+    (
+        "anthropic/claude-opus",
+        ModelPrice {
+            prompt_per_mtok: 15.0,
+            completion_per_mtok: 75.0,
+        },
+    ),
+    (
+        "anthropic/claude-sonnet",
+        ModelPrice {
+            prompt_per_mtok: 3.0,
+            completion_per_mtok: 15.0,
+        },
+    ),
+    (
+        "anthropic/claude-haiku",
+        ModelPrice {
+            prompt_per_mtok: 0.80,
+            completion_per_mtok: 4.0,
+        },
+    ),
     // MiniMax
-    ("minimax/minimax-m2.5", ModelPrice { prompt_per_mtok: 0.50, completion_per_mtok: 1.50 }),
-    ("minimax/minimax-m1", ModelPrice { prompt_per_mtok: 0.30, completion_per_mtok: 1.00 }),
+    (
+        "minimax/minimax-m2.5",
+        ModelPrice {
+            prompt_per_mtok: 0.50,
+            completion_per_mtok: 1.50,
+        },
+    ),
+    (
+        "minimax/minimax-m1",
+        ModelPrice {
+            prompt_per_mtok: 0.30,
+            completion_per_mtok: 1.00,
+        },
+    ),
     // DeepSeek
-    ("deepseek/deepseek-v3", ModelPrice { prompt_per_mtok: 0.27, completion_per_mtok: 1.10 }),
-    ("deepseek/deepseek-r1", ModelPrice { prompt_per_mtok: 0.55, completion_per_mtok: 2.19 }),
-    ("deepseek/deepseek-chat", ModelPrice { prompt_per_mtok: 0.14, completion_per_mtok: 0.28 }),
+    (
+        "deepseek/deepseek-v3",
+        ModelPrice {
+            prompt_per_mtok: 0.27,
+            completion_per_mtok: 1.10,
+        },
+    ),
+    (
+        "deepseek/deepseek-r1",
+        ModelPrice {
+            prompt_per_mtok: 0.55,
+            completion_per_mtok: 2.19,
+        },
+    ),
+    (
+        "deepseek/deepseek-chat",
+        ModelPrice {
+            prompt_per_mtok: 0.14,
+            completion_per_mtok: 0.28,
+        },
+    ),
     // GPT-4o
-    ("openai/gpt-4o", ModelPrice { prompt_per_mtok: 2.50, completion_per_mtok: 10.0 }),
-    ("openai/gpt-4o-mini", ModelPrice { prompt_per_mtok: 0.15, completion_per_mtok: 0.60 }),
+    (
+        "openai/gpt-4o",
+        ModelPrice {
+            prompt_per_mtok: 2.50,
+            completion_per_mtok: 10.0,
+        },
+    ),
+    (
+        "openai/gpt-4o-mini",
+        ModelPrice {
+            prompt_per_mtok: 0.15,
+            completion_per_mtok: 0.60,
+        },
+    ),
     // Gemini
-    ("google/gemini-2.5-pro", ModelPrice { prompt_per_mtok: 1.25, completion_per_mtok: 10.0 }),
-    ("google/gemini-2.5-flash", ModelPrice { prompt_per_mtok: 0.15, completion_per_mtok: 0.60 }),
+    (
+        "google/gemini-2.5-pro",
+        ModelPrice {
+            prompt_per_mtok: 1.25,
+            completion_per_mtok: 10.0,
+        },
+    ),
+    (
+        "google/gemini-2.5-flash",
+        ModelPrice {
+            prompt_per_mtok: 0.15,
+            completion_per_mtok: 0.60,
+        },
+    ),
     // Llama (typically via OpenRouter)
-    ("meta-llama/llama-4", ModelPrice { prompt_per_mtok: 0.20, completion_per_mtok: 0.80 }),
-    ("meta-llama/llama-3", ModelPrice { prompt_per_mtok: 0.10, completion_per_mtok: 0.40 }),
+    (
+        "meta-llama/llama-4",
+        ModelPrice {
+            prompt_per_mtok: 0.20,
+            completion_per_mtok: 0.80,
+        },
+    ),
+    (
+        "meta-llama/llama-3",
+        ModelPrice {
+            prompt_per_mtok: 0.10,
+            completion_per_mtok: 0.40,
+        },
+    ),
     // Ollama (local — free)
-    ("ollama/", ModelPrice { prompt_per_mtok: 0.0, completion_per_mtok: 0.0 }),
+    (
+        "ollama/",
+        ModelPrice {
+            prompt_per_mtok: 0.0,
+            completion_per_mtok: 0.0,
+        },
+    ),
 ];
 
 const DEFAULT_PRICE: ModelPrice = ModelPrice {
