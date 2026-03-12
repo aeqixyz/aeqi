@@ -41,9 +41,9 @@ sigil monitor --watch
 
 Use [config/sigil.example.toml](/home/claudedev/sigil/config/sigil.example.toml) as the starting config.
 
-## What Is Wired Today
+## Operator Surface
 
-### Operator Surface
+### Commands
 
 - Core: `run`, `init`, `setup`, `doctor`, `status`, `monitor`, `config`, `team`, `agent`, `secrets`
 - Work management: `assign`, `ready`, `tasks`, `close`, `hook`, `done`, `mission`, `operation`, `deps`
@@ -182,7 +182,7 @@ The worker protocol supports `DONE`, `BLOCKED:`, `FAILED:`, and `HANDOFF:` outco
 - Readiness is daemon-driven. Use `sigil daemon query readiness` for a machine-readable “can this harness accept work now?” answer.
 - `sigil monitor` is the native operator surface today, but it is still a text CLI view, not a full TUI or web console.
 - The organization kernel is native, but per-role direct chat surfaces like `@ceo` or `@incident-lead` are not first-class CLI commands yet. Today the org model primarily shapes identity, project-team resolution, and operator inspection.
-- Worker/provider runtime presets are wired through the CLI and daemon now, but advisor routing and usage-credit inspection are still OpenRouter-oriented.
+- Worker/provider runtime presets are available through the CLI and daemon now, but advisor routing and usage-credit inspection are still OpenRouter-oriented.
 - Recursive worker orchestration depends on an installed, authenticated `claude` binary when projects use `claude_code`.
 
 ## Working On Sigil

@@ -7,6 +7,8 @@
 .sigil/checkpoints/
 projects/*/.sigil/
 agents/*/.sigil/
+**/.tasks/
+**/.quests/
 *.db
 *.db-wal
 *.db-shm

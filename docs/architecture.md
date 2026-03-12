@@ -9,7 +9,7 @@ Sigil is a Rust workspace with two practical execution planes:
 
 On top of those planes, the main native operator surface is now `sigil monitor`, which combines daemon IPC state with local task-board inspection.
 
-The codebase already contains more orchestration primitives than the top-level CLI exposes directly. This document focuses on the runtime paths that are actually wired today.
+The codebase already contains more orchestration primitives than the top-level CLI exposes directly. This document focuses on the runtime paths operators can use today.
 
 ## Crate Layers
 
