@@ -111,6 +111,8 @@ pub struct Supervisor {
     pub paused: bool,
     /// Enable auto-redecomposition of stalled missions.
     pub auto_redecompose: bool,
+    /// Directories to search for skill TOML files (project skills + shared skills).
+    pub skills_dirs: Vec<std::path::PathBuf>,
     /// Model for mission decomposition / redecomposition.
     pub decomposition_model: String,
     /// Threshold for inferring dependencies between tasks (0.0 = disabled).
@@ -169,6 +171,7 @@ impl Supervisor {
             auto_redecompose: false,
             decomposition_model: String::new(),
             infer_deps_threshold: 0.0,
+            skills_dirs: Vec::new(),
         }
     }
 
@@ -192,6 +195,27 @@ impl Supervisor {
         self.model = model;
         self.cc_max_turns = max_turns;
         self.cc_max_budget_usd = max_budget_usd;
+    }
+
+    /// Look up a skill's system prompt by name from skills directories.
+    fn load_skill_prompt(&self, skill_name: &str) -> Option<String> {
+        for dir in &self.skills_dirs {
+            let path = dir.join(format!("{skill_name}.toml"));
+            if path.exists() {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    if let Ok(value) = content.parse::<toml::Value>() {
+                        if let Some(system) = value
+                            .get("prompt")
+                            .and_then(|p| p.get("system"))
+                            .and_then(|s| s.as_str())
+                        {
+                            return Some(system.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Create a worker based on the rig's execution mode.
@@ -274,6 +298,24 @@ impl Supervisor {
                 worker.identity.memory = Some(format!(
                     "{existing}\n\n## Blackboard (shared knowledge)\n{bb_context}"
                 ));
+            }
+        }
+
+        // Inject skill system prompt if task specifies a skill.
+        if let Some(ref skill_name) = task.skill {
+            if let Some(prompt) = self.load_skill_prompt(skill_name) {
+                info!(
+                    project = %self.project_name,
+                    skill = %skill_name,
+                    "injecting skill prompt into worker identity"
+                );
+                worker.identity.skill_prompt = Some(prompt);
+            } else {
+                warn!(
+                    project = %self.project_name,
+                    skill = %skill_name,
+                    "skill not found in skills directories"
+                );
             }
         }
 

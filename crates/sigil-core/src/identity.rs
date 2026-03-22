@@ -29,6 +29,8 @@ pub struct Identity {
     pub preferences: Option<String>,
     /// Shared workflow from agents/shared/WORKFLOW.md.
     pub shared_workflow: Option<String>,
+    /// Skill-specific system prompt (injected at runtime from skill TOML).
+    pub skill_prompt: Option<String>,
 }
 
 impl Identity {
@@ -66,6 +68,8 @@ impl Identity {
                 .map(|d| load_optional(d, "WORKFLOW.md"))
                 .transpose()?
                 .flatten(),
+            // Injected at runtime by supervisor when task has a skill.
+            skill_prompt: None,
         })
     }
 
@@ -99,6 +103,7 @@ impl Identity {
                 .map(|d| load_optional(d, "WORKFLOW.md"))
                 .transpose()?
                 .flatten(),
+            skill_prompt: None,
         })
     }
 
@@ -134,6 +139,10 @@ impl Identity {
 
         if let Some(ref knowledge) = self.knowledge {
             parts.push(format!("# Project Knowledge\n\n{knowledge}"));
+        }
+
+        if let Some(ref skill) = self.skill_prompt {
+            parts.push(format!("# Active Skill\n\n{skill}"));
         }
 
         if let Some(ref preferences) = self.preferences {
@@ -234,6 +243,7 @@ mod tests {
             preferences: Some("preferences".into()),
             memory: Some("memory".into()),
             heartbeat: None,
+            skill_prompt: Some("skill".into()),
         };
 
         let prompt = id.system_prompt();
@@ -246,6 +256,7 @@ mod tests {
         let operational_pos = prompt.find("# Operational Instructions").unwrap();
         let agents_pos = prompt.find("# Operating Instructions").unwrap();
         let knowledge_pos = prompt.find("# Project Knowledge").unwrap();
+        let skill_pos = prompt.find("# Active Skill").unwrap();
         let preferences_pos = prompt.find("# Architect Preferences").unwrap();
         let memory_pos = prompt.find("# Persistent Memory").unwrap();
 
@@ -255,7 +266,8 @@ mod tests {
         assert!(evolution_pos < operational_pos);
         assert!(operational_pos < agents_pos);
         assert!(agents_pos < knowledge_pos);
-        assert!(knowledge_pos < preferences_pos);
+        assert!(knowledge_pos < skill_pos);
+        assert!(skill_pos < preferences_pos);
         assert!(preferences_pos < memory_pos);
 
         // Sections separated by ---

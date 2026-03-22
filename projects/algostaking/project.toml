@@ -1,3 +1,56 @@
 name = "algostaking"
 prefix = "as"
 repo = "/home/claudedev/algostaking-backend"
+description = "Alpha-induced market making system with FNO prediction, LTC signal combiner, and position-per-market execution"
+
+[team]
+leader = "leader"
+advisors = ["waifu", "trader", "engineer", "designer", "researcher", "reviewer"]
+
+# Health monitoring mission — runs every 30 minutes
+[[missions]]
+name = "health-monitor"
+schedule = "*/30 * * * *"
+skill = "health-checker"
+description = "Check all services, metrics, PnL, directional accuracy. Report via Telegram."
+args = """
+Check algostaking system health:
+1. All services: systemctl is-active for prediction, signal, pms, oms, ems, feature
+2. PnL: curl localhost:9009/metrics | grep ems_realized_pnl
+3. Directional accuracy: curl localhost:9004/metrics | grep fno_directional
+4. Exits: curl localhost:9013/metrics | grep oms_exits_
+5. Errors: journalctl --since '30 min ago' | grep error
+Report to Telegram with: PnL, win rate, accuracy, any issues.
+"""
+
+# Improvement mission — runs every 2 hours
+[[missions]]
+name = "improve-cycle"
+schedule = "0 */2 * * *"
+skill = "developer"
+description = "Review system and make one targeted improvement. Build, test, deploy."
+args = """
+Review algostaking-backend for one improvement opportunity:
+- Check metrics for anomalies or degradation
+- Review prediction/signal/trading services for optimization
+- Implement one surgical fix, verify compilation, deploy
+- Log to /home/claudedev/algostaking-improvement-log.md
+"""
+
+# Daily report — every morning at 9am
+[[missions]]
+name = "morning-report"
+schedule = "57 8 * * *"
+skill = "health-checker"
+description = "Comprehensive daily report with overnight results."
+args = """
+Generate morning report:
+1. Read /home/claudedev/algostaking-improvement-log.md
+2. All service status
+3. Cumulative PnL, win rate, trade count
+4. Directional accuracy trend
+5. Encoder/head/network promotion counts
+6. Any errors in last 12h
+7. Recommended priorities
+Send to Telegram as formatted report.
+"""

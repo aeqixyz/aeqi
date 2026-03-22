@@ -41,14 +41,14 @@ entity-legal = "/home/claudedev/sigil/projects/entity-legal/web"
 
 # System team — overarching orchestrator
 [team]
-leader = "aurelia"
-agents = ["aurelia"]
+leader = "waifu"
+agents = ["waifu"]
 router_model = "google/gemini-2.0-flash-001"
 router_cooldown_secs = 60
 max_background_cost_usd = 0.50
 
 # Agents discovered from agents/{name}/agent.toml files on disk.
-# See: agents/aurelia/agent.toml, agents/kael/agent.toml, etc.
+# See: agents/waifu/agent.toml, agents/trader/agent.toml, etc.
 
 [channels.telegram]
 token_secret = "TELEGRAM_BOT_TOKEN"
@@ -81,6 +81,36 @@ count_threshold = 3
 window_secs = 3600
 [watchdogs.action.escalate]
 message = "3+ task failures in gacha-agency within 1 hour"
+
+# Algostaking cron jobs: service-heartbeat (5m), pnl-tracker (10m),
+# accuracy-watchdog (15m), health-monitor (30m), training-progress (1h),
+# improvement-cycle (2h), morning-report (8:57am), daily-pnl (midnight),
+# weekend-deep-review (Sat 10:17am)
+
+# Algostaking reactive watchdogs
+[[watchdogs]]
+name = "algostaking-task-failure"
+cooldown_secs = 1800
+enabled = true
+[watchdogs.condition]
+event = "task_failed"
+project_filter = "algostaking"
+count_threshold = 2
+window_secs = 3600
+[watchdogs.action.escalate]
+message = "2+ algostaking task failures in 1 hour — check services and ML pipeline"
+
+[[watchdogs]]
+name = "algostaking-worker-timeout"
+cooldown_secs = 3600
+enabled = true
+[watchdogs.condition]
+event = "worker_timeout"
+project_filter = "algostaking"
+count_threshold = 1
+window_secs = 1800
+[watchdogs.action.escalate]
+message = "Algostaking worker timed out — possible stuck inference or training loop"
 
 [[watchdogs]]
 name = "budget-warning"
@@ -116,8 +146,8 @@ max_workers = 2
 execution_mode = "claude_code"
 worker_timeout_secs = 1800
 max_turns = 20
-team.leader = "void"
-team.agents = ["void"]
+team.leader = "engineer"
+team.agents = ["engineer"]
 
 [[projects]]
 name = "algostaking"
@@ -129,8 +159,8 @@ worktree_root = "/home/claudedev/worktrees"
 execution_mode = "claude_code"
 max_turns = 25
 worker_timeout_secs = 3600
-team.leader = "kael"
-team.agents = ["kael"]
+team.leader = "trader"
+team.agents = ["trader"]
 
 [[projects]]
 name = "riftdecks-shop"
@@ -140,8 +170,8 @@ model = "claude-sonnet-4-6"
 max_workers = 2
 execution_mode = "claude_code"
 worker_timeout_secs = 1800
-team.leader = "mira"
-team.agents = ["mira"]
+team.leader = "designer"
+team.agents = ["designer"]
 
 [[projects]]
 name = "entity-legal"
@@ -151,5 +181,5 @@ model = "claude-sonnet-4-6"
 max_workers = 2
 execution_mode = "claude_code"
 worker_timeout_secs = 1800
-team.leader = "mira"
-team.agents = ["mira"]
+team.leader = "designer"
+team.agents = ["designer"]

@@ -180,6 +180,7 @@ mod tests {
             depends_on: vec![],
             blocks: vec![],
             mission_id: None,
+            skill: None,
             labels: vec![],
             retry_count: 0,
             checkpoints: vec![],

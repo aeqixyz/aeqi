@@ -963,6 +963,26 @@ pub struct ProjectConfig {
     /// Per-project orchestrator overrides. If None, falls back to global [orchestrator].
     #[serde(default)]
     pub orchestrator: Option<OrchestratorConfig>,
+    /// Missions defined in project.toml via `[[missions]]`.
+    #[serde(default)]
+    pub missions: Vec<MissionDef>,
+}
+
+/// A mission definition from project.toml `[[missions]]`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MissionDef {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    /// Cron schedule expression (e.g., "*/30 * * * *").
+    #[serde(default)]
+    pub schedule: Option<String>,
+    /// Skill name to apply when executing this mission's tasks.
+    #[serde(default)]
+    pub skill: Option<String>,
+    /// Arguments / prompt text passed to the worker.
+    #[serde(default)]
+    pub args: Option<String>,
 }
 
 fn default_max_workers() -> u32 {

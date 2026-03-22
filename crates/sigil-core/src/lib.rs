@@ -14,7 +14,7 @@ pub mod traits;
 
 pub use agent::{Agent, AgentConfig, AgentResult};
 pub use config::{
-    AgentOrgContext, AgentRole, AgentVoice, ContextBudgetConfig, ExecutionMode,
+    AgentOrgContext, AgentRole, AgentVoice, ContextBudgetConfig, ExecutionMode, MissionDef,
     OrgRelationshipConfig, OrgRelationshipKind, OrgRitualConfig, OrgRoleConfig, OrgUnitConfig,
     OrganizationConfig, PeerAgentConfig, ProjectConfig, ProjectTeamConfig, ProviderKind,
     RuntimePresetConfig, SigilConfig, TeamConfig, discover_agents, load_agent_config,

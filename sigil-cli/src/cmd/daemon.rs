@@ -165,6 +165,14 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 witness.decomposition_model = project_orch.decomposition_model.clone();
                 witness.infer_deps_threshold = project_orch.infer_deps_threshold;
 
+                // Wire skill discovery directories (project-specific + shared).
+                let project_skills_dir = project_dir.join("skills");
+                let shared_skills_dir = project_dir
+                    .parent()
+                    .map(|p| p.join("shared").join("skills"))
+                    .unwrap_or_default();
+                witness.skills_dirs = vec![project_skills_dir, shared_skills_dir];
+
                 // Configure execution mode for workers.
                 if config.execution_mode_for_project(&project_cfg.name) == ExecutionMode::ClaudeCode
                 {

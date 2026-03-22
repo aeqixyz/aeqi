@@ -572,6 +572,7 @@ mod tests {
             max_cost_per_day_usd: None,
             team: None,
             orchestrator: None,
+            missions: Vec::new(),
         };
         let project = Project::from_config(&config, dir.path(), "test-model")?;
         Ok((Arc::new(project), dir))
