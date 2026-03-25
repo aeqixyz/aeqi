@@ -12,11 +12,13 @@ pub mod context_budget;
 pub mod cost_tracking;
 pub mod guardrails;
 pub mod loop_detection;
+pub mod safety_net;
 
 pub use context_budget::ContextBudgetMiddleware;
 pub use cost_tracking::CostTrackingMiddleware;
 pub use guardrails::GuardrailsMiddleware;
 pub use loop_detection::LoopDetectionMiddleware;
+pub use safety_net::SafetyNetMiddleware;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

@@ -21,6 +21,7 @@ pub mod council;
 pub mod daemon;
 pub mod decomposition;
 pub mod emotional_state;
+pub mod escalation;
 pub mod executor;
 pub mod expertise;
 pub mod failure_analysis;
@@ -41,6 +42,7 @@ pub mod session_tracker;
 pub mod supervisor;
 pub mod template;
 pub mod tools;
+pub mod verification;
 pub mod watchdog;
 
 pub use agent_router::{AgentRouter, RouteDecision};
