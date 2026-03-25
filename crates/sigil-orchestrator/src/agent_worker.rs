@@ -513,23 +513,63 @@ impl AgentWorker {
             }
         }
 
-        // Enrich identity with dynamic memory recall (single search, system prompt only).
+        // Enrich identity with dynamic memory recall via query planner.
         let enriched_identity = if let Some(ref mem) = self.memory {
-            let query = sigil_core::traits::MemoryQuery::new(&task_context, 30)
-                .with_scope(MemoryScope::Domain);
-            match mem.search(&query).await {
-                Ok(entries) if !entries.is_empty() => {
-                    let mut id = self.identity.clone();
-                    let dynamic = entries
-                        .iter()
-                        .map(|e| format!("- [{}] {}: {}", e.scope, e.key, e.content))
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    let existing = id.memory.unwrap_or_default();
-                    id.memory = Some(format!("{existing}\n\n## Dynamic Recall\n{dynamic}"));
-                    id
+            // Try query planner first — generates typed, prioritized queries.
+            let entries = match std::panic::catch_unwind(|| {
+                sigil_memory::query_planner::QueryPlanner::plan(
+                    &task_context,
+                    Some(&self.project_name),
+                )
+            }) {
+                Ok(plan) => {
+                    let mut all_entries = Vec::new();
+                    for typed_query in &plan.queries {
+                        let query = sigil_core::traits::MemoryQuery::new(
+                            &typed_query.query_text,
+                            plan.max_results_per_query,
+                        );
+                        if let Ok(results) = mem.search(&query).await {
+                            all_entries.extend(results);
+                        }
+                    }
+                    // Deduplicate by id, keep highest score.
+                    all_entries.sort_by(|a, b| {
+                        b.score
+                            .partial_cmp(&a.score)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    all_entries.dedup_by(|a, b| a.id == b.id);
+                    all_entries.truncate(30);
+                    debug!(
+                        worker = %self.name,
+                        queries = plan.queries.len(),
+                        results = all_entries.len(),
+                        "query planner memory recall"
+                    );
+                    all_entries
                 }
-                _ => self.identity.clone(),
+                Err(_) => {
+                    // Fallback: single flat search if query planner fails.
+                    warn!(worker = %self.name, "query planner failed, falling back to flat search");
+                    let query = sigil_core::traits::MemoryQuery::new(&task_context, 30)
+                        .with_scope(MemoryScope::Domain);
+                    mem.search(&query).await.unwrap_or_default()
+                }
+            };
+
+            if !entries.is_empty() {
+                let mut id = self.identity.clone();
+                let dynamic = entries
+                    .iter()
+                    .map(|e| format!("- [{}] {}: {}", e.scope, e.key, e.content))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let existing = id.memory.unwrap_or_default();
+                id.memory = Some(format!("{existing}\n\n## Dynamic Recall\n{dynamic}"));
+                id
+            } else {
+                self.identity.clone()
             }
         } else {
             self.identity.clone()

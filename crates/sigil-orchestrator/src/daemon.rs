@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::{Timelike, Utc};
+use chrono::Utc;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -44,6 +44,7 @@ pub struct Daemon {
     pub chat_engine: Option<Arc<ChatEngine>>,
     pub note_store: Option<Arc<NoteStore>>,
     pub anomaly_detector: proactive::AnomalyDetector,
+    pub write_queue: Arc<std::sync::Mutex<sigil_memory::debounce::WriteQueue>>,
     pub event_broadcaster: Arc<EventBroadcaster>,
     pub event_collector: Arc<Mutex<Vec<ExecutionEvent>>>,
     pub pid_file: Option<PathBuf>,
@@ -69,6 +70,9 @@ impl Daemon {
             chat_engine: None,
             note_store: None,
             anomaly_detector: proactive::AnomalyDetector::new(),
+            write_queue: Arc::new(std::sync::Mutex::new(
+                sigil_memory::debounce::WriteQueue::default(),
+            )),
             event_broadcaster: Arc::new(EventBroadcaster::new()),
             event_collector: Arc::new(Mutex::new(Vec::new())),
             pid_file: None,
@@ -673,6 +677,28 @@ impl Daemon {
                 for (project, cost) in &project_costs {
                     self.anomaly_detector
                         .record_baseline(project, *cost, 0.0, 0);
+                }
+            }
+
+            // 15. Flush debounced memory writes.
+            if let Ok(mut wq) = self.write_queue.lock() {
+                let ready = wq.drain_ready(chrono::Utc::now());
+                if !ready.is_empty() {
+                    info!(
+                        count = ready.len(),
+                        "flushing debounced memory writes"
+                    );
+                    // TODO: actual memory store integration requires per-project
+                    // memory handles — for now we log the drained writes so the
+                    // queue doesn't grow unbounded.
+                    for w in &ready {
+                        debug!(
+                            project = %w.project,
+                            key = %w.key,
+                            category = %w.category,
+                            "debounced write flushed (pending store integration)"
+                        );
+                    }
                 }
             }
 
@@ -1530,6 +1556,8 @@ impl Daemon {
                 }
 
                 "brief" => {
+                    use crate::proactive::{BriefBuilder, TaskSummary};
+
                     let summaries = registry.list_project_summaries().await;
                     let (spent, budget, _remaining) = registry.cost_ledger.budget_status();
                     let worker_count = registry.total_max_workers().await;
@@ -1562,62 +1590,76 @@ impl Daemon {
                         0
                     };
 
-                    let mut brief = String::new();
-                    brief.push_str(&format!(
-                        "Good {}. Here's your brief.\n\n",
-                        if chrono::Utc::now().hour() < 12 {
-                            "morning"
-                        } else if chrono::Utc::now().hour() < 18 {
-                            "afternoon"
-                        } else {
-                            "evening"
-                        }
-                    ));
+                    // Build structured brief via BriefBuilder.
+                    let mut builder = BriefBuilder::new();
 
-                    // Projects overview.
-                    brief.push_str("Projects:\n");
+                    // Collect task summaries per category from project summaries.
+                    let mut completed = Vec::new();
+                    let mut blocked = Vec::new();
+                    let mut active = Vec::new();
+
                     for s in &summaries {
-                        brief.push_str(&format!(
-                            "  {} — {} open tasks, {} done, {} missions\n",
-                            s.name, s.open_tasks, s.done_tasks, s.active_missions
-                        ));
+                        for _ in 0..s.done_tasks {
+                            completed.push(TaskSummary {
+                                id: String::new(),
+                                subject: format!("{} task", s.name),
+                                project: s.name.clone(),
+                                agent: None,
+                                cost_usd: None,
+                            });
+                        }
+                        for _ in 0..s.pending_tasks {
+                            blocked.push(TaskSummary {
+                                id: String::new(),
+                                subject: format!("{} pending", s.name),
+                                project: s.name.clone(),
+                                agent: None,
+                                cost_usd: None,
+                            });
+                        }
+                        for _ in 0..s.in_progress_tasks {
+                            active.push(TaskSummary {
+                                id: String::new(),
+                                subject: format!("{} in progress", s.name),
+                                project: s.name.clone(),
+                                agent: None,
+                                cost_usd: None,
+                            });
+                        }
                     }
 
-                    // Recent activity summary.
-                    brief.push_str(&format!(
-                        "\nRecent activity: {} tasks completed, {} failed, {} assigned\n",
-                        tasks_completed, tasks_failed, tasks_assigned
-                    ));
+                    builder.with_completed_tasks(&completed);
+                    builder.with_blocked_tasks(&blocked);
+                    builder.with_active_tasks(&active);
 
-                    // Budget.
-                    brief.push_str(&format!(
-                        "Budget: ${:.3} spent of ${:.2} ({:.1}% used)\n",
-                        spent,
-                        budget,
-                        (spent / budget) * 100.0
-                    ));
+                    // Add cost/budget section.
+                    if budget > 0.0 {
+                        builder.with_cost_summary(spent, budget);
+                    }
 
-                    // System health.
-                    brief.push_str(&format!(
-                        "System: {} workers, {} cron jobs, {} pending messages\n",
+                    let text = builder.render_text();
+
+                    // Append system health info (not modeled in BriefBuilder).
+                    let mut full_brief = text;
+                    full_brief.push_str(&format!(
+                        "--- System ---\n  {} workers, {} cron jobs, {} pending messages\n",
                         worker_count, cron_count, dispatch_health.unread
                     ));
-
                     if dispatch_health.dead_letters > 0 {
-                        brief.push_str(&format!(
-                            "⚠ {} dead letters in dispatch queue\n",
+                        full_brief.push_str(&format!(
+                            "  ! {} dead letters in dispatch queue\n",
                             dispatch_health.dead_letters
                         ));
                     }
 
                     serde_json::json!({
                         "ok": true,
-                        "brief": brief.trim(),
+                        "brief": full_brief.trim(),
                         "stats": {
                             "tasks_completed": tasks_completed,
                             "tasks_failed": tasks_failed,
                             "tasks_assigned": tasks_assigned,
-                            "budget_used_pct": (spent / budget) * 100.0,
+                            "budget_used_pct": if budget > 0.0 { (spent / budget) * 100.0 } else { 0.0 },
                             "workers": worker_count,
                             "cron_jobs": cron_count,
                             "dead_letters": dispatch_health.dead_letters,
