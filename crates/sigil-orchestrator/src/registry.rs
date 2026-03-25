@@ -438,6 +438,24 @@ impl ProjectRegistry {
             .collect()
     }
 
+    /// Get real-time progress from all active workers across all projects.
+    pub async fn worker_progress(&self) -> Vec<serde_json::Value> {
+        let supervisors = self.supervisors.read().await;
+        let mut all = Vec::new();
+        for (name, sup) in supervisors.iter() {
+            if let Ok(sup) = sup.try_lock() {
+                let mut entries = sup.worker_progress();
+                for entry in &mut entries {
+                    if let Some(obj) = entry.as_object_mut() {
+                        obj.insert("project".to_string(), serde_json::json!(name));
+                    }
+                }
+                all.extend(entries);
+            }
+        }
+        all
+    }
+
     /// Get a supervisor by project name (for config reload).
     pub async fn get_supervisor(&self, project: &str) -> Option<Arc<Mutex<Supervisor>>> {
         self.supervisors.read().await.get(project).cloned()

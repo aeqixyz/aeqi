@@ -47,6 +47,7 @@ pub struct ExecutionProgress {
     pub turns_so_far: u32,
     pub cost_so_far: f64,
     pub last_tool: Option<String>,
+    pub status_message: Option<String>,
 }
 
 /// Parsed stream event from `--output-format stream-json`.
@@ -452,9 +453,21 @@ impl ClaudeCodeExecutor {
                                 let _ = tx.send(progress.clone());
                             }
                         }
-                        StreamEvent::System { .. }
-                        | StreamEvent::Assistant { .. }
-                        | StreamEvent::ToolResult { .. } => {}
+                        StreamEvent::Assistant { ref message } => {
+                            if let Some(ref text) = message.content {
+                                // Extract first non-empty line as status update.
+                                if let Some(line) = text.lines().find(|l| !l.trim().is_empty()) {
+                                    let trimmed = line.trim();
+                                    if !trimmed.is_empty() && trimmed.len() < 200 {
+                                        progress.status_message = Some(trimmed.to_string());
+                                        if let Some(ref tx) = self.progress_sender {
+                                            let _ = tx.send(progress.clone());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        StreamEvent::System { .. } | StreamEvent::ToolResult { .. } => {}
                     }
 
                     // Check cost callback on every event that might update cost.

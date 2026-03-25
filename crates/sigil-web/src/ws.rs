@@ -45,11 +45,17 @@ async fn handle_socket(mut socket: axum::extract::ws::WebSocket, state: AppState
     loop {
         tokio::select! {
             _ = interval.tick() => {
-                // Poll daemon for status update.
+                // Poll daemon for status + worker progress.
                 let status = state.ipc.cmd("status").await;
-                let msg = match status {
-                    Ok(data) => serde_json::json!({"event": "status", "data": data}),
-                    Err(e) => serde_json::json!({"event": "error", "data": {"error": e.to_string()}}),
+                let workers = state.ipc.cmd("worker_progress").await;
+                let msg = match (status, workers) {
+                    (Ok(data), Ok(wp)) => serde_json::json!({
+                        "event": "status",
+                        "data": data,
+                        "workers": wp.get("workers").cloned().unwrap_or(serde_json::json!([])),
+                    }),
+                    (Ok(data), Err(_)) => serde_json::json!({"event": "status", "data": data}),
+                    (Err(e), _) => serde_json::json!({"event": "error", "data": {"error": e.to_string()}}),
                 };
 
                 if let Ok(text) = serde_json::to_string(&msg)

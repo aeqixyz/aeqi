@@ -34,6 +34,8 @@ struct TrackedWorker {
     child_pid: std::sync::Arc<std::sync::atomic::AtomicU32>,
     /// Per-worker timeout override from pipeline tier.
     timeout_secs: u64,
+    /// Real-time progress from the Claude Code executor.
+    progress_rx: Option<tokio::sync::watch::Receiver<crate::executor::ExecutionProgress>>,
 }
 
 /// Supervisor: per-rig supervisor. Runs patrol cycles, manages workers,
@@ -218,7 +220,15 @@ impl Supervisor {
     }
 
     /// Create a worker based on the rig's execution mode.
-    async fn create_worker(&self, worker_name: String, task: &sigil_tasks::Task) -> AgentWorker {
+    /// Returns the worker and an optional progress receiver (ClaudeCode mode only).
+    async fn create_worker(
+        &self,
+        worker_name: String,
+        task: &sigil_tasks::Task,
+    ) -> (
+        AgentWorker,
+        Option<tokio::sync::watch::Receiver<crate::executor::ExecutionProgress>>,
+    ) {
         // Enrich identity with emotional state context if available.
         let identity = if let Some(ref emo) = self.emotional_state {
             let emo_guard = emo.lock().await;
@@ -236,6 +246,7 @@ impl Supervisor {
             self.identity.clone()
         };
 
+        let mut progress_rx = None;
         let mut worker = match self.execution_mode {
             ExecutionMode::Agent => AgentWorker::new(
                 worker_name,
@@ -264,6 +275,8 @@ impl Supervisor {
                     tier_turns,
                     self.cc_max_budget_usd,
                 );
+                let (executor, rx) = executor.with_progress_channel();
+                progress_rx = Some(rx);
                 AgentWorker::new_claude_code(
                     worker_name,
                     self.project_name.clone(),
@@ -326,7 +339,14 @@ impl Supervisor {
             }
         }
 
-        worker.with_max_task_retries(self.max_task_retries)
+        // Inject domain knowledge hints based on task labels/subject.
+        let hints = Self::resolve_domain_hints(&task.labels, &task.subject, &self.skills_dirs);
+        if !hints.is_empty() {
+            let existing = worker.identity.memory.clone().unwrap_or_default();
+            worker.identity.memory = Some(format!("{existing}\n\n{hints}"));
+        }
+
+        (worker.with_max_task_retries(self.max_task_retries), progress_rx)
     }
 
     /// Run one patrol cycle: reap finished tasks, detect timeouts,
@@ -723,7 +743,8 @@ impl Supervisor {
                 );
             }
 
-            let mut worker = self.create_worker(worker_name.clone(), &task).await;
+            let (mut worker, worker_progress_rx) =
+                self.create_worker(worker_name.clone(), &task).await;
 
             // If there's a previous external checkpoint for this task, inject it into the
             // task description so the new worker has context about the prior attempt's git state.
@@ -1019,6 +1040,7 @@ impl Supervisor {
                 started_at: std::time::Instant::now(),
                 child_pid: child_pid_tracker,
                 timeout_secs: worker_timeout,
+                progress_rx: worker_progress_rx,
             });
         }
 
@@ -1470,6 +1492,82 @@ impl Supervisor {
         let capacity = self.max_workers as usize;
         let idle = capacity.saturating_sub(running);
         (idle, running, 0)
+    }
+
+    /// Get real-time progress from all active workers.
+    pub fn worker_progress(&self) -> Vec<serde_json::Value> {
+        self.running_tasks
+            .iter()
+            .filter(|t| !t.handle.is_finished())
+            .map(|t| {
+                let (turns, cost, last_tool, status_msg) = match &t.progress_rx {
+                    Some(rx) => {
+                        let p = rx.borrow();
+                        (
+                            p.turns_so_far,
+                            p.cost_so_far,
+                            p.last_tool.clone(),
+                            p.status_message.clone(),
+                        )
+                    }
+                    None => (0, 0.0, None, None),
+                };
+                serde_json::json!({
+                    "task_id": t.task_id,
+                    "turns": turns,
+                    "cost_usd": cost,
+                    "last_tool": last_tool,
+                    "status": status_msg,
+                    "elapsed_secs": t.started_at.elapsed().as_secs(),
+                    "timeout_secs": t.timeout_secs,
+                })
+            })
+            .collect()
+    }
+
+    /// Resolve relevant domain skill file paths based on task labels and subject.
+    /// Returns a markdown snippet listing relevant files the worker should read.
+    fn resolve_domain_hints(labels: &[String], subject: &str, skills_dirs: &[std::path::PathBuf]) -> String {
+        let text = format!("{} {}", subject, labels.join(" ")).to_lowercase();
+
+        // Domain keyword → skill subdirectory paths to check
+        let mappings: &[(&[&str], &[&str])] = &[
+            (&["trading", "pms", "oms", "ems", "risk", "rms", "mms", "market making", "quote"],
+             &["pipelines/trading.md", "services/pms.md", "services/oms.md", "services/ems.md"]),
+            (&["data", "ingestion", "aggregation", "persistence", "orderbook"],
+             &["pipelines/data.md", "services/ingestion.md", "services/aggregation.md"]),
+            (&["strategy", "feature", "prediction", "signal", "optimizer", "fno", "ltc", "pfe"],
+             &["pipelines/strategy.md", "services/feature.md", "services/prediction.md", "services/signal.md"]),
+            (&["gateway", "api", "stream", "websocket", "configuration"],
+             &["pipelines/gateway.md", "services/api.md", "services/stream.md"]),
+            (&["types", "flatbuffer", "shared crate"],
+             &["crates/types.md", "crates/keys.md"]),
+            (&["zmq", "transport", "pubsub"],
+             &["crates/zmq_transport.md", "zmq.md"]),
+            (&["deploy", "systemd", "infrastructure"],
+             &["systemd.md", "infrastructure-overview.md"]),
+        ];
+
+        let mut hints = Vec::new();
+        for (keywords, paths) in mappings {
+            if keywords.iter().any(|kw| text.contains(kw)) {
+                for rel_path in *paths {
+                    for dir in skills_dirs {
+                        let full = dir.join(rel_path);
+                        if full.exists() {
+                            hints.push(format!("- `skills/{rel_path}`"));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if hints.is_empty() {
+            return String::new();
+        }
+        hints.dedup();
+        format!("## Relevant Skill Files\nRead these for domain context:\n{}", hints.join("\n"))
     }
 
     /// Cancel a task by ID. Marks it as Cancelled and aborts any running worker.

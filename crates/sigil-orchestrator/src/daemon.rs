@@ -778,6 +778,11 @@ impl Daemon {
                     )
                 }
 
+                "worker_progress" => {
+                    let workers = registry.worker_progress().await;
+                    serde_json::json!({"ok": true, "workers": workers})
+                }
+
                 "projects" => {
                     let summaries = registry.list_project_summaries().await;
                     let projects: Vec<serde_json::Value> = summaries
