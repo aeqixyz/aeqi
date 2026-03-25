@@ -461,6 +461,23 @@ impl SqliteMemory {
         }
     }
 
+    /// Check if a memory with the same key was stored within the given time window.
+    pub fn has_recent_key(&self, key: &str, hours: u32) -> bool {
+        let cutoff = (Utc::now() - chrono::Duration::hours(hours as i64)).to_rfc3339();
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM memories WHERE key = ?1 AND created_at > ?2",
+                rusqlite::params![key, cutoff],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        count > 0
+    }
+
     pub fn has_recent_duplicate(&self, content: &str, hours: u32) -> bool {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
@@ -539,8 +556,15 @@ impl Memory for SqliteMemory {
         scope: MemoryScope,
         entity_id: Option<&str>,
     ) -> Result<String> {
+        // Dedup by exact content within 24h
         if self.has_recent_duplicate(content, 24) {
-            debug!(key = %key, "skipping duplicate memory (seen within 24h)");
+            debug!(key = %key, "skipping duplicate memory (exact content match within 24h)");
+            return Ok(String::new());
+        }
+        // Dedup by key within 24h — prevents cron workers from storing the same
+        // fact under the same key with slightly different values each run.
+        if self.has_recent_key(key, 24) {
+            debug!(key = %key, "skipping duplicate memory (same key within 24h)");
             return Ok(String::new());
         }
 

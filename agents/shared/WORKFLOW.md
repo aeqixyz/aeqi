@@ -69,15 +69,78 @@ Task triage is the orchestrator's job. If tasks have dependencies, sequence them
 
 ## Sub-Agent Orchestration
 
-Workers have full access to Claude Code's Task tool. Each worker IS an orchestrator.
+Workers have full access to Claude Code's Agent tool. Each worker IS an orchestrator.
 
-For complex tasks, follow the **R→D→R pipeline** (Research → Develop → Review):
+### Pipeline Tiers
 
-1. **Research**: Spawn an Explore agent to map relevant code, find patterns, identify constraints
-2. **Develop**: Implement based on research findings. Work in worktree, commit.
-3. **Review**: Spawn a review agent to check for anti-patterns, security issues, correctness
+| Complexity | Pipeline | Subagents | Worktree |
+|------------|----------|-----------|----------|
+| **Simple** (1 file, clear fix) | Direct | None | No |
+| **Moderate** (multi-file, clear scope) | R→D→R | 2-3 | Yes |
+| **Complex** (architectural, multi-service) | Full 5-phase | 4-6 | Yes |
 
-Simple tasks (single-file fix, config change) don't need the full pipeline — just do the work.
+For moderate/complex tasks, follow the structured pipeline. Simple tasks — just do the work.
+
+### Subagent Prompt Templates
+
+When spawning subagents, use these structured prompts for consistent results:
+
+**Research** (Explore subagent — read-only, fast):
+```
+Agent tool:
+  subagent_type: "Explore"
+  description: "Research for <3-5 word summary>"
+  prompt: |
+    CONTEXT: <what you already know>
+    OBJECTIVE: <specific research question>
+    SCOPE: <directories/services to focus on>
+    OUTPUT: Key Files (file:line), Patterns, Constraints, Recommendation
+```
+
+**Plan** (Plan subagent — read-only, architectural):
+```
+Agent tool:
+  subagent_type: "Plan"
+  description: "Design plan for <3-5 word summary>"
+  prompt: |
+    TASK: <what to build>
+    RESEARCH: <findings from Explore agents>
+    PRODUCE: Ordered file changes, risk assessment, rollback plan
+```
+
+**Develop** (general-purpose, isolated worktree):
+```
+Agent tool:
+  subagent_type: "general-purpose"
+  isolation: "worktree"
+  model: "sonnet"
+  description: "Implement <3-5 word summary>"
+  prompt: |
+    TASK: <implementation objective>
+    PLAN: <plan output>
+    DONE CRITERIA: compiles, tests pass, committed
+```
+
+**Review** (Explore subagent — read-only, thorough):
+```
+Agent tool:
+  subagent_type: "Explore"
+  description: "Review <3-5 word summary>"
+  prompt: |
+    REVIEW: git diff dev...HEAD in <worktree>
+    CHECKLIST: security, correctness, patterns, performance, safety
+    OUTPUT: PASS or FAIL with file:line issues
+```
+
+### Parallel Execution
+
+Launch MULTIPLE subagents in a SINGLE message when their work is independent:
+- 3 Explore agents for parallel research (architecture, patterns, impact)
+- Multiple developer agents for independent services
+
+### Pipeline Orchestrator Spec
+
+For complex orchestration, read `subagents/pipeline-orchestrator.md` for the full protocol including handover file format and iteration rules.
 
 ## Escalation
 

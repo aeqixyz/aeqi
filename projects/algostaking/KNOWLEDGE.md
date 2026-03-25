@@ -1,15 +1,15 @@
 # AlgoStaking Project Knowledge
 
-Sub-microsecond alpha extraction engine. 12 Rust microservices, ZeroMQ pub/sub, FlatBuffers serialization, PostgreSQL/TimescaleDB.
+Lunar-epoch market making system. 15 Rust microservices, ZeroMQ pub/sub, FlatBuffers serialization, PostgreSQL/TimescaleDB.
 
 ## Service Pipeline
 
 ```
-Exchange WS → Ingestion → Aggregation → Feature → Prediction → Signal → PMS → OMS → EMS
-     ↓            ↓            ↓           ↓           ↓          ↓       ↓       ↓
-   Raw         Tick       AVBB Bar     Feature    Prediction  Signal   Position  Order
-   JSON     FlatBuffer   FlatBuffer    Vector      Tensor     Score    Request  Execution
+Exchange WS → Ingestion → Aggregation → Feature → Prediction → Signal
+  → PMS → RMS → MMS → OMS → EMS
 ```
+
+Alpha expressed as quote skew (market making), not directional trades. Earns spread + rebates.
 
 ### Data Pipeline
 | Service | ZMQ Pub | Metrics | Purpose |
@@ -24,13 +24,16 @@ Exchange WS → Ingestion → Aggregation → Feature → Prediction → Signal 
 | feature | 5557 | 9003 | DAG-based feature engineering (<20μs per bar) |
 | prediction | 5558 | 9004 | FNO inference, atomic model hot-swap (ArcSwap) |
 | signal | 5561 | 9008 | LTC network aggregation, Kelly sizing |
+| optimizer | (batch) | 9016 | Walk-forward PFE brute-force at lunar epoch boundaries (~7.4 days) |
 
 ### Trading Pipeline
 | Service | ZMQ Pub | Metrics | Purpose |
 |---------|---------|---------|---------|
-| pms | 5570 | 9012 | Kelly position sizing, risk limits, exposure management |
-| oms | 5564 | 9013 | Order state machine, fill tracking, deduplication |
-| ems | 5565 | 9009 | Venue connect, paper/live routing, fill reporting |
+| pms | 5570, 5577 | 9012 | Kelly position sizing, allocation directives |
+| rms | 5578-5579 | 9014 | **NEW (2026-03-23)** Independent risk gate: circuit breaker, position/venue/sector/portfolio limits, configurable throttle delay |
+| mms | 5580 | 9015 | **NEW (2026-03-23)** Avellaneda-Stoikov quote engine: L2 microprice, funding-adjusted reservation pricing, 5-level geometric ladder |
+| oms | 5564 | 9013 | Quote-native order management: cancel-before-replace, 5 bid + 5 ask per market |
+| ems | 5565-5566, 5568 | 9009 | Venue connect, paper/live routing, fill reporting |
 
 ### Gateway
 | Service | Port | Metrics | Purpose |
@@ -50,7 +53,19 @@ Hot-path topics use binary format (native endian):
 | 5557 | `[market_key:i64][bar_key:i32][feature_id:u16]` | 14 bytes | FeatureVector |
 | 5558 | Same as 5557 | 14 bytes | Prediction |
 | 5561 | Same as 5557 | 14 bytes | Signal |
-| 5564-5572 | String topics | — | Trading pipeline |
+| 5564-5580 | String topics | — | Trading pipeline (PMS/RMS/MMS/OMS/EMS) |
+
+## Trading Data Streams (RMS/MMS)
+
+| Port | Data | Publisher | Consumers |
+|------|------|-----------|-----------|
+| 5577 | AllocationDirectives | PMS | RMS, Persistence |
+| 5578 | ApprovedDirectives | RMS | MMS, Persistence |
+| 5579 | RiskCommands | RMS | MMS, OMS, Persistence |
+| 5580 | QuoteIntents | MMS | OMS, Persistence |
+| 5581 | BookDiffs | Ingestion | Aggregation, Persistence |
+| 5582 | L2Snapshots | Aggregation | MMS, Feature, Persistence |
+| 5583 | FundingRates | Ingestion | MMS, Persistence |
 
 ## AVBB Bar Types
 
@@ -93,7 +108,11 @@ PendingNew → New → Acknowledged → PartiallyFilled → Filled
 
 **Kelly sizing**: `(edge / variance) × quality × risk_multiplier`
 
-**Risk checks**: drawdown limits, daily drawdown, correlation filter
+**Risk checks (PMS)**: drawdown limits, daily drawdown, correlation filter
+
+**RMS risk gate**: independent position reconstruction from fills; circuit breaker with graduated response; position/venue/sector/portfolio limits; configurable throttle delay
+
+**MMS quote engine**: Avellaneda-Stoikov reservation pricing; L2 microprice for fair value; funding-rate adjustment; 5-level geometric bid/ask ladder
 
 **Fill dedup**: LRU cache (10K entries)
 
@@ -150,12 +169,15 @@ algostaking logs dev api
 
 | Crate | Purpose |
 |-------|---------|
-| types | FlatBuffer schemas, data structs (TickData, BarData, SignalData, OpenTrade) |
-| keys | Key packing (MarketKey, BarKey, StrategyKey), binary ZMQ topic formatting |
-| ports | Port registry (constants for all 12 services) |
-| zmq_transport | ResilientSubscriber/Publisher, MessageParser trait, auto-reconnect |
-| metrics | HFT metrics (Prometheus) |
+| types | FlatBuffer schemas, message types (TickData, BarData, AllocationDirective, QuoteIntent, etc.) |
+| keys | MarketKey packing, topic routing |
+| ports | Compile-time port registry (30 ZMQ + 12 metrics) |
+| zmq_transport | Resilient PUB/SUB with reconnection |
+| metrics | Lock-free Prometheus metrics server |
 | service | Config loading, graceful shutdown |
+| state_sync | DB bootstrap + ZMQ live cache |
+| hindsight | Optimal hindsight tracking for training labels |
+| lunar | Moon phase calculator for epoch system |
 
 ## Staking Business Logic
 
@@ -163,6 +185,15 @@ algostaking logs dev api
 - API: stake, staking-summary, account/balance, pause/start
 - PMS gate checks + realized_profit tracking
 - Frontend: progress bar, stake action, pause/start toggle, profile stats
+
+## Recent Changes (2026-03-25)
+
+- **Config validation**: MMS and RMS `Config::validate()` rejects invalid params at startup (no silent bad config)
+- **Fair value validation**: `QuoteEngine.generate_quotes()` returns `Option<QuoteIntent>` — `None` on invalid fair_value; metric: `mms_quotes_skipped_invalid_fv`
+- **Should-requote guard**: prevents NaN propagation from zero fair values
+- **Optimizer scoring**: unknown methods now warn instead of silently falling back
+- **Config externalization**: hardcoded TTL, level-spacing, throttle-delay moved to config files
+- **Per-reason rejection metrics**: `rms_rejected_by_reason{reason=...}`, `rms_directives_throttled`
 
 ## Hard-Won Rules
 
@@ -174,6 +205,9 @@ algostaking logs dev api
 6. **tokio-postgres can't serialize f64/i64 to DECIMAL** — compute in SQL subqueries.
 7. **account_id = subscription_id** in trading tables. JOIN path: strategy_subscriptions → subaccounts → fund_id.
 8. **Schema = source of truth** — fresh `psql -f *.sql` must create working DB.
+9. **QuoteEngine returns Option** — callers MUST handle None (invalid fair value). Never assume quotes are always produced.
+10. **Config structs MUST have `validate()`** called after deserialization — never trust raw TOML/JSON.
+11. **Monitoring metrics MUST exist for every rejection/skip/failure path** — silent drops are invisible bugs.
 
 ## Trading Performance (2026-02-13)
 

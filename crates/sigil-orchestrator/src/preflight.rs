@@ -16,6 +16,19 @@ pub enum Difficulty {
     Uncertain,
 }
 
+/// Pipeline execution tier — determines subagent strategy and resource limits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PipelineTier {
+    /// Direct fix, single file, clear scope. No subagents.
+    #[default]
+    Simple,
+    /// Multi-file, clear scope. R→D→R with subagents + worktree.
+    Moderate,
+    /// Architectural, multi-service. Full 5-phase pipeline with worktrees.
+    Complex,
+}
+
 /// Result of a pre-flight assessment.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreflightAssessment {
@@ -25,6 +38,7 @@ pub struct PreflightAssessment {
     pub estimated_turns: u32,
     pub confidence: f64,
     pub risks: Vec<String>,
+    pub pipeline_tier: PipelineTier,
 }
 
 /// Verdict after evaluating a pre-flight assessment.
@@ -54,6 +68,7 @@ impl PreflightAssessment {
         let mut turns = 10;
         let mut confidence = 0.5;
         let mut risks = Vec::new();
+        let mut pipeline_tier = PipelineTier::Simple;
 
         for line in text.lines() {
             let line = line.trim();
@@ -79,6 +94,13 @@ impl PreflightAssessment {
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
+            } else if let Some(rest) = line.strip_prefix("PIPELINE:") {
+                pipeline_tier = match rest.trim().to_lowercase().as_str() {
+                    "simple" => PipelineTier::Simple,
+                    "moderate" => PipelineTier::Moderate,
+                    "complex" => PipelineTier::Complex,
+                    _ => PipelineTier::Simple,
+                };
             }
         }
 
@@ -89,6 +111,7 @@ impl PreflightAssessment {
             estimated_turns: turns,
             confidence,
             risks,
+            pipeline_tier,
         }
     }
 
@@ -136,8 +159,21 @@ impl PreflightAssessment {
              COST: <estimated cost in USD, e.g. 0.05>\n\
              TURNS: <estimated number of turns needed>\n\
              CONFIDENCE: <0.0 to 1.0, your confidence in completing this>\n\
-             RISKS: <comma-separated risk factors, or empty>"
+             RISKS: <comma-separated risk factors, or empty>\n\
+             PIPELINE: <one of: simple, moderate, complex>\n\
+               simple = single file fix, config change, direct implementation (no subagents)\n\
+               moderate = multi-file change with clear scope (R→D→R subagent pipeline)\n\
+               complex = architectural, multi-service, needs full research→plan→develop→review→deploy"
         )
+    }
+
+    /// Returns the skill name to inject based on pipeline tier.
+    pub fn skill_for_tier(&self) -> Option<&'static str> {
+        match self.pipeline_tier {
+            PipelineTier::Simple => None,
+            PipelineTier::Moderate => Some("pipeline-moderate"),
+            PipelineTier::Complex => Some("pipeline-complex"),
+        }
     }
 }
 
@@ -147,7 +183,7 @@ mod tests {
 
     #[test]
     fn test_preflight_parse() {
-        let text = "APPROACH: Modify the auth middleware\nDIFFICULTY: medium\nCOST: 0.05\nTURNS: 8\nCONFIDENCE: 0.85\nRISKS: token expiry, session management";
+        let text = "APPROACH: Modify the auth middleware\nDIFFICULTY: medium\nCOST: 0.05\nTURNS: 8\nCONFIDENCE: 0.85\nRISKS: token expiry, session management\nPIPELINE: moderate";
         let assessment = PreflightAssessment::parse(text);
         assert_eq!(assessment.approach, "Modify the auth middleware");
         assert_eq!(assessment.estimated_difficulty, Difficulty::Medium);
@@ -155,6 +191,24 @@ mod tests {
         assert_eq!(assessment.estimated_turns, 8);
         assert!((assessment.confidence - 0.85).abs() < 0.001);
         assert_eq!(assessment.risks.len(), 2);
+        assert_eq!(assessment.pipeline_tier, PipelineTier::Moderate);
+    }
+
+    #[test]
+    fn test_pipeline_tier_defaults_to_simple() {
+        let text = "APPROACH: Fix typo\nDIFFICULTY: trivial\nCOST: 0.001\nTURNS: 1\nCONFIDENCE: 1.0\nRISKS:";
+        let assessment = PreflightAssessment::parse(text);
+        assert_eq!(assessment.pipeline_tier, PipelineTier::Simple);
+    }
+
+    #[test]
+    fn test_skill_for_tier() {
+        let mut a = PreflightAssessment::parse("PIPELINE: simple");
+        assert_eq!(a.skill_for_tier(), None);
+        a.pipeline_tier = PipelineTier::Moderate;
+        assert_eq!(a.skill_for_tier(), Some("pipeline-moderate"));
+        a.pipeline_tier = PipelineTier::Complex;
+        assert_eq!(a.skill_for_tier(), Some("pipeline-complex"));
     }
 
     #[test]
@@ -166,6 +220,7 @@ mod tests {
             estimated_turns: 20,
             confidence: 0.9,
             risks: vec![],
+            pipeline_tier: PipelineTier::Simple,
         };
         let verdict = assessment.evaluate(0.5, 0.8);
         assert!(matches!(verdict, PreflightVerdict::Reject { .. }));
@@ -180,6 +235,7 @@ mod tests {
             estimated_turns: 5,
             confidence: 0.2,
             risks: vec![],
+            pipeline_tier: PipelineTier::Simple,
         };
         let verdict = assessment.evaluate(10.0, 0.8);
         assert!(matches!(verdict, PreflightVerdict::Reroute { .. }));
@@ -194,6 +250,7 @@ mod tests {
             estimated_turns: 3,
             confidence: 0.9,
             risks: vec![],
+            pipeline_tier: PipelineTier::Simple,
         };
         let verdict = assessment.evaluate(10.0, 0.8);
         assert_eq!(verdict, PreflightVerdict::Proceed);

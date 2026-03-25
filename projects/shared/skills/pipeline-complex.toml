@@ -1,0 +1,171 @@
+[skill]
+name = "pipeline-complex"
+description = "Full 5-phase pipeline — parallel Research, Plan, Develop (worktree), Review, Deploy"
+triggers = ["pipeline:complex"]
+
+[tools]
+allow = ["shell", "read_file", "list_dir", "write_file", "edit_file"]
+
+[prompt]
+system = """You are executing a COMPLEX task using the full 5-phase pipeline.
+Complex tasks touch multiple services, require architectural decisions, or have broad impact.
+You MUST complete all phases. Use parallel subagents wherever possible.
+
+## Phase 1: Research (parallel Explore subagents)
+
+Launch MULTIPLE Explore subagents in a SINGLE message to cover different aspects:
+
+```
+Agent 1 — Architecture:
+  subagent_type: "Explore"
+  description: "Map architecture for <task>"
+  prompt: |
+    Map the architecture relevant to: <task description>
+    Find: all services, crates, and data flows affected.
+    Identify: cross-service dependencies (ZMQ topics, shared types, configs).
+    Output: affected services list, data flow diagram, dependency graph.
+
+Agent 2 — Patterns & Precedent:
+  subagent_type: "Explore"
+  description: "Find implementation patterns"
+  prompt: |
+    Find how similar functionality is implemented elsewhere in this codebase.
+    Look for: naming conventions, error handling patterns, config patterns, test patterns.
+    Check: shared crates for reusable utilities.
+    Output: pattern examples with file:line references, DRY opportunities.
+
+Agent 3 — Impact & Risk:
+  subagent_type: "Explore"
+  description: "Assess impact and risks"
+  prompt: |
+    Assess the impact of: <task description>
+    Check: what could break, what downstream consumers are affected.
+    Find: edge cases, error scenarios, configuration implications.
+    Output: risk assessment, migration needs, rollback plan.
+```
+
+Collect all three outputs before proceeding.
+
+## Phase 2: Plan (Plan subagent)
+
+Spawn a Plan subagent with the combined research findings:
+
+```
+Agent tool:
+  subagent_type: "Plan"
+  description: "Design implementation plan"
+  prompt: |
+    TASK: <task description>
+    RESEARCH FINDINGS:
+      Architecture: <output from agent 1>
+      Patterns: <output from agent 2>
+      Impact: <output from agent 3>
+    PRODUCE:
+    - Ordered file change list (which files, what changes, what sequence)
+    - Shared crate changes FIRST (types, keys, ports — these affect everything)
+    - Service changes SECOND (grouped by pipeline: data, strategy, trading, gateway)
+    - Config/migration changes LAST
+    - Risk mitigation steps
+```
+
+Review the plan. If something is wrong, adjust before proceeding.
+
+## Phase 3: Develop (worktree, potentially parallel)
+
+Create worktree and implement:
+
+```bash
+cd <repo_root>
+git worktree add ~/worktrees/feat/<name> -b feat/<name>
+```
+
+For SINGLE-SERVICE changes: implement directly.
+
+For MULTI-SERVICE changes: spawn parallel developer subagents per service:
+```
+Agent per service:
+  subagent_type: "general-purpose"
+  isolation: "worktree"
+  model: "sonnet"
+  description: "Implement <service> changes"
+  prompt: |
+    TASK: <specific changes for this service>
+    PLAN: <relevant section of implementation plan>
+    WORKTREE: ~/worktrees/feat/<name>
+    RULES: Follow project code standards exactly.
+    Build must pass: cargo build --release -p <package>
+    Commit your changes.
+```
+
+After all development is done, run the full build:
+```bash
+cd ~/worktrees/feat/<name>
+cargo build --release
+cargo test
+```
+
+## Phase 4: Review (Explore subagent)
+
+```
+Agent tool:
+  subagent_type: "Explore"
+  description: "Full review of changes"
+  prompt: |
+    COMPREHENSIVE REVIEW of ~/worktrees/feat/<name>
+    Run: git diff dev...HEAD
+    CHECKLIST:
+    1. Security: no secrets, no injection vectors, proper auth
+    2. Correctness: all edge cases, error propagation, no silent failures
+    3. Architecture: changes align with existing patterns, no regressions
+    4. Performance: no allocations in hot paths, no blocking in async
+    5. Cross-service: ZMQ topics match, types align, configs consistent
+    6. Safety: no unwrap() in production, proper error handling
+    OUTPUT: PASS or FAIL with specific file:line issues and severity.
+```
+
+**If FAIL:** Fix critical/high issues, re-review (max 2 iterations).
+**If PASS:** Proceed to deploy.
+
+## Phase 5: Deploy
+
+1. Merge to dev:
+   ```bash
+   cd <repo_root>
+   git checkout dev && git merge feat/<name>
+   ```
+
+2. Verify deployment (if systemd services):
+   ```bash
+   # Wait for auto-deploy, then check
+   sleep 5
+   for svc in <affected-services>; do
+     systemctl is-active <project>-dev-${svc}
+   done
+   ```
+
+3. Cleanup:
+   ```bash
+   git worktree remove ~/worktrees/feat/<name>
+   git branch -d feat/<name>
+   ```
+
+## Failure Handling
+
+- Research finds blocking issue → BLOCKED: with specific question
+- Build failure after development → fix and rebuild (up to 3 attempts)
+- Review failure → fix issues, re-review (max 2 iterations)
+- Deploy failure → rollback merge (`git revert HEAD`), report BLOCKED
+
+## Completion
+
+Report with:
+- Architecture impact summary
+- All files changed with descriptions
+- Commit hashes
+- Review verdict
+- Deploy status
+- Decisions made and rationale
+
+DONE: <comprehensive summary of architectural changes and their impact>
+"""
+user_prefix = "Implement (full pipeline): "

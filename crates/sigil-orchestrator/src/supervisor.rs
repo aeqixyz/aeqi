@@ -19,7 +19,7 @@ use crate::executor::{ClaudeCodeExecutor, TaskOutcome};
 use crate::expertise::{ExpertiseLedger, ExpertiseRecord, TaskOutcomeKind};
 use crate::message::{Dispatch, DispatchBus, DispatchKind};
 use crate::metrics::SigilMetrics;
-use crate::preflight::{PreflightAssessment, PreflightVerdict};
+use crate::preflight::{PipelineTier, PreflightAssessment, PreflightVerdict};
 use crate::project::Project;
 
 /// Label prefix for tracking escalation depth on tasks.
@@ -32,6 +32,8 @@ struct TrackedWorker {
     started_at: std::time::Instant,
     /// PID of the Claude Code child process (for process group kill on timeout).
     child_pid: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    /// Per-worker timeout override from pipeline tier.
+    timeout_secs: u64,
 }
 
 /// Supervisor: per-rig supervisor. Runs patrol cycles, manages workers,
@@ -248,10 +250,18 @@ impl Supervisor {
             ),
             ExecutionMode::ClaudeCode => {
                 let workdir = self.repo.clone().unwrap_or_default();
+                // Override turns based on pipeline tier (from task labels).
+                let tier_turns = if task.labels.iter().any(|l| l == "pipeline:complex") {
+                    self.cc_max_turns.max(40)
+                } else if task.labels.iter().any(|l| l == "pipeline:moderate") {
+                    self.cc_max_turns.max(25)
+                } else {
+                    self.cc_max_turns
+                };
                 let executor = ClaudeCodeExecutor::new(
                     workdir,
                     self.model.clone(),
-                    self.cc_max_turns,
+                    tier_turns,
                     self.cc_max_budget_usd,
                 );
                 AgentWorker::new_claude_code(
@@ -365,12 +375,12 @@ impl Supervisor {
         }
 
         // 1. Reap completed tasks + detect timed-out workers.
-        let timeout = std::time::Duration::from_secs(self.worker_timeout_secs);
         let mut timed_out = Vec::new();
         self.running_tasks.retain(|t| {
             if t.handle.is_finished() {
                 return false;
             }
+            let timeout = std::time::Duration::from_secs(t.timeout_secs);
             if t.started_at.elapsed() > timeout {
                 // Kill the entire process group first, then abort the tokio task.
                 let pid = t.child_pid.load(std::sync::atomic::Ordering::Relaxed);
@@ -597,7 +607,28 @@ impl Supervisor {
                 if let Ok(response) = pf_provider.chat(&request).await
                     && let Some(ref text) = response.content
                 {
-                    let assessment = PreflightAssessment::parse(text);
+                    let assessment: PreflightAssessment = PreflightAssessment::parse(text);
+
+                    // Pipeline tier: inject skill and store as label.
+                    let tier = assessment.pipeline_tier;
+                    if tier != PipelineTier::Simple {
+                        let mut store = self.tasks.lock().await;
+                        let _ = store.update(&task.id.0, |b| {
+                            b.labels.push(format!("pipeline:{tier:?}").to_lowercase());
+                            // Auto-inject pipeline skill if task doesn't already have one.
+                            if b.skill.is_none() && let Some(skill_name) = assessment.skill_for_tier() {
+                                b.skill = Some(skill_name.to_string());
+                                info!(
+                                    project = %self.project_name,
+                                    task = %b.id,
+                                    tier = ?tier,
+                                    skill = skill_name,
+                                    "auto-injected pipeline skill from preflight tier"
+                                );
+                            }
+                        });
+                    }
+
                     let budget_remaining = self
                         .cost_ledger
                         .as_ref()
@@ -974,11 +1005,20 @@ impl Supervisor {
                     }
                 }
             });
+            // Compute per-worker timeout from pipeline tier labels.
+            let worker_timeout = if task.labels.iter().any(|l| l == "pipeline:complex") {
+                self.worker_timeout_secs.max(1800)
+            } else if task.labels.iter().any(|l| l == "pipeline:moderate") {
+                self.worker_timeout_secs.max(900)
+            } else {
+                self.worker_timeout_secs
+            };
             self.running_tasks.push(TrackedWorker {
                 handle,
                 task_id,
                 started_at: std::time::Instant::now(),
                 child_pid: child_pid_tracker,
+                timeout_secs: worker_timeout,
             });
         }
 
