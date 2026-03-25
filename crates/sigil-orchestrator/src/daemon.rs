@@ -12,6 +12,7 @@ use crate::heartbeat::Heartbeat;
 use crate::lifecycle::LifecycleEngine;
 use crate::message::{Dispatch, DispatchBus, DispatchHealth};
 use crate::notes::{DirectiveDetector, DirectiveStatus, NoteStore};
+use crate::proactive;
 use crate::reflection::Reflection;
 use crate::registry::ProjectRegistry;
 use crate::schedule::ScheduleStore;
@@ -41,6 +42,7 @@ pub struct Daemon {
     pub watchdog: Option<WatchdogEngine>,
     pub chat_engine: Option<Arc<ChatEngine>>,
     pub note_store: Option<Arc<NoteStore>>,
+    pub anomaly_detector: proactive::AnomalyDetector,
     pub pid_file: Option<PathBuf>,
     pub socket_path: Option<PathBuf>,
     session_tracker_shutdown: Option<Arc<tokio::sync::Notify>>,
@@ -63,6 +65,7 @@ impl Daemon {
             watchdog: None,
             chat_engine: None,
             note_store: None,
+            anomaly_detector: proactive::AnomalyDetector::new(),
             pid_file: None,
             socket_path: None,
             session_tracker_shutdown: None,
@@ -619,6 +622,33 @@ impl Daemon {
                             }
                         }
                     }
+                }
+            }
+
+            // 13. Process pending note directives into tasks.
+            if let Some(ref ns) = self.note_store
+                && let Ok(pending) = ns.get_pending_directives()
+            {
+                for directive in pending.iter().take(5) {
+                    let _ = ns.update_directive_status(
+                        &directive.id,
+                        DirectiveStatus::Active,
+                        None,
+                    );
+                    info!(
+                        directive = %directive.id,
+                        content = %directive.content,
+                        "directive activated"
+                    );
+                }
+            }
+
+            // 14. Anomaly detection: record per-project cost baselines.
+            {
+                let project_costs = self.registry.cost_ledger.daily_report();
+                for (project, cost) in &project_costs {
+                    self.anomaly_detector
+                        .record_baseline(project, *cost, 0.0, 0);
                 }
             }
 

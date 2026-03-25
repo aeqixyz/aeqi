@@ -539,6 +539,47 @@ impl NoteStore {
         Ok(directives)
     }
 
+    /// Get all pending directives across all notes, ordered by creation time.
+    pub fn get_pending_directives(&self) -> Result<Vec<Directive>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("lock: {e}"))?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, note_id, line_number, content, status, task_id, matched_task_id, confidence, created_at, updated_at
+                 FROM note_directives WHERE status = 'pending' ORDER BY created_at",
+            )
+            .context("failed to prepare get pending directives query")?;
+
+        let directives = stmt
+            .query_map([], |row| {
+                let status_str: String = row.get(4)?;
+                let task_id: Option<String> = row.get(5)?;
+                let matched_task_id: Option<String> = row.get(6)?;
+                let created_str: String = row.get(8)?;
+                let updated_str: String = row.get(9)?;
+                Ok(Directive {
+                    id: row.get(0)?,
+                    note_id: row.get(1)?,
+                    line_number: row.get(2)?,
+                    content: row.get(3)?,
+                    status: DirectiveStatus::from_str_lossy(&status_str),
+                    task_id,
+                    matched_task_id,
+                    confidence: row.get(7)?,
+                    created_at: DateTime::parse_from_rfc3339(&created_str)
+                        .unwrap_or_default()
+                        .with_timezone(&Utc),
+                    updated_at: DateTime::parse_from_rfc3339(&updated_str)
+                        .unwrap_or_default()
+                        .with_timezone(&Utc),
+                })
+            })
+            .context("failed to query pending directives")?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .context("failed to collect pending directives")?;
+
+        Ok(directives)
+    }
+
     /// Update a directive's status and optionally link a task.
     /// Returns true if the directive was found and updated.
     pub fn update_directive_status(
@@ -936,5 +977,54 @@ build the pricing page v2
         store.delete_note(&note.id).unwrap();
         let directives = store.get_directives(&note.id).unwrap();
         assert!(directives.is_empty());
+    }
+
+    #[test]
+    fn test_get_pending_directives_returns_only_pending() {
+        let store = temp_store();
+
+        // Create two notes with directives.
+        let note1 = store.save_note("sigil", "build auth\nfix bug").unwrap();
+        let detected1 = vec![
+            DetectedDirective {
+                line_number: 1,
+                content: "build auth".to_string(),
+                pattern_type: PatternType::Imperative,
+            },
+            DetectedDirective {
+                line_number: 2,
+                content: "fix bug".to_string(),
+                pattern_type: PatternType::Imperative,
+            },
+        ];
+        let saved1 = store.save_directives(&note1.id, detected1).unwrap();
+
+        let note2 = store
+            .save_note("algostaking", "deploy to prod")
+            .unwrap();
+        let detected2 = vec![DetectedDirective {
+            line_number: 1,
+            content: "deploy to prod".to_string(),
+            pattern_type: PatternType::Imperative,
+        }];
+        let saved2 = store.save_directives(&note2.id, detected2).unwrap();
+
+        // All three should be pending initially.
+        let pending = store.get_pending_directives().unwrap();
+        assert_eq!(pending.len(), 3);
+
+        // Mark one as active, one as done.
+        store
+            .update_directive_status(&saved1[0].id, DirectiveStatus::Active, Some("sg-100"))
+            .unwrap();
+        store
+            .update_directive_status(&saved2[0].id, DirectiveStatus::Done, None)
+            .unwrap();
+
+        // Only the remaining pending directive should be returned.
+        let pending = store.get_pending_directives().unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].content, "fix bug");
+        assert_eq!(pending[0].status, DirectiveStatus::Pending);
     }
 }

@@ -18,10 +18,13 @@ use crate::emotional_state::EmotionalState;
 use crate::execution_events::EventBroadcaster;
 use crate::executor::{ClaudeCodeExecutor, TaskOutcome};
 use crate::expertise::{ExpertiseLedger, ExpertiseRecord, TaskOutcomeKind};
+use crate::escalation::{EscalationPolicy, EscalationTracker};
 use crate::middleware::{
-    ContextBudgetMiddleware, CostTrackingMiddleware, GuardrailsMiddleware,
-    LoopDetectionMiddleware, MiddlewareChain,
+    ClarificationMiddleware, ContextBudgetMiddleware, ContextCompressionMiddleware,
+    CostTrackingMiddleware, GuardrailsMiddleware, LoopDetectionMiddleware, MemoryRefreshMiddleware,
+    MiddlewareChain, Outcome, OutcomeStatus, SafetyNetMiddleware,
 };
+use crate::verification::{TaskContext, VerificationPipeline};
 use crate::message::{Dispatch, DispatchBus, DispatchKind};
 use crate::metrics::SigilMetrics;
 use crate::preflight::{PreflightAssessment, PreflightVerdict};
@@ -129,6 +132,10 @@ pub struct Supervisor {
     pub infer_deps_threshold: f64,
     /// Event broadcaster for real-time execution events (Priority 2).
     pub event_broadcaster: Option<Arc<EventBroadcaster>>,
+    /// Whether to run the verification pipeline on Done outcomes.
+    pub verification_enabled: bool,
+    /// Escalation tracker for task failure recovery (three-strikes policy).
+    pub escalation_tracker: Arc<Mutex<EscalationTracker>>,
 }
 
 impl Supervisor {
@@ -254,6 +261,12 @@ impl Supervisor {
             infer_deps_threshold: 0.0,
             skills_dirs: Vec::new(),
             event_broadcaster: None,
+            verification_enabled: true,
+            escalation_tracker: Arc::new(Mutex::new(EscalationTracker::new(EscalationPolicy {
+                max_retries: 4,
+                cooldown_secs: 300,
+                escalate_model: None,
+            }))),
         }
     }
 
@@ -428,6 +441,10 @@ impl Supervisor {
             Box::new(CostTrackingMiddleware::new(budget)),
             Box::new(ContextBudgetMiddleware::new(200)),
             Box::new(GuardrailsMiddleware::with_defaults()),
+            Box::new(ContextCompressionMiddleware::new()),
+            Box::new(MemoryRefreshMiddleware::new()),
+            Box::new(ClarificationMiddleware::new()),
+            Box::new(SafetyNetMiddleware::new()),
         ]);
         worker.set_middleware(chain);
 
@@ -871,6 +888,8 @@ impl Supervisor {
             let task_labels = task.labels.clone();
             let task_subject = task.subject.clone();
             let agent_name_for_records = agent_name.clone();
+            let verification_enabled = self.verification_enabled;
+            let escalation_tracker = self.escalation_tracker.clone();
             let handle = tokio::spawn(async move {
                 let start = std::time::Instant::now();
                 match worker.execute().await {
@@ -1004,6 +1023,42 @@ impl Supervisor {
                                         );
                                     }
                                 }
+
+                                // Verification pipeline: validate the outcome.
+                                if verification_enabled {
+                                    let task_ctx = TaskContext {
+                                        task_id: task_id_clone.clone(),
+                                        subject: task_subject.clone(),
+                                        done_condition: None,
+                                        project: project_name_task.clone(),
+                                        project_dir: None,
+                                        artifacts: vec![],
+                                    };
+                                    let mw_outcome = Outcome {
+                                        status: OutcomeStatus::Done,
+                                        confidence: 0.8,
+                                        artifacts: vec![],
+                                        cost_usd,
+                                        turns,
+                                        duration_ms: (duration_secs * 1000.0) as u64,
+                                        reason: Some(summary.clone()),
+                                    };
+                                    let result = VerificationPipeline::with_defaults()
+                                        .verify(&mw_outcome, &task_ctx)
+                                        .await;
+                                    info!(
+                                        task = %task_id_clone,
+                                        confidence = result.confidence,
+                                        approved = result.approved,
+                                        "verification complete"
+                                    );
+                                }
+
+                                // Clear escalation state on success.
+                                {
+                                    let mut tracker = escalation_tracker.lock().await;
+                                    tracker.record_success(&task_id_clone);
+                                }
                             }
                             TaskOutcome::Blocked {
                                 question,
@@ -1032,6 +1087,22 @@ impl Supervisor {
                                         },
                                     ))
                                     .await;
+
+                                // Record failure and decide escalation action.
+                                {
+                                    let mut tracker = escalation_tracker.lock().await;
+                                    tracker.record_failure(
+                                        &task_id_clone,
+                                        &agent_name_for_records,
+                                    );
+                                    let action = tracker.decide(&task_id_clone);
+                                    info!(
+                                        task = %task_id_clone,
+                                        agent = %agent_name_for_records,
+                                        action = ?action,
+                                        "escalation decision after failure"
+                                    );
+                                }
                             }
                             TaskOutcome::Handoff { .. } => {}
                         }

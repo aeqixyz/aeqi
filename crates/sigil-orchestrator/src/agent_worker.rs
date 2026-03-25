@@ -80,6 +80,8 @@ pub struct AgentWorker {
     pub middleware_chain: Option<MiddlewareChain>,
     /// Event broadcaster for real-time execution event streaming.
     pub event_broadcaster: Option<Arc<EventBroadcaster>>,
+    /// Optional debounced write queue for batching reflection memory writes.
+    pub write_queue: Option<Arc<tokio::sync::Mutex<sigil_memory::debounce::WriteQueue>>>,
 }
 
 impl AgentWorker {
@@ -123,6 +125,7 @@ impl AgentWorker {
             failure_analysis_model: String::new(),
             middleware_chain: None,
             event_broadcaster: None,
+            write_queue: None,
         }
     }
 
@@ -160,6 +163,7 @@ impl AgentWorker {
             failure_analysis_model: String::new(),
             middleware_chain: None,
             event_broadcaster: None,
+            write_queue: None,
         }
     }
 
@@ -198,6 +202,14 @@ impl AgentWorker {
     /// Set the event broadcaster for real-time execution event streaming.
     pub fn set_broadcaster(&mut self, broadcaster: Arc<EventBroadcaster>) {
         self.event_broadcaster = Some(broadcaster);
+    }
+
+    /// Set the debounced write queue for batching reflection memory writes.
+    pub fn set_write_queue(
+        &mut self,
+        queue: Arc<tokio::sync::Mutex<sigil_memory::debounce::WriteQueue>>,
+    ) {
+        self.write_queue = Some(queue);
     }
 
     /// Get the child PID tracker (for process group kill on timeout).
@@ -1125,6 +1137,10 @@ impl AgentWorker {
     }
 
     async fn store_routed_insights_static(worker_name: &str, text: &str, mem: &Arc<dyn Memory>) {
+        use sigil_memory::dedup::{DedupAction, DedupCandidate, DedupPipeline, SimilarMemory};
+
+        let dedup = DedupPipeline::default();
+
         for line in text.lines() {
             let line = line.trim();
             if line == "NONE" || line.is_empty() {
@@ -1166,6 +1182,51 @@ impl AgentWorker {
             let key = key.trim();
             let content = content.trim();
             if key.is_empty() || content.is_empty() {
+                continue;
+            }
+
+            // ── Dedup check: search for similar existing memories ──
+            let should_store = match async {
+                let query = sigil_core::traits::MemoryQuery::new(key, 5);
+                let existing = mem.search(&query).await.unwrap_or_default();
+                let similar: Vec<SimilarMemory> = existing
+                    .iter()
+                    .map(|e| SimilarMemory {
+                        id: e.id.clone(),
+                        key: e.key.clone(),
+                        content: e.content.clone(),
+                        similarity: e.score as f32,
+                    })
+                    .collect();
+                let candidate = DedupCandidate {
+                    key: key.to_string(),
+                    content: content.to_string(),
+                    embedding: None,
+                };
+                Ok::<DedupAction, anyhow::Error>(dedup.decide(&candidate, &similar))
+            }
+            .await
+            {
+                Ok(DedupAction::Skip) => {
+                    debug!(worker = %worker_name, key = %key, "dedup: skipping duplicate memory");
+                    false
+                }
+                Ok(DedupAction::Create) => true,
+                Ok(DedupAction::Merge(id)) => {
+                    debug!(worker = %worker_name, key = %key, merge_with = %id, "dedup: merging with existing memory");
+                    true
+                }
+                Ok(DedupAction::Supersede(id)) => {
+                    debug!(worker = %worker_name, key = %key, supersedes = %id, "dedup: superseding existing memory");
+                    true
+                }
+                Err(e) => {
+                    debug!(worker = %worker_name, key = %key, "dedup check failed, proceeding with store: {e}");
+                    true
+                }
+            };
+
+            if !should_store {
                 continue;
             }
 

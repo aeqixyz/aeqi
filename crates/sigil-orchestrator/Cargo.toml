@@ -6,6 +6,7 @@ description = "Agent orchestration engine — supervisor, workers, chat, dispatc
 
 [dependencies]
 sigil-core = { workspace = true }
+sigil-memory = { workspace = true }
 sigil-tasks = { workspace = true }
 sigil-providers = { workspace = true }
 sigil-tools = { workspace = true }
