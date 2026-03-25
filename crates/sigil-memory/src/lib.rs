@@ -7,6 +7,9 @@
 //! Used by agent workers for long-term memory recall during task execution.
 
 pub mod chunker;
+pub mod dedup;
+pub mod graph;
+pub mod hierarchy;
 pub mod hybrid;
 pub mod sqlite;
 pub mod vector;
