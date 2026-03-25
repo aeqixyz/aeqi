@@ -416,7 +416,7 @@ impl AgentWorker {
 
         // Enrich identity with dynamic memory recall (single search, system prompt only).
         let enriched_identity = if let Some(ref mem) = self.memory {
-            let query = sigil_core::traits::MemoryQuery::new(&task_context, 10)
+            let query = sigil_core::traits::MemoryQuery::new(&task_context, 30)
                 .with_scope(MemoryScope::Domain);
             match mem.search(&query).await {
                 Ok(entries) if !entries.is_empty() => {

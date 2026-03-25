@@ -262,10 +262,11 @@ impl Supervisor {
             ExecutionMode::ClaudeCode => {
                 let workdir = self.repo.clone().unwrap_or_default();
                 // Override turns based on pipeline tier (from task labels).
+                // On Max subscription there's no per-token cost — be generous.
                 let tier_turns = if task.labels.iter().any(|l| l == "pipeline:complex") {
-                    self.cc_max_turns.max(40)
+                    self.cc_max_turns.max(75)
                 } else if task.labels.iter().any(|l| l == "pipeline:moderate") {
-                    self.cc_max_turns.max(25)
+                    self.cc_max_turns.max(50)
                 } else {
                     self.cc_max_turns
                 };
@@ -1027,10 +1028,11 @@ impl Supervisor {
                 }
             });
             // Compute per-worker timeout from pipeline tier labels.
+            // Generous timeouts — Max subscription, no cost pressure.
             let worker_timeout = if task.labels.iter().any(|l| l == "pipeline:complex") {
-                self.worker_timeout_secs.max(1800)
+                self.worker_timeout_secs.max(3600) // 1 hour for complex
             } else if task.labels.iter().any(|l| l == "pipeline:moderate") {
-                self.worker_timeout_secs.max(900)
+                self.worker_timeout_secs.max(1800) // 30 min for moderate
             } else {
                 self.worker_timeout_secs
             };
