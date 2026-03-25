@@ -116,6 +116,7 @@ impl AgentWorker {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new_claude_code(
         agent_name: String,
         name: String,

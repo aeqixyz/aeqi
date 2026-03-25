@@ -29,6 +29,7 @@ pub mod hook;
 pub mod lifecycle;
 pub mod message;
 pub mod metrics;
+pub mod middleware;
 pub mod operation;
 pub mod pipeline;
 pub mod preflight;
