@@ -71,15 +71,20 @@ Task triage is the orchestrator's job. If tasks have dependencies, sequence them
 
 Workers have full access to Claude Code's Agent tool. Each worker IS an orchestrator.
 
-### Pipeline Tiers
+### Adaptive Pipeline
 
-| Complexity | Pipeline | Subagents | Worktree |
-|------------|----------|-----------|----------|
-| **Simple** (1 file, clear fix) | Direct | None | No |
-| **Moderate** (multi-file, clear scope) | R→D→R | 2-3 | Yes |
-| **Complex** (architectural, multi-service) | Full 5-phase | 4-6 | Yes |
+All implementation work uses one adaptive pipeline:
 
-For moderate/complex tasks, follow the structured pipeline. Simple tasks — just do the work.
+1. **Discover**: inspect the relevant code, constraints, and prior checkpoints
+2. **Plan**: define the intended change and verification path before editing
+3. **Implement**: make the smallest coherent change that solves the task
+4. **Verify**: run the strongest checks justified by the risk and scope
+5. **Finalize**: summarize what changed, what was verified, and any remaining risks
+
+The shape stays the same for every task. Only the depth changes:
+- tiny tasks move through the phases quickly
+- broad or risky tasks use more subagents, deeper planning, and stronger verification
+- worktrees are preferred whenever repo changes are involved
 
 ### Subagent Prompt Templates
 

@@ -71,13 +71,15 @@ Task triage is the orchestrator's job. If tasks have dependencies, sequence them
 
 Workers have full access to Claude Code's Task tool. Each worker IS an orchestrator.
 
-For complex tasks, follow the **R→D→R pipeline** (Research → Develop → Review):
+Use the **adaptive execution pipeline** for all tasks:
 
-1. **Research**: Spawn an Explore agent to map relevant code, find patterns, identify constraints
-2. **Develop**: Implement based on research findings. Work in worktree, commit.
-3. **Review**: Spawn a review agent to check for anti-patterns, security issues, correctness
+1. **Discover**: inspect relevant code, constraints, and prior checkpoints
+2. **Plan**: define the implementation and verification path before editing
+3. **Implement**: make the change in a worktree when repo edits are involved
+4. **Verify**: run the strongest checks justified by the task
+5. **Finalize**: report what changed, what was verified, and any remaining risks
 
-Simple tasks (single-file fix, config change) don't need the full pipeline — just do the work.
+Small tasks move quickly through the phases. Larger tasks may use research, planning, reviewer, or domain-specific subagents, but the workflow shape stays the same.
 
 ## Escalation
 

@@ -16,18 +16,7 @@ pub enum Difficulty {
     Uncertain,
 }
 
-/// Pipeline execution tier — determines subagent strategy and resource limits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum PipelineTier {
-    /// Direct fix, single file, clear scope. No subagents.
-    #[default]
-    Simple,
-    /// Multi-file, clear scope. R→D→R with subagents + worktree.
-    Moderate,
-    /// Architectural, multi-service. Full 5-phase pipeline with worktrees.
-    Complex,
-}
+pub const ADAPTIVE_PIPELINE_SKILL: &str = "pipeline-executor";
 
 /// Result of a pre-flight assessment.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,7 +27,6 @@ pub struct PreflightAssessment {
     pub estimated_turns: u32,
     pub confidence: f64,
     pub risks: Vec<String>,
-    pub pipeline_tier: PipelineTier,
 }
 
 /// Verdict after evaluating a pre-flight assessment.
@@ -51,6 +39,35 @@ pub enum PreflightVerdict {
 }
 
 impl PreflightAssessment {
+    fn parse_json(text: &str) -> Option<Self> {
+        #[derive(Deserialize)]
+        struct JsonAssessment {
+            #[serde(default)]
+            approach: String,
+            #[serde(default, alias = "estimated_difficulty")]
+            difficulty: Option<Difficulty>,
+            #[serde(default, alias = "cost")]
+            estimated_cost_usd: Option<f64>,
+            #[serde(default, alias = "turns")]
+            estimated_turns: Option<u32>,
+            #[serde(default)]
+            confidence: Option<f64>,
+            #[serde(default)]
+            risks: Vec<String>,
+        }
+
+        let candidate = extract_json_block(text)?;
+        let parsed: JsonAssessment = serde_json::from_str(candidate).ok()?;
+        Some(Self {
+            approach: parsed.approach,
+            estimated_difficulty: parsed.difficulty.unwrap_or(Difficulty::Medium),
+            estimated_cost_usd: parsed.estimated_cost_usd.unwrap_or(0.01),
+            estimated_turns: parsed.estimated_turns.unwrap_or(10),
+            confidence: parsed.confidence.unwrap_or(0.5),
+            risks: parsed.risks,
+        })
+    }
+
     /// Parse a pre-flight assessment from LLM response text.
     /// Expected format:
     /// ```text
@@ -62,13 +79,16 @@ impl PreflightAssessment {
     /// RISKS: complex regex, untested edge cases
     /// ```
     pub fn parse(text: &str) -> Self {
+        if let Some(parsed) = Self::parse_json(text) {
+            return parsed;
+        }
+
         let mut approach = String::new();
         let mut difficulty = Difficulty::Medium;
         let mut cost = 0.01;
         let mut turns = 10;
         let mut confidence = 0.5;
         let mut risks = Vec::new();
-        let mut pipeline_tier = PipelineTier::Simple;
 
         for line in text.lines() {
             let line = line.trim();
@@ -94,13 +114,6 @@ impl PreflightAssessment {
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
-            } else if let Some(rest) = line.strip_prefix("PIPELINE:") {
-                pipeline_tier = match rest.trim().to_lowercase().as_str() {
-                    "simple" => PipelineTier::Simple,
-                    "moderate" => PipelineTier::Moderate,
-                    "complex" => PipelineTier::Complex,
-                    _ => PipelineTier::Simple,
-                };
             }
         }
 
@@ -111,7 +124,6 @@ impl PreflightAssessment {
             estimated_turns: turns,
             confidence,
             risks,
-            pipeline_tier,
         }
     }
 
@@ -153,28 +165,43 @@ impl PreflightAssessment {
             "Assess this task before execution. Estimate difficulty, cost, and risks.\n\n\
              Task: {subject}\n\
              Description: {description}\n\n\
-             Respond with EXACTLY this format (one line per field):\n\
-             APPROACH: <your planned approach in one sentence>\n\
-             DIFFICULTY: <one of: trivial, easy, medium, hard, uncertain>\n\
-             COST: <estimated cost in USD, e.g. 0.05>\n\
-             TURNS: <estimated number of turns needed>\n\
-             CONFIDENCE: <0.0 to 1.0, your confidence in completing this>\n\
-             RISKS: <comma-separated risk factors, or empty>\n\
-             PIPELINE: <one of: simple, moderate, complex>\n\
-               simple = single file fix, config change, direct implementation (no subagents)\n\
-               moderate = multi-file change with clear scope (R→D→R subagent pipeline)\n\
-               complex = architectural, multi-service, needs full research→plan→develop→review→deploy"
+             Respond with ONLY valid JSON using this exact schema:\n\
+             {{\n\
+               \"approach\": \"<one sentence>\",\n\
+               \"difficulty\": \"<trivial|easy|medium|hard|uncertain>\",\n\
+               \"estimated_cost_usd\": <number>,\n\
+               \"estimated_turns\": <integer>,\n\
+               \"confidence\": <0.0 to 1.0>,\n\
+               \"risks\": [\"<risk>\", \"<risk>\"]\n\
+             }}\n\
+             Do not classify the task into a named pipeline tier. Sigil uses one adaptive execution pipeline for all tasks."
         )
     }
 
-    /// Returns the skill name to inject based on pipeline tier.
-    pub fn skill_for_tier(&self) -> Option<&'static str> {
-        match self.pipeline_tier {
-            PipelineTier::Simple => None,
-            PipelineTier::Moderate => Some("pipeline-moderate"),
-            PipelineTier::Complex => Some("pipeline-complex"),
+    /// Returns the default execution skill for project work.
+    pub fn adaptive_pipeline_skill(&self) -> &'static str {
+        ADAPTIVE_PIPELINE_SKILL
+    }
+}
+
+fn extract_json_block(text: &str) -> Option<&str> {
+    let trimmed = text.trim();
+    if trimmed.starts_with('{') && trimmed.ends_with('}') {
+        return Some(trimmed);
+    }
+    if let Some(start) = trimmed.find("```json") {
+        let after = &trimmed[start + "```json".len()..];
+        let after = after.strip_prefix('\n').unwrap_or(after).trim();
+        if let Some(end) = after.find("```") {
+            return Some(after[..end].trim());
         }
     }
+    if let (Some(start), Some(end)) = (trimmed.find('{'), trimmed.rfind('}'))
+        && start < end
+    {
+        return Some(trimmed[start..=end].trim());
+    }
+    None
 }
 
 #[cfg(test)]
@@ -183,7 +210,7 @@ mod tests {
 
     #[test]
     fn test_preflight_parse() {
-        let text = "APPROACH: Modify the auth middleware\nDIFFICULTY: medium\nCOST: 0.05\nTURNS: 8\nCONFIDENCE: 0.85\nRISKS: token expiry, session management\nPIPELINE: moderate";
+        let text = "APPROACH: Modify the auth middleware\nDIFFICULTY: medium\nCOST: 0.05\nTURNS: 8\nCONFIDENCE: 0.85\nRISKS: token expiry, session management";
         let assessment = PreflightAssessment::parse(text);
         assert_eq!(assessment.approach, "Modify the auth middleware");
         assert_eq!(assessment.estimated_difficulty, Difficulty::Medium);
@@ -191,24 +218,31 @@ mod tests {
         assert_eq!(assessment.estimated_turns, 8);
         assert!((assessment.confidence - 0.85).abs() < 0.001);
         assert_eq!(assessment.risks.len(), 2);
-        assert_eq!(assessment.pipeline_tier, PipelineTier::Moderate);
     }
 
     #[test]
-    fn test_pipeline_tier_defaults_to_simple() {
-        let text = "APPROACH: Fix typo\nDIFFICULTY: trivial\nCOST: 0.001\nTURNS: 1\nCONFIDENCE: 1.0\nRISKS:";
+    fn test_preflight_parse_json() {
+        let text = r#"{
+            "approach": "Modify the auth middleware",
+            "difficulty": "medium",
+            "estimated_cost_usd": 0.05,
+            "estimated_turns": 8,
+            "confidence": 0.85,
+            "risks": ["token expiry", "session management"]
+        }"#;
         let assessment = PreflightAssessment::parse(text);
-        assert_eq!(assessment.pipeline_tier, PipelineTier::Simple);
+        assert_eq!(assessment.approach, "Modify the auth middleware");
+        assert_eq!(assessment.estimated_difficulty, Difficulty::Medium);
+        assert!((assessment.estimated_cost_usd - 0.05).abs() < 0.001);
+        assert_eq!(assessment.estimated_turns, 8);
+        assert!((assessment.confidence - 0.85).abs() < 0.001);
+        assert_eq!(assessment.risks, vec!["token expiry", "session management"]);
     }
 
     #[test]
-    fn test_skill_for_tier() {
-        let mut a = PreflightAssessment::parse("PIPELINE: simple");
-        assert_eq!(a.skill_for_tier(), None);
-        a.pipeline_tier = PipelineTier::Moderate;
-        assert_eq!(a.skill_for_tier(), Some("pipeline-moderate"));
-        a.pipeline_tier = PipelineTier::Complex;
-        assert_eq!(a.skill_for_tier(), Some("pipeline-complex"));
+    fn test_adaptive_pipeline_skill() {
+        let a = PreflightAssessment::parse("APPROACH: test");
+        assert_eq!(a.adaptive_pipeline_skill(), ADAPTIVE_PIPELINE_SKILL);
     }
 
     #[test]
@@ -220,7 +254,6 @@ mod tests {
             estimated_turns: 20,
             confidence: 0.9,
             risks: vec![],
-            pipeline_tier: PipelineTier::Simple,
         };
         let verdict = assessment.evaluate(0.5, 0.8);
         assert!(matches!(verdict, PreflightVerdict::Reject { .. }));
@@ -235,7 +268,6 @@ mod tests {
             estimated_turns: 5,
             confidence: 0.2,
             risks: vec![],
-            pipeline_tier: PipelineTier::Simple,
         };
         let verdict = assessment.evaluate(10.0, 0.8);
         assert!(matches!(verdict, PreflightVerdict::Reroute { .. }));
@@ -250,7 +282,6 @@ mod tests {
             estimated_turns: 3,
             confidence: 0.9,
             risks: vec![],
-            pipeline_tier: PipelineTier::Simple,
         };
         let verdict = assessment.evaluate(10.0, 0.8);
         assert_eq!(verdict, PreflightVerdict::Proceed);

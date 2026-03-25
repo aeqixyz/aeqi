@@ -82,7 +82,7 @@ How the agent should work. These are project-specific instructions layered on to
 - Create sub-tasks for discovered work
 - Commit frequently with descriptive messages (feat:, fix:, docs:, chore:)
 - Run tests before marking work complete
-- Follow the R->D->R pipeline: Research -> Develop -> Review
+- Follow the adaptive pipeline: Discover -> Plan -> Implement -> Verify -> Finalize
 
 ## After completing work
 - Run full test suite
@@ -185,7 +185,7 @@ The `projects/shared/` directory contains templates inherited by all projects:
 
 ```
 projects/shared/
-  WORKFLOW.md              <- base workflow (R->D->R pipeline, code standards)
+  WORKFLOW.md              <- base workflow (adaptive execution pipeline, code standards)
   skills/                  <- shared skill archetypes
     researcher.toml
     developer.toml

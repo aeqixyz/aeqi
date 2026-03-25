@@ -634,13 +634,17 @@ impl LifecycleProcess {
              - Do NOT re-propose anything in 'Previously Proposed'\n\
              - Max 3 proposals, each concrete and actionable\n\
              - Include confidence score (0.0-1.0)\n\n\
-             Output (for each):\n\
-             PROPOSAL:\n\
-             Subject: <one-line title>\n\
-             Description: <2-3 sentences>\n\
-             Confidence: <0.0-1.0>\n\
-             END PROPOSAL\n\n\
-             If nothing needed, output exactly: NO_GAPS",
+             Respond with ONLY valid JSON using this exact schema:\n\
+             {{\n\
+               \"proposals\": [\n\
+                 {{\n\
+                   \"subject\": \"<one-line title>\",\n\
+                   \"description\": \"<2-3 sentences>\",\n\
+                   \"confidence\": <0.0-1.0>\n\
+                 }}\n\
+               ]\n\
+             }}\n\
+             If nothing needed, return {{\"proposals\": []}}.",
             name = proj_name,
             prefix = proj_prefix,
             agent = self.agent_name,
@@ -767,13 +771,17 @@ impl LifecycleProcess {
              - Cross-project synergies\n\
              - Process improvements\n\n\
              Rules: max 2 ideas, novel, specific, actionable.\n\n\
-             Output:\n\
-             PROPOSAL:\n\
-             Subject: <title>\n\
-             Description: <3-5 sentences>\n\
-             Confidence: 0.5\n\
-             END PROPOSAL\n\n\
-             If nothing novel, output: NO_GAPS",
+             Respond with ONLY valid JSON using this exact schema:\n\
+             {{\n\
+               \"proposals\": [\n\
+                 {{\n\
+                   \"subject\": \"<title>\",\n\
+                   \"description\": \"<3-5 sentences>\",\n\
+                   \"confidence\": <0.0-1.0>\n\
+                 }}\n\
+               ]\n\
+             }}\n\
+             If nothing novel, return {{\"proposals\": []}}.",
             name = self.agent_name,
             memory = truncate_chars(&memory, 1000),
             evolution = truncate_chars(&evolution, 500),
@@ -1011,6 +1019,7 @@ fn parse_block(text: &str, block_name: &str) -> Option<String> {
     }
 }
 
+#[derive(Debug, Deserialize)]
 struct Proposal {
     subject: String,
     description: String,
@@ -1018,6 +1027,10 @@ struct Proposal {
 }
 
 fn parse_proposals(text: &str) -> Vec<Proposal> {
+    if let Some(parsed) = parse_proposals_json(text) {
+        return parsed;
+    }
+
     let mut proposals = Vec::new();
     let mut pos = 0;
     while pos < text.len() {
@@ -1035,6 +1048,53 @@ fn parse_proposals(text: &str) -> Vec<Proposal> {
         pos += start + 9 + end + 12;
     }
     proposals
+}
+
+fn parse_proposals_json(text: &str) -> Option<Vec<Proposal>> {
+    #[derive(Deserialize)]
+    struct ProposalPayload {
+        #[serde(default)]
+        proposals: Vec<Proposal>,
+    }
+
+    let candidate = extract_json_block(text)?;
+    let proposals = if let Ok(payload) = serde_json::from_str::<ProposalPayload>(candidate) {
+        payload.proposals
+    } else if let Ok(list) = serde_json::from_str::<Vec<Proposal>>(candidate) {
+        list
+    } else {
+        return None;
+    };
+
+    Some(filter_proposals(proposals))
+}
+
+fn extract_json_block(text: &str) -> Option<&str> {
+    let trimmed = text.trim();
+    if trimmed.starts_with('{') && trimmed.ends_with('}') {
+        return Some(trimmed);
+    }
+    if trimmed.starts_with('[') && trimmed.ends_with(']') {
+        return Some(trimmed);
+    }
+    if let Some(start) = trimmed.find("```json") {
+        let after = &trimmed[start + "```json".len()..];
+        let after = after.strip_prefix('\n').unwrap_or(after).trim();
+        if let Some(end) = after.find("```") {
+            return Some(after[..end].trim());
+        }
+    }
+    if let (Some(start), Some(end)) = (trimmed.find('['), trimmed.rfind(']'))
+        && start < end
+    {
+        return Some(trimmed[start..=end].trim());
+    }
+    if let (Some(start), Some(end)) = (trimmed.find('{'), trimmed.rfind('}'))
+        && start < end
+    {
+        return Some(trimmed[start..=end].trim());
+    }
+    None
 }
 
 fn parse_proposal_block(block: &str) -> Option<Proposal> {
@@ -1073,6 +1133,13 @@ fn parse_proposal_block(block: &str) -> Option<Proposal> {
         description: description_lines.join(" "),
         confidence,
     })
+}
+
+fn filter_proposals(proposals: Vec<Proposal>) -> Vec<Proposal> {
+    proposals
+        .into_iter()
+        .filter(|proposal| !proposal.subject.trim().is_empty() && proposal.confidence >= 0.5)
+        .collect()
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -1134,6 +1201,41 @@ mod tests {
     fn test_parse_proposals_multiple() {
         let text = "PROPOSAL:\nSubject: A\nDescription: Do A.\nConfidence: 0.9\nEND PROPOSAL\n\
                     PROPOSAL:\nSubject: B\nDescription: Do B.\nConfidence: 0.75\nEND PROPOSAL";
+        assert_eq!(parse_proposals(text).len(), 2);
+    }
+
+    #[test]
+    fn test_parse_proposals_json_object() {
+        let text = r#"{
+            "proposals": [
+                {
+                    "subject": "Add monitoring",
+                    "description": "Add health checks and alerting.",
+                    "confidence": 0.85
+                }
+            ]
+        }"#;
+        let proposals = parse_proposals(text);
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].subject, "Add monitoring");
+        assert_eq!(proposals[0].description, "Add health checks and alerting.");
+        assert!((proposals[0].confidence - 0.85).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_parse_proposals_json_array() {
+        let text = r#"[
+            {
+                "subject": "A",
+                "description": "Do A.",
+                "confidence": 0.9
+            },
+            {
+                "subject": "B",
+                "description": "Do B.",
+                "confidence": 0.75
+            }
+        ]"#;
         assert_eq!(parse_proposals(text).len(), 2);
     }
 

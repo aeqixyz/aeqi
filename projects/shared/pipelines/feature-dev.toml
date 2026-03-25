@@ -1,5 +1,5 @@
 name = "Feature: {{feature_name}}"
-description = "End-to-end feature development for {{feature_name}} using R→D→R pipeline"
+description = "End-to-end feature development for {{feature_name}} using Sigil's adaptive execution pipeline"
 
 [[variables]]
 name = "feature_name"
@@ -15,7 +15,7 @@ default = ""
 name = "Research: {{feature_name}}"
 description = "Explore the codebase to understand existing patterns, identify affected files, and map dependencies for {{feature_name}}. {{context}}"
 priority = "high"
-labels = ["research", "r-d-r"]
+labels = ["discover", "adaptive-pipeline"]
 sequential = false
 acceptance_criteria = "List of affected files, existing patterns identified, dependencies mapped, implementation approach documented"
 
@@ -23,12 +23,12 @@ acceptance_criteria = "List of affected files, existing patterns identified, dep
 name = "Implement: {{feature_name}}"
 description = "Implement {{feature_name}} following the patterns identified in research. Work in a worktree, write tests, ensure compilation. {{context}}"
 priority = "high"
-labels = ["development", "r-d-r"]
+labels = ["implement", "adaptive-pipeline"]
 acceptance_criteria = "Code compiles, tests pass, implementation matches research findings"
 
 [[steps]]
 name = "Review: {{feature_name}}"
 description = "Review the implementation of {{feature_name}} for correctness, security, performance, and style. Check for anti-patterns and ensure it follows project conventions."
 priority = "normal"
-labels = ["review", "r-d-r"]
+labels = ["verify", "adaptive-pipeline"]
 acceptance_criteria = "No critical issues found, code follows project conventions, all review comments addressed"

@@ -19,8 +19,9 @@ use crate::executor::{ClaudeCodeExecutor, TaskOutcome};
 use crate::expertise::{ExpertiseLedger, ExpertiseRecord, TaskOutcomeKind};
 use crate::message::{Dispatch, DispatchBus, DispatchKind};
 use crate::metrics::SigilMetrics;
-use crate::preflight::{PipelineTier, PreflightAssessment, PreflightVerdict};
+use crate::preflight::{PreflightAssessment, PreflightVerdict};
 use crate::project::Project;
+use std::collections::HashMap;
 
 /// Label prefix for tracking escalation depth on tasks.
 const ESCALATION_LABEL_PREFIX: &str = "escalation:";
@@ -32,7 +33,7 @@ struct TrackedWorker {
     started_at: std::time::Instant,
     /// PID of the Claude Code child process (for process group kill on timeout).
     child_pid: std::sync::Arc<std::sync::atomic::AtomicU32>,
-    /// Per-worker timeout override from pipeline tier.
+    /// Effective timeout for the running worker.
     timeout_secs: u64,
     /// Real-time progress from the Claude Code executor.
     progress_rx: Option<tokio::sync::watch::Receiver<crate::executor::ExecutionProgress>>,
@@ -124,6 +125,75 @@ pub struct Supervisor {
 }
 
 impl Supervisor {
+    fn candidate_agents(&self) -> Vec<String> {
+        self.team
+            .as_ref()
+            .map(ProjectTeamConfig::effective_agents)
+            .filter(|agents| !agents.is_empty())
+            .unwrap_or_else(|| vec![self.escalation_target.clone()])
+    }
+
+    async fn select_agent_for_task(
+        &self,
+        task: &sigil_tasks::Task,
+    ) -> (String, Option<String>, Vec<String>) {
+        let candidates = self.candidate_agents();
+        if candidates.is_empty() {
+            return (
+                self.escalation_target.clone(),
+                None,
+                Vec::new(),
+            );
+        }
+
+        let domain = ExpertiseLedger::extract_domain(&task.labels, &task.subject);
+        let mut ranking_info = Vec::new();
+
+        if self.expertise_routing
+            && let Some(ref ledger) = self.expertise_ledger
+        {
+            let rankings = ledger.rank_for_domain(&domain).unwrap_or_default();
+            ranking_info = rankings
+                .iter()
+                .filter(|score| candidates.contains(&score.agent_name))
+                .take(3)
+                .map(|score| format!("{}({:.0}%)", score.agent_name, score.confidence * 100.0))
+                .collect();
+
+            for score in rankings {
+                if candidates.contains(&score.agent_name)
+                    && !ledger
+                        .is_deprioritized(&score.agent_name, &domain)
+                        .unwrap_or(false)
+                {
+                    return (score.agent_name, Some(domain), ranking_info);
+                }
+            }
+        }
+
+        let store = self.tasks.lock().await;
+        let mut load_by_agent: HashMap<String, usize> =
+            candidates.iter().cloned().map(|agent| (agent, 0)).collect();
+        for queued_task in store.all() {
+            if queued_task.is_closed() {
+                continue;
+            }
+            if let Some(assignee) = &queued_task.assignee
+                && let Some(load) = load_by_agent.get_mut(assignee)
+            {
+                *load += 1;
+            }
+        }
+        drop(store);
+
+        let selected = candidates
+            .iter()
+            .min_by_key(|agent| (load_by_agent.get(*agent).copied().unwrap_or(0), agent.as_str()))
+            .cloned()
+            .unwrap_or_else(|| self.escalation_target.clone());
+        (selected, Some(domain), ranking_info)
+    }
+
     pub fn new(
         project: &Project,
         provider: Arc<dyn Provider>,
@@ -223,6 +293,7 @@ impl Supervisor {
     /// Returns the worker and an optional progress receiver (ClaudeCode mode only).
     async fn create_worker(
         &self,
+        agent_name: String,
         worker_name: String,
         task: &sigil_tasks::Task,
     ) -> (
@@ -249,6 +320,7 @@ impl Supervisor {
         let mut progress_rx = None;
         let mut worker = match self.execution_mode {
             ExecutionMode::Agent => AgentWorker::new(
+                agent_name.clone(),
                 worker_name,
                 self.project_name.clone(),
                 self.provider.clone(),
@@ -261,24 +333,18 @@ impl Supervisor {
             ),
             ExecutionMode::ClaudeCode => {
                 let workdir = self.repo.clone().unwrap_or_default();
-                // Override turns based on pipeline tier (from task labels).
-                // On Max subscription there's no per-token cost — be generous.
-                let tier_turns = if task.labels.iter().any(|l| l == "pipeline:complex") {
-                    self.cc_max_turns.max(75)
-                } else if task.labels.iter().any(|l| l == "pipeline:moderate") {
-                    self.cc_max_turns.max(50)
-                } else {
-                    self.cc_max_turns
-                };
+                // Use one generous turn budget for the adaptive pipeline.
+                let adaptive_turns = self.cc_max_turns.max(50);
                 let executor = ClaudeCodeExecutor::new(
                     workdir,
                     self.model.clone(),
-                    tier_turns,
+                    adaptive_turns,
                     self.cc_max_budget_usd,
                 );
                 let (executor, rx) = executor.with_progress_channel();
                 progress_rx = Some(rx);
                 AgentWorker::new_claude_code(
+                    agent_name,
                     worker_name,
                     self.project_name.clone(),
                     executor,
@@ -553,62 +619,29 @@ impl Supervisor {
             }
 
             let worker_idx = self.running_tasks.len() + 1;
-            let worker_name = format!("{}-worker-{}", self.project_name, worker_idx);
+            let (agent_name, domain, ranking_info) = self.select_agent_for_task(&task).await;
+            let worker_name = format!("{}:{}:{}", self.project_name, agent_name, worker_idx);
 
-            // Expertise routing: query ledger for domain rankings.
-            if self.expertise_routing
-                && let Some(ref ledger) = self.expertise_ledger
-            {
-                let domain = ExpertiseLedger::extract_domain(&task.labels, &task.subject);
-                let rankings = ledger.rank_for_domain(&domain).unwrap_or_default();
-
-                // Check if this worker's agent is deprioritized for the domain.
-                if ledger
-                    .is_deprioritized(&worker_name, &domain)
-                    .unwrap_or(false)
-                {
-                    info!(
-                        project = %self.project_name,
-                        task = %task.id,
-                        domain = %domain,
-                        "agent deprioritized for domain, skipping this cycle"
-                    );
-                    if let Some(ref audit) = self.audit_log {
-                        let _ = audit.record(
-                            &AuditEvent::new(
-                                &self.project_name,
-                                DecisionType::RouteDecision,
-                                format!("Skipped: agent deprioritized for domain '{domain}'"),
-                            )
-                            .with_task(&task.id.0)
-                            .with_agent(&worker_name),
-                        );
-                    }
-                    continue;
-                }
-
-                // Record routing decision with rankings.
-                if let Some(ref audit) = self.audit_log {
-                    let ranking_info = if rankings.is_empty() {
-                        "no expertise data".to_string()
-                    } else {
-                        rankings
-                            .iter()
-                            .take(3)
-                            .map(|s| format!("{}({:.0}%)", s.agent_name, s.confidence * 100.0))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    };
-                    let _ = audit.record(
-                        &AuditEvent::new(
-                            &self.project_name,
-                            DecisionType::RouteDecision,
-                            format!("Domain '{domain}' → {worker_name} [rankings: {ranking_info}]"),
-                        )
-                        .with_task(&task.id.0)
-                        .with_agent(&worker_name),
-                    );
-                }
+            if let Some(ref audit) = self.audit_log {
+                let ranking_info = if ranking_info.is_empty() {
+                    "no expertise data".to_string()
+                } else {
+                    ranking_info.join(", ")
+                };
+                let routing_summary = if let Some(domain) = domain {
+                    format!("Domain '{domain}' → {agent_name} [rankings: {ranking_info}]")
+                } else {
+                    format!("Selected {agent_name} [rankings: {ranking_info}]")
+                };
+                let _ = audit.record(
+                    &AuditEvent::new(
+                        &self.project_name,
+                        DecisionType::RouteDecision,
+                        routing_summary,
+                    )
+                    .with_task(&task.id.0)
+                    .with_agent(&agent_name),
+                );
             }
             // Preflight assessment: evaluate task before committing resources.
             if self.preflight_enabled && !self.preflight_model.is_empty() {
@@ -630,25 +663,23 @@ impl Supervisor {
                 {
                     let assessment: PreflightAssessment = PreflightAssessment::parse(text);
 
-                    // Pipeline tier: inject skill and store as label.
-                    let tier = assessment.pipeline_tier;
-                    if tier != PipelineTier::Simple {
-                        let mut store = self.tasks.lock().await;
-                        let _ = store.update(&task.id.0, |b| {
-                            b.labels.push(format!("pipeline:{tier:?}").to_lowercase());
-                            // Auto-inject pipeline skill if task doesn't already have one.
-                            if b.skill.is_none() && let Some(skill_name) = assessment.skill_for_tier() {
-                                b.skill = Some(skill_name.to_string());
-                                info!(
-                                    project = %self.project_name,
-                                    task = %b.id,
-                                    tier = ?tier,
-                                    skill = skill_name,
-                                    "auto-injected pipeline skill from preflight tier"
-                                );
-                            }
-                        });
-                    }
+                    // Auto-inject the unified adaptive execution skill.
+                    let mut store = self.tasks.lock().await;
+                    let skill_name = assessment.adaptive_pipeline_skill().to_string();
+                    let _ = store.update(&task.id.0, |b| {
+                        if !b.labels.iter().any(|label| label == "execution:adaptive") {
+                            b.labels.push("execution:adaptive".to_string());
+                        }
+                        if b.skill.is_none() {
+                            b.skill = Some(skill_name.clone());
+                            info!(
+                                project = %self.project_name,
+                                task = %b.id,
+                                skill = %skill_name,
+                                "auto-injected adaptive pipeline skill"
+                            );
+                        }
+                    });
 
                     let budget_remaining = self
                         .cost_ledger
@@ -677,16 +708,16 @@ impl Supervisor {
                                 "preflight rejected task"
                             );
                             if let Some(ref audit) = self.audit_log {
-                                let _ = audit.record(
-                                    &AuditEvent::new(
-                                        &self.project_name,
-                                        DecisionType::PreflightRejected,
-                                        format!("Rejected: {reason}"),
-                                    )
-                                    .with_task(&task.id.0)
-                                    .with_agent(&worker_name),
-                                );
-                            }
+                        let _ = audit.record(
+                            &AuditEvent::new(
+                                &self.project_name,
+                                DecisionType::PreflightRejected,
+                                format!("Rejected: {reason}"),
+                            )
+                            .with_task(&task.id.0)
+                            .with_agent(&agent_name),
+                        );
+                    }
                             // Store assessment in task metadata.
                             let mut store = self.tasks.lock().await;
                             let _ = store.update(&task.id.0, |b| {
@@ -705,16 +736,16 @@ impl Supervisor {
                                 "preflight rerouted task"
                             );
                             if let Some(ref audit) = self.audit_log {
-                                let _ = audit.record(
-                                    &AuditEvent::new(
-                                        &self.project_name,
-                                        DecisionType::PreflightRejected,
-                                        format!("Rerouted: {reason}"),
-                                    )
-                                    .with_task(&task.id.0)
-                                    .with_agent(&worker_name),
-                                );
-                            }
+                        let _ = audit.record(
+                            &AuditEvent::new(
+                                &self.project_name,
+                                DecisionType::PreflightRejected,
+                                format!("Rerouted: {reason}"),
+                            )
+                            .with_task(&task.id.0)
+                            .with_agent(&agent_name),
+                        );
+                    }
                             continue;
                         }
                         PreflightVerdict::Proceed => {}
@@ -725,6 +756,7 @@ impl Supervisor {
             info!(
                 project = %self.project_name,
                 worker = %worker_name,
+                agent = %agent_name,
                 task = %task.id,
                 subject = %task.subject,
                 mode = ?self.execution_mode,
@@ -737,15 +769,15 @@ impl Supervisor {
                     &AuditEvent::new(
                         &self.project_name,
                         DecisionType::TaskAssigned,
-                        format!("Assigned to {worker_name}"),
+                        format!("Assigned to {agent_name} via {worker_name}"),
                     )
                     .with_task(&task.id.0)
-                    .with_agent(&worker_name),
+                    .with_agent(&agent_name),
                 );
             }
 
             let (mut worker, worker_progress_rx) =
-                self.create_worker(worker_name.clone(), &task).await;
+                self.create_worker(agent_name.clone(), worker_name.clone(), &task).await;
 
             // If there's a previous external checkpoint for this task, inject it into the
             // task description so the new worker has context about the prior attempt's git state.
@@ -802,7 +834,7 @@ impl Supervisor {
                         format!("Worker {} spawned for task {}", worker_name, task.id),
                     )
                     .with_task(&task.id.0)
-                    .with_agent(&worker_name),
+                    .with_agent(&agent_name),
                 );
             }
             let emo_state = self.emotional_state.clone();
@@ -815,7 +847,7 @@ impl Supervisor {
             let outcome_recipient = self.system_escalation_target.clone();
             let task_labels = task.labels.clone();
             let task_subject = task.subject.clone();
-            let worker_name_for_records = worker_name.clone();
+            let agent_name_for_records = agent_name.clone();
             let handle = tokio::spawn(async move {
                 let start = std::time::Instant::now();
                 match worker.execute().await {
@@ -868,7 +900,7 @@ impl Supervisor {
                                 TaskOutcome::Blocked { .. } => TaskOutcomeKind::Blocked,
                             };
                             let _ = ledger.record(&ExpertiseRecord {
-                                agent_name: worker_name_for_records.clone(),
+                                agent_name: agent_name_for_records.clone(),
                                 task_domain: domain,
                                 outcome: outcome_kind,
                                 cost_usd,
@@ -896,7 +928,7 @@ impl Supervisor {
                                     ),
                                 )
                                 .with_task(&task_id_clone)
-                                .with_agent(&worker_name_for_records),
+                                .with_agent(&agent_name_for_records),
                             );
                         }
 
@@ -927,7 +959,7 @@ impl Supervisor {
                                         .post(
                                             &key,
                                             &content,
-                                            &worker_name_for_records,
+                                            &agent_name_for_records,
                                             &project_name_task,
                                             &task_labels,
                                             crate::blackboard::EntryDurability::Transient,
@@ -945,7 +977,7 @@ impl Supervisor {
                                                 ),
                                             )
                                             .with_task(&task_id_clone)
-                                            .with_agent(&worker_name_for_records),
+                                            .with_agent(&agent_name_for_records),
                                         );
                                     }
                                 }
@@ -1027,21 +1059,12 @@ impl Supervisor {
                     }
                 }
             });
-            // Compute per-worker timeout from pipeline tier labels.
-            // Generous timeouts — Max subscription, no cost pressure.
-            let worker_timeout = if task.labels.iter().any(|l| l == "pipeline:complex") {
-                self.worker_timeout_secs.max(3600) // 1 hour for complex
-            } else if task.labels.iter().any(|l| l == "pipeline:moderate") {
-                self.worker_timeout_secs.max(1800) // 30 min for moderate
-            } else {
-                self.worker_timeout_secs
-            };
             self.running_tasks.push(TrackedWorker {
                 handle,
                 task_id,
                 started_at: std::time::Instant::now(),
                 child_pid: child_pid_tracker,
-                timeout_secs: worker_timeout,
+                timeout_secs: self.worker_timeout_secs.max(1800),
                 progress_rx: worker_progress_rx,
             });
         }

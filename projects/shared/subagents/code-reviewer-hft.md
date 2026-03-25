@@ -1,6 +1,6 @@
 ---
 name: code-reviewer-hft
-description: Expert code review for HFT/low-latency Rust code. Final phase of R→D→R pipeline. Checks for anti-patterns and updates handover file with results.
+description: Expert code review for HFT/low-latency Rust code. Verification phase of the adaptive execution pipeline. Checks for anti-patterns and updates handover file with results.
 tools: Read, Grep, Glob, Write
 model: opus
 ---

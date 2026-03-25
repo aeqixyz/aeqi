@@ -44,6 +44,9 @@ pub enum WorkerExecution {
 /// An AgentWorker is an ephemeral task executor. Each worker runs as a tokio task
 /// with its own identity, hook, and tool allowlist.
 pub struct AgentWorker {
+    /// Stable logical agent identity used for assignee, expertise, memory, and audit semantics.
+    pub agent_name: String,
+    /// Ephemeral worker-run identifier used for execution tracing.
     pub name: String,
     pub project_name: String,
     pub state: WorkerState,
@@ -74,6 +77,7 @@ pub struct AgentWorker {
 impl AgentWorker {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        agent_name: String,
         name: String,
         project_name: String,
         provider: Arc<dyn sigil_core::traits::Provider>,
@@ -86,6 +90,7 @@ impl AgentWorker {
     ) -> Self {
         let reflect_model = model.clone();
         Self {
+            agent_name,
             name,
             project_name,
             state: WorkerState::Idle,
@@ -112,6 +117,7 @@ impl AgentWorker {
     }
 
     pub fn new_claude_code(
+        agent_name: String,
         name: String,
         project_name: String,
         executor: ClaudeCodeExecutor,
@@ -122,6 +128,7 @@ impl AgentWorker {
     ) -> Self {
         let project_dir = Some(executor.workdir().to_path_buf());
         Self {
+            agent_name,
             name,
             project_name,
             state: WorkerState::Idle,
@@ -203,7 +210,7 @@ impl AgentWorker {
             Ok(checkpoint) => {
                 let checkpoint: AgentCheckpoint = checkpoint
                     .with_task_id(task_id)
-                    .with_worker_name(&self.name);
+                    .with_worker_name(&self.agent_name);
 
                 let checkpoint = if let Some(notes) = progress_notes {
                     checkpoint.with_progress_notes(notes)
@@ -251,7 +258,7 @@ impl AgentWorker {
         if let Err(e) = store.update(task_id, |q| {
             q.checkpoints.push(Checkpoint {
                 timestamp: Utc::now(),
-                worker: self.name.clone(),
+                worker: self.agent_name.clone(),
                 progress: progress.to_string(),
                 cost_usd: cost,
                 turns_used: turns,
@@ -365,7 +372,7 @@ impl AgentWorker {
             let mut store = self.tasks.lock().await;
             if let Err(e) = store.update(&hook.task_id.0, |b| {
                 b.status = TaskStatus::InProgress;
-                b.assignee = Some(self.name.clone());
+                b.assignee = Some(self.agent_name.clone());
             }) {
                 warn!(task = %hook.task_id, error = %e, "failed to mark task in_progress");
             }
@@ -483,7 +490,7 @@ impl AgentWorker {
             let task_ctx = task_context.clone();
             let text = result_text.clone();
             let model = self.reflect_model.clone();
-            let name = self.name.clone();
+            let name = self.agent_name.clone();
             tokio::spawn(async move {
                 Self::reflect_detached(name, task_ctx, text, model, mem, provider).await;
             });
@@ -676,7 +683,7 @@ impl AgentWorker {
                                             ),
                                         )
                                         .with_task(&hook.task_id.0)
-                                        .with_agent(&self.name),
+                                        .with_agent(&self.agent_name),
                                     );
                                 }
 
@@ -781,7 +788,7 @@ impl AgentWorker {
                                 format!("Auto-cancelled after max retries: {}", error_text),
                             )
                             .with_task(&hook.task_id.0)
-                            .with_agent(&self.name),
+                            .with_agent(&self.agent_name),
                         );
                     }
                 }
@@ -805,7 +812,7 @@ impl AgentWorker {
         let agent_config = AgentConfig {
             model: model.to_string(),
             max_iterations: 20,
-            name: self.name.clone(),
+            name: self.agent_name.clone(),
             ..Default::default()
         };
 
@@ -859,7 +866,7 @@ impl AgentWorker {
             let task_ctx = task_context.to_string();
             let result_text = result.result_text.clone();
             let model = self.reflect_model.clone();
-            let name = self.name.clone();
+            let name = self.agent_name.clone();
             tokio::spawn(async move {
                 Self::reflect_detached(name, task_ctx, result_text, model, mem, provider).await;
             });

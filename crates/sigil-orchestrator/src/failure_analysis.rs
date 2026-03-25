@@ -30,6 +30,34 @@ pub struct FailureAnalysis {
 }
 
 impl FailureAnalysis {
+    fn parse_json(text: &str) -> Option<Self> {
+        #[derive(Deserialize)]
+        struct JsonFailureAnalysis {
+            #[serde(default)]
+            mode: Option<FailureMode>,
+            #[serde(default)]
+            reasoning: String,
+            #[serde(default)]
+            suggested_approach: Option<String>,
+            #[serde(default)]
+            failed_tools: Vec<String>,
+            #[serde(default)]
+            missing_context_hints: Vec<String>,
+        }
+
+        let candidate = extract_json_block(text)?;
+        let parsed: JsonFailureAnalysis = serde_json::from_str(candidate).ok()?;
+        Some(Self {
+            mode: parsed.mode.unwrap_or(FailureMode::Unknown),
+            reasoning: parsed.reasoning,
+            suggested_approach: parsed
+                .suggested_approach
+                .and_then(|value| if value.trim().is_empty() { None } else { Some(value) }),
+            failed_tools: parsed.failed_tools,
+            missing_context_hints: parsed.missing_context_hints,
+        })
+    }
+
     /// Parse a failure analysis from LLM response text.
     /// Expected format:
     /// ```text
@@ -40,6 +68,10 @@ impl FailureAnalysis {
     /// CONTEXT: database schema, migration files
     /// ```
     pub fn parse(text: &str) -> Self {
+        if let Some(parsed) = Self::parse_json(text) {
+            return parsed;
+        }
+
         let mut mode = FailureMode::Unknown;
         let mut reasoning = String::new();
         let mut suggested_approach = None;
@@ -154,14 +186,36 @@ impl FailureAnalysis {
              Task: {subject}\n\
              Description: {description}\n\
              Error: {error}\n\n\
-             Respond with EXACTLY this format (one line per field):\n\
-             MODE: <one of: missing_context, wrong_approach, tool_failure, budget_exhausted, external_blocker, unknown>\n\
-             REASONING: <one sentence explanation>\n\
-             APPROACH: <suggested alternative approach, or empty>\n\
-             TOOLS: <comma-separated failed tools, or empty>\n\
-             CONTEXT: <comma-separated missing context hints, or empty>"
+             Respond with ONLY valid JSON using this exact schema:\n\
+             {{\n\
+               \"mode\": \"<missing_context|wrong_approach|tool_failure|budget_exhausted|external_blocker|unknown>\",\n\
+               \"reasoning\": \"<one sentence explanation>\",\n\
+               \"suggested_approach\": \"<alternative approach or empty string>\",\n\
+               \"failed_tools\": [\"<tool>\", \"<tool>\"],\n\
+               \"missing_context_hints\": [\"<hint>\", \"<hint>\"]\n\
+             }}"
         )
     }
+}
+
+fn extract_json_block(text: &str) -> Option<&str> {
+    let trimmed = text.trim();
+    if trimmed.starts_with('{') && trimmed.ends_with('}') {
+        return Some(trimmed);
+    }
+    if let Some(start) = trimmed.find("```json") {
+        let after = &trimmed[start + "```json".len()..];
+        let after = after.strip_prefix('\n').unwrap_or(after).trim();
+        if let Some(end) = after.find("```") {
+            return Some(after[..end].trim());
+        }
+    }
+    if let (Some(start), Some(end)) = (trimmed.find('{'), trimmed.rfind('}'))
+        && start < end
+    {
+        return Some(trimmed[start..=end].trim());
+    }
+    None
 }
 
 #[cfg(test)]
@@ -171,6 +225,29 @@ mod tests {
     #[test]
     fn test_parse_failure_analysis() {
         let text = "MODE: missing_context\nREASONING: Could not find the config file\nAPPROACH: Check /etc directory\nTOOLS: file_read\nCONTEXT: config path, environment variables";
+        let analysis = FailureAnalysis::parse(text);
+        assert_eq!(analysis.mode, FailureMode::MissingContext);
+        assert_eq!(analysis.reasoning, "Could not find the config file");
+        assert_eq!(
+            analysis.suggested_approach,
+            Some("Check /etc directory".to_string())
+        );
+        assert_eq!(analysis.failed_tools, vec!["file_read"]);
+        assert_eq!(
+            analysis.missing_context_hints,
+            vec!["config path", "environment variables"]
+        );
+    }
+
+    #[test]
+    fn test_parse_failure_analysis_json() {
+        let text = r#"{
+            "mode": "missing_context",
+            "reasoning": "Could not find the config file",
+            "suggested_approach": "Check /etc directory",
+            "failed_tools": ["file_read"],
+            "missing_context_hints": ["config path", "environment variables"]
+        }"#;
         let analysis = FailureAnalysis::parse(text);
         assert_eq!(analysis.mode, FailureMode::MissingContext);
         assert_eq!(analysis.reasoning, "Could not find the config file");

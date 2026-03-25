@@ -17,11 +17,12 @@ User → Rei (system leader) → Project Teams → Claude Code Workers
 
 ## Architecture
 
-- **9 Rust crates**, 217+ tests, zero clippy warnings
+- **9 Rust crates**, 222+ tests, zero clippy warnings
 - **28 CLI commands** including `sigil daemon start` and `sigil web start`
 - **Web dashboard** — Vite + React 19 with VS Code-style tree navigation
 - **Knowledge system** — SQLite + FTS5 + vector embeddings with hybrid search
 - **Chat** — knowledge-aware with memory search, note storage, auto-insight extraction
+- **Execution** — one adaptive pipeline with stable agent ownership, strong verification, and fallback-safe orchestration parsing
 
 ## Quick Start
 
@@ -52,6 +53,7 @@ sigil web start       # web API on :8400
 - **Agents** — AI personalities with expertise (engineer, trader, designer, researcher, reviewer)
 - **Rei** — the system leader, routes all work, multi-archetype personality
 - **Skills** — reusable capability templates (developer, health-checker, latency-debugger)
+- **Adaptive Pipeline** — one disciplined Discover → Plan → Implement → Verify → Finalize execution flow, with depth adjusted to task scope rather than named pipeline classes
 - **Missions** — groups of tasks with progress tracking
 - **Memory** — per-project learned knowledge that compounds over time
 - **Blackboard** — ephemeral shared knowledge between agents
