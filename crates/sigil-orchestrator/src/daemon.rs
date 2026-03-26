@@ -1,5 +1,6 @@
 use anyhow::Result;
 use chrono::{Timelike, Utc};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -808,30 +809,128 @@ impl Daemon {
                 }
             }
 
-            // 14. Anomaly detection: record per-project cost baselines.
+            // 14. Anomaly detection: record baselines + check for anomalies.
             {
                 let project_costs = self.registry.cost_ledger.daily_report();
+
+                // Compute failure rates from audit log if available.
+                let failure_rates: HashMap<String, (u32, u32)> = {
+                    let mut rates: HashMap<String, (u32, u32)> = HashMap::new();
+                    if let Some(ref audit) = self.registry.audit_log {
+                        for (project, _cost) in &project_costs {
+                            let recent = audit.query_by_project(project).unwrap_or_default();
+                            let recent_slice: Vec<_> =
+                                recent.into_iter().rev().take(50).collect();
+                            let total = recent_slice.len() as u32;
+                            let failures = recent_slice
+                                .iter()
+                                .filter(|e| {
+                                    e.decision_type == crate::audit::DecisionType::TaskFailed
+                                })
+                                .count() as u32;
+                            rates.insert(project.clone(), (failures, total));
+                        }
+                    }
+                    rates
+                };
+
+                let mut anomalies = Vec::new();
+
                 for (project, cost) in &project_costs {
+                    let (failures, total) =
+                        failure_rates.get(project).copied().unwrap_or((0, 0));
+                    let failure_rate = if total > 0 {
+                        failures as f32 / total as f32
+                    } else {
+                        0.0
+                    };
+
                     self.anomaly_detector
-                        .record_baseline(project, *cost, 0.0, 0);
+                        .record_baseline(project, *cost, failure_rate, 0);
+
+                    // Check for cost spikes.
+                    if let Some(anomaly) = self.anomaly_detector.check_cost(project, *cost) {
+                        warn!(
+                            project = %project,
+                            message = %anomaly.message,
+                            "anomaly detected: cost spike"
+                        );
+                        anomalies.push(anomaly);
+                    }
+
+                    // Check for failure rate surges.
+                    if let Some(anomaly) =
+                        self.anomaly_detector
+                            .check_failure_rate(project, failures, total)
+                    {
+                        warn!(
+                            project = %project,
+                            message = %anomaly.message,
+                            "anomaly detected: failure surge"
+                        );
+                        anomalies.push(anomaly);
+                    }
+                }
+
+                // Deliver anomalies via Telegram if configured.
+                if !anomalies.is_empty() {
+                    if let Ok(mut queue) = self.pending_telegram_messages.lock() {
+                        for anomaly in &anomalies {
+                            let text = format!(
+                                "\u{26a0}\u{fe0f} Anomaly: {}\nProject: {}\nSeverity: {:?}",
+                                anomaly.message,
+                                anomaly.project.as_deref().unwrap_or("system"),
+                                anomaly.severity,
+                            );
+                            for chat_id in &self.telegram_allowed_chats {
+                                queue.push((*chat_id, text.clone()));
+                            }
+                        }
+                    }
                 }
             }
 
-            // 15. Flush debounced memory writes.
+            // 15. Flush debounced memory writes to project memory stores.
             if let Ok(mut wq) = self.write_queue.lock() {
                 let ready = wq.drain_ready(chrono::Utc::now());
                 if !ready.is_empty() {
                     info!(count = ready.len(), "flushing debounced memory writes");
-                    // TODO: actual memory store integration requires per-project
-                    // memory handles — for now we log the drained writes so the
-                    // queue doesn't grow unbounded.
-                    for w in &ready {
-                        debug!(
-                            project = %w.project,
-                            key = %w.key,
-                            category = %w.category,
-                            "debounced write flushed (pending store integration)"
-                        );
+                    if let Some(ref engine) = self.chat_engine {
+                        for w in &ready {
+                            if let Some(mem) = engine.memory_stores.get(&w.project) {
+                                let category = match w.category.as_str() {
+                                    "fact" => sigil_core::traits::MemoryCategory::Fact,
+                                    "procedure" => sigil_core::traits::MemoryCategory::Procedure,
+                                    "preference" => sigil_core::traits::MemoryCategory::Preference,
+                                    "context" => sigil_core::traits::MemoryCategory::Context,
+                                    _ => sigil_core::traits::MemoryCategory::Fact,
+                                };
+                                let scope = match w.scope.as_str() {
+                                    "entity" => sigil_core::traits::MemoryScope::Entity,
+                                    "system" => sigil_core::traits::MemoryScope::System,
+                                    _ => sigil_core::traits::MemoryScope::Domain,
+                                };
+                                match mem.store(&w.key, &w.content, category, scope, None).await {
+                                    Ok(id) => debug!(
+                                        project = %w.project,
+                                        id = %id,
+                                        key = %w.key,
+                                        "debounced write persisted"
+                                    ),
+                                    Err(e) => warn!(
+                                        project = %w.project,
+                                        key = %w.key,
+                                        "debounced write failed: {e}"
+                                    ),
+                                }
+                            } else {
+                                debug!(
+                                    project = %w.project,
+                                    key = %w.key,
+                                    "no memory store for project — write dropped"
+                                );
+                            }
+                        }
                     }
                 }
             }
