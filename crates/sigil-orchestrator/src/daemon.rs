@@ -1373,6 +1373,8 @@ impl Daemon {
                                     "created_at": task.created_at.to_rfc3339(),
                                     "updated_at": task.updated_at.map(|t| t.to_rfc3339()),
                                     "closed_at": task.closed_at.map(|t| t.to_rfc3339()),
+                                    "closed_reason": task.closed_reason,
+                                    "runtime": task.metadata.pointer("/sigil/runtime").cloned(),
                                 }));
                             }
                         }
