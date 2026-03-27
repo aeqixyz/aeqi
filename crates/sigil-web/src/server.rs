@@ -1,9 +1,20 @@
 use anyhow::Result;
-use axum::{Router, middleware};
+use axum::{
+    Router,
+    body::Body,
+    extract::{Request, State},
+    http::{Method, StatusCode},
+    middleware,
+    response::{IntoResponse, Response},
+};
 use sigil_core::config::{PeerAgentConfig, SigilConfig};
-use std::sync::Arc;
-use tower_http::cors::{Any, CorsLayer};
-use tower_http::trace::TraceLayer;
+use std::{path::PathBuf, sync::Arc};
+use tower::ServiceExt;
+use tower_http::{
+    cors::{Any, CorsLayer},
+    services::{ServeDir, ServeFile},
+    trace::TraceLayer,
+};
 use tracing::info;
 
 use crate::auth;
@@ -17,6 +28,7 @@ pub struct AppState {
     pub ipc: Arc<IpcClient>,
     pub auth_secret: Option<String>,
     pub agents_config: Vec<PeerAgentConfig>,
+    pub ui_dist_dir: Option<PathBuf>,
 }
 
 /// Start the web server using settings from SigilConfig.
@@ -30,7 +42,10 @@ pub async fn start(config: &SigilConfig) -> Result<()> {
         ipc: ipc.clone(),
         auth_secret: web.auth_secret.clone(),
         agents_config: config.agents.clone(),
+        ui_dist_dir: web.ui_dist_dir.as_ref().map(PathBuf::from),
     };
+    let ui_dist_dir = state.ui_dist_dir.clone();
+    let serve_ui = ui_dist_dir.is_some();
 
     // Build CORS layer.
     let cors = if web.cors_origins.is_empty() {
@@ -62,12 +77,20 @@ pub async fn start(config: &SigilConfig) -> Result<()> {
         .route("/api/auth/login", axum::routing::post(login_handler))
         .route("/api/ws", axum::routing::get(ws::handler));
 
-    let app = Router::new()
+    let mut app = Router::new()
         .nest("/api", protected)
         .merge(public)
         .layer(cors)
-        .layer(TraceLayer::new_for_http())
-        .with_state(state);
+        .layer(TraceLayer::new_for_http());
+
+    if serve_ui {
+        if let Some(ui_dist_dir) = ui_dist_dir.as_ref() {
+            info!("sigil-web serving UI assets from {}", ui_dist_dir.display());
+        }
+        app = app.fallback(spa_handler);
+    }
+
+    let app = app.with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&web.bind).await?;
     info!("sigil-web listening on {}", web.bind);
@@ -117,6 +140,40 @@ async fn login_handler(
         Err(e) => (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             axum::Json(serde_json::json!({"ok": false, "error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+async fn spa_handler(State(state): State<AppState>, req: Request) -> Response {
+    if req.method() != Method::GET && req.method() != Method::HEAD {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let path = req.uri().path();
+    if path.starts_with("/api") {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let Some(ui_dist_dir) = state.ui_dist_dir.clone() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let last_segment = path.rsplit('/').next().unwrap_or_default();
+    let response = if !last_segment.contains('.') {
+        ServeDir::new(ui_dist_dir.clone())
+            .fallback(ServeFile::new(ui_dist_dir.join("index.html")))
+            .oneshot(req)
+            .await
+    } else {
+        ServeDir::new(ui_dist_dir).oneshot(req).await
+    };
+
+    match response {
+        Ok(response) => response.map(Body::new).into_response(),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to serve UI asset: {err}"),
         )
             .into_response(),
     }

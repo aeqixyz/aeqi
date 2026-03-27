@@ -26,14 +26,28 @@ Intent → Understand → Orchestrate → Execute → Verify → Learn → Proac
 - **Skill promotion** — recurring patterns auto-promoted to formal skill definitions
 - **Web dashboard** — chat-first UI (Vite + React 19), context panel, command palette
 - **Chat** — dual-path (quick + agent execution), multi-channel (web, Telegram, API)
+- **Monorepo** — Rust workspace plus `apps/ui` frontend with shared release flow
 
 ## Quick Start
 
 ```bash
 cargo build --release
+npm --prefix apps/ui install
+npm --prefix apps/ui run build
 sigil setup --runtime openrouter_agent
 sigil daemon start    # orchestration daemon
-sigil web start       # web API on :8400
+sigil web start       # web API on :8400, optionally serves apps/ui/dist
+```
+
+## Monorepo Layout
+
+```text
+sigil/
+  crates/    # Rust crates
+  sigil-cli/ # CLI binary
+  apps/ui/   # Vite + React frontend
+  config/    # sample and local config
+  docs/      # architecture and notes
 ```
 
 ## Crates
@@ -49,6 +63,13 @@ sigil web start       # web API on :8400
 | `sigil-providers` | OpenRouter, Anthropic, Ollama |
 | `sigil-gates` | Telegram, Discord, Slack |
 | `sigil-tools` | Shell, file, git, tasks, delegate, skills |
+
+## UI Runtime
+
+- `apps/ui` is the canonical frontend source.
+- `sigil-web` can serve the built SPA directly when `[web].ui_dist_dir` is configured.
+- For production, the usual setup is `nginx` or `caddy` as a thin TLS reverse proxy in front of `sigil-web`.
+- For local development, run Vite in `apps/ui` on `:5173` and point it at `sigil-web` on `:8400`.
 
 ## Key Concepts
 

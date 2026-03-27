@@ -40,11 +40,15 @@ Messages persist to localStorage (last 100). Session ID persists for conversatio
 ## Deployment
 
 ```bash
-npm run build                         # Vite production build
-sudo cp -r dist/* /var/www/sigil-ui/  # Deploy static files
+cd /home/claudedev/sigil/apps/ui
+npm run build
 ```
 
-Your reverse proxy should serve the static SPA and proxy `/api/*` to `sigil-web` on `:8400`.
+Preferred production setup:
+- Build the UI in `apps/ui/dist`
+- Set `[web].ui_dist_dir` in `sigil.toml`
+- Run `sigil web start`
+- Put a thin reverse proxy in front for TLS and host routing
 
 Services: `sigil.service` (daemon), `sigil-web.service` (API server)
 

@@ -28,12 +28,28 @@ pub(crate) fn load_config_with_agents(
     config_path: &Option<PathBuf>,
 ) -> Result<(SigilConfig, PathBuf)> {
     let (mut config, path) = load_config(config_path)?;
+    resolve_web_paths(&mut config, &path);
     let agents_dir = resolve_agents_dir(&path);
     let warnings = config.discover_and_merge_agents(&agents_dir);
     for w in &warnings {
         warn!("{w}");
     }
     Ok((config, path))
+}
+
+fn resolve_web_paths(config: &mut SigilConfig, config_path: &Path) {
+    let Some(ui_dist_dir) = config.web.ui_dist_dir.as_mut() else {
+        return;
+    };
+
+    let path = PathBuf::from(ui_dist_dir.as_str());
+    if path.is_absolute() {
+        return;
+    }
+
+    if let Some(parent) = config_path.parent() {
+        *ui_dist_dir = parent.join(path).to_string_lossy().into_owned();
+    }
 }
 
 pub(crate) fn find_project_dir(name: &str) -> Result<PathBuf> {

@@ -16,6 +16,11 @@ agents/*/.sigil/
 # Local config (commit sigil.example.toml instead)
 config/sigil.toml
 config/platform.toml
+apps/ui/node_modules/
+apps/ui/dist/
+apps/ui/*.tsbuildinfo
+apps/ui/.env
+apps/ui/.env*.local
 
 # Agent directories (personal — create your own)
 agents/*/

@@ -142,6 +142,7 @@ worker_timeout_secs = 1800
 # [web]
 # enabled = true
 # bind = "0.0.0.0:8400"
+# ui_dist_dir = "/abs/path/to/sigil/apps/ui/dist"  # if set, sigil-web serves the SPA directly
 # cors_origins = ["https://dashboard.example.com", "http://localhost:5173"]
 # auth_secret = "${SIGIL_WEB_SECRET}"
 # ws_poll_interval_secs = 5

@@ -5,6 +5,7 @@ data_dir = "~/.sigil"
 [web]
 enabled = true
 bind = "0.0.0.0:8400"
+ui_dist_dir = "/home/claudedev/sigil/apps/ui/dist"
 cors_origins = ["https://entity.business", "http://localhost:5173"]
 auth_secret = "${SIGIL_WEB_SECRET}"
 
@@ -40,7 +41,7 @@ model = "xiaomi/mimo-v2-pro"
 # Global repo pool — all agents can access all repos
 [repos]
 sigil = "/home/claudedev/sigil"
-sigil-ui = "/home/claudedev/entity-business"
+sigil-ui = "/home/claudedev/sigil/apps/ui"
 algostaking = "/home/claudedev/algostaking-backend"
 algostaking-app = "/home/claudedev/algostaking-app"
 algostaking-frontend = "/home/claudedev/algostaking-frontend"

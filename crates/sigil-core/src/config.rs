@@ -921,6 +921,8 @@ pub struct WebConfig {
     #[serde(default = "default_web_bind")]
     pub bind: String,
     #[serde(default)]
+    pub ui_dist_dir: Option<String>,
+    #[serde(default)]
     pub cors_origins: Vec<String>,
     #[serde(default)]
     pub auth_secret: Option<String>,
@@ -933,6 +935,7 @@ impl Default for WebConfig {
         Self {
             enabled: false,
             bind: default_web_bind(),
+            ui_dist_dir: None,
             cors_origins: Vec::new(),
             auth_secret: None,
             ws_poll_interval_secs: default_ws_poll_interval(),
@@ -1230,6 +1233,10 @@ impl SigilConfig {
             if let Some(ref mut wt) = project.worktree_root {
                 *wt = expand_tilde(wt);
             }
+        }
+
+        if let Some(ref mut ui_dist_dir) = config.web.ui_dist_dir {
+            *ui_dist_dir = expand_tilde(&resolve_env(ui_dist_dir));
         }
 
         // Resolve environment variables in web auth secret.
@@ -2098,6 +2105,37 @@ repo = "/tmp/test"
         assert_eq!(config.sigil.name, "test");
         assert_eq!(config.projects.len(), 1);
         assert_eq!(config.projects[0].name, "test-domain");
+        assert!(config.web.ui_dist_dir.is_none());
+    }
+
+    #[test]
+    fn test_web_ui_dist_dir_expands_tilde_and_env() {
+        // SAFETY: test runs single-threaded, no concurrent env access.
+        unsafe { std::env::set_var("SIGIL_UI_DIST_TEST", "~/sigil/apps/ui/dist") };
+        let toml = r#"
+[sigil]
+name = "test"
+
+[web]
+ui_dist_dir = "${SIGIL_UI_DIST_TEST}"
+
+[[projects]]
+name = "test-domain"
+prefix = "td"
+repo = "/tmp/test"
+"#;
+        let config = SigilConfig::parse(toml).unwrap();
+        let home = dirs::home_dir().unwrap();
+        assert_eq!(
+            config.web.ui_dist_dir,
+            Some(
+                home.join("sigil/apps/ui/dist")
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
+        // SAFETY: test runs single-threaded, no concurrent env access.
+        unsafe { std::env::remove_var("SIGIL_UI_DIST_TEST") };
     }
 
     #[test]

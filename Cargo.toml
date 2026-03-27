@@ -26,6 +26,7 @@ keywords = ["agents", "orchestration", "llm", "claude", "automation"]
 [workspace.dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+tower = "0.5"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -36,7 +37,7 @@ toml = "0.8"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 axum = { version = "0.8", features = ["ws"] }
 axum-extra = { version = "0.10", features = ["typed-header"] }
-tower-http = { version = "0.6", features = ["cors", "trace"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
 jsonwebtoken = "9"
 
 # CLI
