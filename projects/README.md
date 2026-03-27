@@ -61,7 +61,7 @@ prefix = "sg"
 repo = "/path/to/repo"
 model = "claude-sonnet-4-6"
 max_workers = 2
-execution_mode = "claude_code"
+execution_mode = "agent"
 worker_timeout_secs = 1800
 ```
 

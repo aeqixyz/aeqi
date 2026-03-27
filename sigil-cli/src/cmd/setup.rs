@@ -124,16 +124,9 @@ pub(crate) async fn cmd_setup(runtime: &str, service: bool, force: bool) -> Resu
             println!("  1. Ensure Ollama is running and the configured model is pulled");
         }
     }
-    if starter.execution_mode == Some(ExecutionMode::ClaudeCode) {
-        println!("  2. Ensure `claude` is installed and authenticated");
-        println!("  3. sigil doctor --strict");
-        println!("  4. sigil team");
-        println!("  5. sigil daemon install --start");
-    } else {
-        println!("  2. sigil doctor --strict");
-        println!("  3. sigil team");
-        println!("  4. sigil daemon install --start");
-    }
+    println!("  2. sigil doctor --strict");
+    println!("  3. sigil team");
+    println!("  4. sigil daemon install --start");
 
     Ok(())
 }
@@ -191,7 +184,7 @@ temporal_decay_halflife_days = 30\n\
 [team]\n\
 leader = \"leader\"\n\
 agents = [\"leader\", \"researcher\", \"reviewer\"]\n\
-router_model = \"google/gemini-2.0-flash-001\"\n\
+router_model = \"{default_model}\"\n\
 router_cooldown_secs = 60\n\
 max_background_cost_usd = 0.5\n\
 \n\
@@ -311,7 +304,6 @@ fn render_provider_block(provider: ProviderKind, default_model: &str) -> String 
             "[providers.openrouter]\n\
 api_key = \"${{OPENROUTER_API_KEY}}\"\n\
 default_model = \"{default_model}\"\n\
-fallback_model = \"google/gemini-2.0-flash-001\"\n\
 embedding_model = \"openai/text-embedding-3-small\"\n\
 \n"
         ),
@@ -335,21 +327,11 @@ fn starter_runtime(name: &str) -> Result<RuntimePresetConfig> {
         "openrouter_agent" => Ok(RuntimePresetConfig {
             provider: ProviderKind::OpenRouter,
             execution_mode: Some(ExecutionMode::Agent),
-            model: Some("anthropic/claude-sonnet-4.6".to_string()),
-        }),
-        "openrouter_claude_code" => Ok(RuntimePresetConfig {
-            provider: ProviderKind::OpenRouter,
-            execution_mode: Some(ExecutionMode::ClaudeCode),
-            model: Some("anthropic/claude-sonnet-4.6".to_string()),
+            model: Some("xiaomi/mimo-v2-pro".to_string()),
         }),
         "anthropic_agent" => Ok(RuntimePresetConfig {
             provider: ProviderKind::Anthropic,
             execution_mode: Some(ExecutionMode::Agent),
-            model: Some("claude-sonnet-4-20250514".to_string()),
-        }),
-        "anthropic_claude_code" => Ok(RuntimePresetConfig {
-            provider: ProviderKind::Anthropic,
-            execution_mode: Some(ExecutionMode::ClaudeCode),
             model: Some("claude-sonnet-4-20250514".to_string()),
         }),
         "ollama_agent" => Ok(RuntimePresetConfig {
@@ -357,13 +339,24 @@ fn starter_runtime(name: &str) -> Result<RuntimePresetConfig> {
             execution_mode: Some(ExecutionMode::Agent),
             model: Some("llama3.1:8b".to_string()),
         }),
+        // Legacy aliases retained so older invocations keep working.
+        "openrouter_claude_code" => Ok(RuntimePresetConfig {
+            provider: ProviderKind::OpenRouter,
+            execution_mode: Some(ExecutionMode::Agent),
+            model: Some("xiaomi/mimo-v2-pro".to_string()),
+        }),
+        "anthropic_claude_code" => Ok(RuntimePresetConfig {
+            provider: ProviderKind::Anthropic,
+            execution_mode: Some(ExecutionMode::Agent),
+            model: Some("claude-sonnet-4-20250514".to_string()),
+        }),
         "ollama_claude_code" => Ok(RuntimePresetConfig {
             provider: ProviderKind::Ollama,
-            execution_mode: Some(ExecutionMode::ClaudeCode),
+            execution_mode: Some(ExecutionMode::Agent),
             model: Some("llama3.1:8b".to_string()),
         }),
         _ => anyhow::bail!(
-            "supported starter runtimes: openrouter_agent, openrouter_claude_code, anthropic_agent, anthropic_claude_code, ollama_agent, ollama_claude_code"
+            "supported starter runtimes: openrouter_agent, anthropic_agent, ollama_agent"
         ),
     }
 }
@@ -378,7 +371,7 @@ fn agent_runtime_name(provider: ProviderKind) -> &'static str {
 
 fn default_model_for_provider(provider: ProviderKind) -> &'static str {
     match provider {
-        ProviderKind::OpenRouter => "anthropic/claude-sonnet-4.6",
+        ProviderKind::OpenRouter => "xiaomi/mimo-v2-pro",
         ProviderKind::Anthropic => "claude-sonnet-4-20250514",
         ProviderKind::Ollama => "llama3.1:8b",
     }

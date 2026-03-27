@@ -41,8 +41,6 @@ pub struct ProjectRegistry {
     pub config_project_names: Vec<String>,
     /// Watchdog rules config (for IPC query).
     pub watchdog_rules_config: Vec<serde_json::Value>,
-    /// Latest Claude Code rate limit info.
-    pub rate_limit: std::sync::Mutex<Option<serde_json::Value>>,
 }
 
 impl ProjectRegistry {
@@ -62,7 +60,6 @@ impl ProjectRegistry {
             conversation_store: None,
             config_project_names: Vec::new(),
             watchdog_rules_config: Vec::new(),
-            rate_limit: std::sync::Mutex::new(None),
         }
     }
 

@@ -282,20 +282,6 @@ pub(crate) async fn cmd_doctor(
                     println!("[WARN] Data dir missing: {}", data_dir.display());
                 }
             }
-
-            let claude_required = config.projects.iter().any(|p| {
-                config.execution_mode_for_project(&p.name) == sigil_core::ExecutionMode::ClaudeCode
-            }) || config.agents.iter().any(|a| {
-                config.execution_mode_for_agent(&a.name) == sigil_core::ExecutionMode::ClaudeCode
-            });
-            if claude_required {
-                if command_on_path("claude") {
-                    println!("[OK] Claude Code CLI available");
-                } else {
-                    println!("[WARN] Claude Code runtime selected but `claude` is not on PATH");
-                    issues_found += 1;
-                }
-            }
         }
         Err(e) => {
             println!("[FAIL] Config: {e}");
@@ -322,9 +308,4 @@ pub(crate) async fn cmd_doctor(
     }
 
     Ok(())
-}
-
-fn command_on_path(command: &str) -> bool {
-    std::env::var_os("PATH")
-        .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(command).exists()))
 }

@@ -21,7 +21,7 @@ pub struct CostEntry {
     pub cost_usd: f64,
     pub turns: u32,
     pub timestamp: DateTime<Utc>,
-    /// "claude_code" or "openrouter" — Claude Code with Max subscription = $0 actual cost.
+    /// Execution source label (for example: "agent" or a provider-specific tag).
     #[serde(default = "default_source")]
     pub source: String,
     /// Token count (input + output) for tracking usage regardless of cost.
@@ -30,7 +30,7 @@ pub struct CostEntry {
 }
 
 fn default_source() -> String {
-    "claude_code".to_string()
+    "agent".to_string()
 }
 
 impl CostEntry {
@@ -43,7 +43,7 @@ impl CostEntry {
             cost_usd,
             turns,
             timestamp: chrono::Utc::now(),
-            source: "claude_code".to_string(),
+            source: "agent".to_string(),
             tokens: 0,
         }
     }

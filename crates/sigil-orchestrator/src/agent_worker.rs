@@ -15,7 +15,7 @@ use crate::audit::{AuditEvent, AuditLog, DecisionType};
 use crate::blackboard::Blackboard;
 use crate::checkpoint::AgentCheckpoint;
 use crate::execution_events::{EventBroadcaster, ExecutionEvent};
-use crate::executor::{ClaudeCodeExecutor, TaskOutcome};
+use crate::executor::TaskOutcome;
 use crate::failure_analysis::{FailureAnalysis, FailureMode};
 use crate::hook::Hook;
 use crate::message::{Dispatch, DispatchBus, DispatchKind};
@@ -33,14 +33,12 @@ pub enum WorkerState {
 
 /// How a worker executes its assigned task.
 pub enum WorkerExecution {
-    /// Internal Agent loop (current behavior): LLM API calls with basic tools.
+    /// Native Sigil agent loop.
     Agent {
         provider: Arc<dyn sigil_core::traits::Provider>,
         tools: Vec<Arc<dyn Tool>>,
         model: String,
     },
-    /// Claude Code CLI subprocess: full Edit, Grep, Glob, context compression.
-    ClaudeCode(ClaudeCodeExecutor),
 }
 
 /// An AgentWorker is an ephemeral task executor. Each worker runs as a tokio task
@@ -127,44 +125,6 @@ impl AgentWorker {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn new_claude_code(
-        agent_name: String,
-        name: String,
-        project_name: String,
-        executor: ClaudeCodeExecutor,
-        identity: Identity,
-        dispatch_bus: Arc<DispatchBus>,
-        tasks: Arc<Mutex<sigil_tasks::TaskBoard>>,
-        task_notify: Arc<Notify>,
-    ) -> Self {
-        let project_dir = Some(executor.workdir().to_path_buf());
-        Self {
-            agent_name,
-            name,
-            project_name,
-            state: WorkerState::Idle,
-            hook: None,
-            execution: WorkerExecution::ClaudeCode(executor),
-            identity,
-            dispatch_bus,
-            tasks,
-            task_notify,
-            memory: None,
-            reflect_provider: None,
-            reflect_model: String::new(),
-            project_dir,
-            max_task_retries: 3,
-            blackboard: None,
-            audit_log: None,
-            adaptive_retry: false,
-            failure_analysis_model: String::new(),
-            middleware_chain: None,
-            event_broadcaster: None,
-            write_queue: None,
-        }
-    }
-
     pub fn with_memory(mut self, memory: Arc<dyn Memory>) -> Self {
         self.memory = Some(memory);
         self
@@ -210,23 +170,9 @@ impl AgentWorker {
         self.write_queue = Some(queue);
     }
 
-    /// Get the child PID tracker (for process group kill on timeout).
-    /// Returns a zero-valued AtomicU32 for Agent mode.
-    pub fn child_pid(&self) -> std::sync::Arc<std::sync::atomic::AtomicU32> {
-        match &self.execution {
-            WorkerExecution::ClaudeCode(executor) => executor.child_pid.clone(),
-            WorkerExecution::Agent { .. } => {
-                std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0))
-            }
-        }
-    }
-
-    /// Get the working directory for this worker (from executor or project_dir).
+    /// Get the working directory for this worker.
     fn workdir(&self) -> Option<&std::path::Path> {
-        match &self.execution {
-            WorkerExecution::ClaudeCode(executor) => Some(executor.workdir()),
-            WorkerExecution::Agent { .. } => self.project_dir.as_deref(),
-        }
+        self.project_dir.as_deref()
     }
 
     /// Capture an external checkpoint by inspecting git state in the worker's workdir.
@@ -376,7 +322,7 @@ impl AgentWorker {
         }
     }
 
-    /// Execute the hooked work. Dispatches to Agent or Claude Code based on execution mode.
+    /// Execute the hooked work through the native Sigil agent runtime.
     /// Returns (outcome, cost_usd, turns_used) for the Supervisor to record.
     pub async fn execute(&mut self) -> Result<(TaskOutcome, f64, u32)> {
         let hook = match &self.hook {
@@ -448,10 +394,7 @@ impl AgentWorker {
             worker = %self.name,
             task = %hook.task_id,
             subject = %hook.subject,
-            mode = match &self.execution {
-                WorkerExecution::Agent { .. } => "agent",
-                WorkerExecution::ClaudeCode(_) => "claude_code",
-            },
+            mode = "agent",
             "starting work"
         );
 
@@ -605,15 +548,10 @@ impl AgentWorker {
                     );
                     (agent_result.text, cost, agent_result.iterations)
                 }),
-            WorkerExecution::ClaudeCode(executor) => {
-                self.execute_claude_code(executor, &task_context, &enriched_identity)
-                    .await
-            }
         };
 
-        // Fire-and-forget reflection for Agent mode (ClaudeCode mode triggers its own).
-        if matches!(self.execution, WorkerExecution::Agent { .. })
-            && let Ok((ref result_text, _, _)) = raw_result
+        // Fire-and-forget reflection so the worker slot does not wait on memory extraction.
+        if let Ok((ref result_text, _, _)) = raw_result
             && let (Some(mem), Some(provider)) =
                 (self.memory.clone(), self.reflect_provider.clone())
         {
@@ -1057,56 +995,6 @@ impl AgentWorker {
         agent.run(task_context).await
     }
 
-    /// Execute via Claude Code CLI subprocess. Returns (text, cost_usd, turns_used).
-    async fn execute_claude_code(
-        &self,
-        executor: &ClaudeCodeExecutor,
-        task_context: &str,
-        identity: &Identity,
-    ) -> Result<(String, f64, u32)> {
-        let result = executor.execute(identity, task_context).await?;
-
-        info!(
-            worker = %self.name,
-            turns = result.num_turns,
-            cost_usd = result.total_cost_usd,
-            duration_ms = result.duration_ms,
-            "claude code execution completed"
-        );
-
-        // Persist latest rate limit info for dashboard visibility.
-        if let Some(ref rl) = result.rate_limit {
-            let rl_json = serde_json::json!({
-                "status": rl.status,
-                "resets_at": rl.resets_at,
-                "rate_limit_type": rl.rate_limit_type,
-                "overage_status": rl.overage_status,
-                "updated_at": chrono::Utc::now().to_rfc3339(),
-            });
-            if let Ok(data_dir) =
-                std::env::var("HOME").map(|h| std::path::PathBuf::from(h).join(".sigil"))
-            {
-                let _ = std::fs::write(
-                    data_dir.join("rate_limit.json"),
-                    serde_json::to_string_pretty(&rl_json).unwrap_or_default(),
-                );
-            }
-        }
-
-        // Fire-and-forget reflection — don't block the worker slot.
-        if let (Some(mem), Some(provider)) = (self.memory.clone(), self.reflect_provider.clone()) {
-            let task_ctx = task_context.to_string();
-            let result_text = result.result_text.clone();
-            let model = self.reflect_model.clone();
-            let name = self.agent_name.clone();
-            tokio::spawn(async move {
-                Self::reflect_detached(name, task_ctx, result_text, model, mem, provider).await;
-            });
-        }
-
-        Ok((result.result_text, result.total_cost_usd, result.num_turns))
-    }
-
     /// Detached reflection — runs in a separate tokio task, no &self needed.
     async fn reflect_detached(
         worker_name: String,
@@ -1288,9 +1176,7 @@ impl AgentWorker {
 
                     // Create memory graph edge if dedup detected a relationship.
                     if let Some((relation, target_id)) = supersede_target {
-                        if let Err(e) = mem
-                            .store_memory_edge(&id, &target_id, relation, 0.8)
-                            .await
+                        if let Err(e) = mem.store_memory_edge(&id, &target_id, relation, 0.8).await
                         {
                             debug!(worker = %worker_name, "failed to store edge: {e}");
                         } else {

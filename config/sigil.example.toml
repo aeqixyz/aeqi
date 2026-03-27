@@ -8,8 +8,7 @@ data_dir = "~/.sigil"
 
 [providers.openrouter]
 api_key = "${OPENROUTER_API_KEY}"
-default_model = "minimax/minimax-m2.5"
-fallback_model = "deepseek/deepseek-v3.2"
+default_model = "xiaomi/mimo-v2-pro"
 # embedding_model = "openai/text-embedding-3-small"
 
 # [providers.anthropic]
@@ -31,7 +30,7 @@ default_interval_minutes = 30
 # Agent lifecycle engine — autonomous reflection, evolution, proactive scanning
 [lifecycle]
 enabled = false
-model = "minimax/MiniMax-M1"
+model = "xiaomi/mimo-v2-pro"
 
 # Global repo pool — all agents can access all repos
 [repos]
@@ -41,7 +40,7 @@ my-project = "/path/to/your/project"
 [team]
 leader = "leader"
 agents = ["leader"]
-router_model = "google/gemini-2.0-flash-001"
+router_model = "xiaomi/mimo-v2-pro"
 router_cooldown_secs = 60
 max_background_cost_usd = 0.50
 
@@ -106,7 +105,7 @@ max_background_cost_usd = 0.50
 # max_task_retries = 3          # handoff/failure retries before auto-cancel
 # shell_timeout_secs = 30       # shell tool timeout
 # max_description_chars = 8000  # task description truncation limit
-# executor_max_retries = 3      # Claude Code transient failure retries
+# executor_max_retries = 3      # worker execution transient failure retries
 # dispatch_ttl_secs = 3600      # dispatch message TTL
 # council_max_rounds = 1        # max council debate rounds
 # expertise_routing = false     # enable expertise-based smart routing (v3)
@@ -130,9 +129,9 @@ max_background_cost_usd = 0.50
 name = "my-project"
 prefix = "mp"
 repo = "/path/to/your/project"
-model = "claude-sonnet-4-6"
+model = "xiaomi/mimo-v2-pro"
 max_workers = 2
-execution_mode = "claude_code"
+execution_mode = "agent"
 worker_timeout_secs = 1800
 # team.org = "core"
 # team.unit = "control-plane"

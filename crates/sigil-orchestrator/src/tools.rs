@@ -455,8 +455,8 @@ impl Tool for ChannelReplyTool {
     }
 }
 
-/// Tool that surfaces Claude Code session costs, OpenRouter key usage, and
-/// per-project worker execution costs aggregated from `~/.sigil/usage.jsonl`.
+/// Tool that surfaces OpenRouter key usage and per-project worker execution
+/// costs aggregated from `~/.sigil/usage.jsonl`.
 pub struct UsageStatsTool {
     api_key: Option<String>,
 }
@@ -471,13 +471,6 @@ impl UsageStatsTool {
 impl Tool for UsageStatsTool {
     async fn execute(&self, _args: serde_json::Value) -> Result<ToolResult> {
         let mut output = String::new();
-
-        output.push_str("**Claude Code Lifetime Usage**\n");
-        match collect_claude_usage().await {
-            Ok(s) => output.push_str(&s),
-            Err(_) => output.push_str("  (not available — ~/.claude.json missing)\n"),
-        }
-        output.push('\n');
 
         output.push_str("**OpenRouter API Key**\n");
         match &self.api_key {
@@ -501,7 +494,9 @@ impl Tool for UsageStatsTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "usage_stats".to_string(),
-            description: "Get Claude Code session costs, OpenRouter API key credit usage, and per-project worker execution costs.".to_string(),
+            description:
+                "Get OpenRouter API key credit usage and per-project worker execution costs."
+                    .to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {}
@@ -512,58 +507,6 @@ impl Tool for UsageStatsTool {
     fn name(&self) -> &str {
         "usage_stats"
     }
-}
-
-/// Read Claude Code's ~/.claude.json and return a formatted usage summary.
-pub async fn collect_claude_usage() -> Result<String> {
-    let path = dirs::home_dir()
-        .context("no home directory")?
-        .join(".claude.json");
-
-    let content = tokio::fs::read_to_string(&path)
-        .await
-        .context("failed to read ~/.claude.json")?;
-
-    let v: serde_json::Value =
-        serde_json::from_str(&content).context("failed to parse ~/.claude.json")?;
-
-    let mut out = String::new();
-
-    if let Some(total) = v.get("lastCost").and_then(|c| c.as_f64()) {
-        out.push_str(&format!("  Total: ${total:.2}\n"));
-    }
-
-    if let Some(model_usage) = v.get("lastModelUsage").and_then(|m| m.as_object()) {
-        let mut models: Vec<_> = model_usage.iter().collect();
-        models.sort_by(|a, b| {
-            let ac = a.1.get("cost").and_then(|c| c.as_f64()).unwrap_or(0.0);
-            let bc = b.1.get("cost").and_then(|c| c.as_f64()).unwrap_or(0.0);
-            bc.partial_cmp(&ac).unwrap_or(std::cmp::Ordering::Equal)
-        });
-        for (model, usage) in &models {
-            let input = usage
-                .get("inputTokens")
-                .and_then(|t| t.as_u64())
-                .unwrap_or(0);
-            let output = usage
-                .get("outputTokens")
-                .and_then(|t| t.as_u64())
-                .unwrap_or(0);
-            let cache_read = usage
-                .get("cacheReadInputTokens")
-                .and_then(|t| t.as_u64())
-                .unwrap_or(0);
-            let cost = usage.get("cost").and_then(|c| c.as_f64()).unwrap_or(0.0);
-            out.push_str(&format!(
-                "  {model}: {}k in / {}k out (cache: {}k read) — ${cost:.2}\n",
-                input / 1000,
-                output / 1000,
-                cache_read / 1000,
-            ));
-        }
-    }
-
-    Ok(out)
 }
 
 /// Query OpenRouter /api/v1/auth/key and return a formatted credit summary.

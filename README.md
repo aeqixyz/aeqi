@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/0xAEQI/sigil/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/0xAEQI/sigil/actions/workflows/ci.yml)
 
-**Proactive AI.** The agent orchestrator that doesn't wait. It routes to the right agents, executes via Claude Code, verifies its own work, learns from results, and messages you with what got done.
+**Proactive AI.** The agent orchestrator that doesn't wait. It routes to the right agents, executes through Sigil's native agent runtime, verifies its own work, learns from results, and messages you with what got done.
 
 ## What It Does
 
@@ -31,7 +31,7 @@ Intent → Understand → Orchestrate → Execute → Verify → Learn → Proac
 
 ```bash
 cargo build --release
-sigil setup --runtime openrouter_claude_code
+sigil setup --runtime openrouter_agent
 sigil daemon start    # orchestration daemon
 sigil web start       # web API on :8400
 ```

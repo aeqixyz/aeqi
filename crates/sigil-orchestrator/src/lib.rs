@@ -5,8 +5,8 @@
 //! dispatch bus ([`DispatchBus`]), cost ledger ([`CostLedger`]), Prometheus metrics
 //! ([`SigilMetrics`]), lifecycle engine ([`LifecycleEngine`]), and conversation storage.
 //!
-//! Workers spawn via Claude Code (`claude -p`) with full tool access. The supervisor
-//! enforces budgets and escalation chains (worker → project leader → system leader → human).
+//! Workers run through Sigil's native agent loop. The supervisor enforces budgets
+//! and escalation chains (worker → project leader → system leader → human).
 
 pub mod agent_router;
 pub mod agent_worker;
@@ -28,6 +28,7 @@ pub mod expertise;
 pub mod failure_analysis;
 pub mod heartbeat;
 pub mod hook;
+pub mod intent;
 pub mod lifecycle;
 pub mod message;
 pub mod metrics;
@@ -62,7 +63,7 @@ pub use council::Council;
 pub use daemon::Daemon;
 pub use emotional_state::EmotionalState;
 pub use execution_events::{EventBroadcaster, ExecutionEvent};
-pub use executor::{ClaudeCodeExecutor, TaskOutcome};
+pub use executor::TaskOutcome;
 pub use expertise::ExpertiseLedger;
 pub use heartbeat::Heartbeat;
 pub use hook::Hook;

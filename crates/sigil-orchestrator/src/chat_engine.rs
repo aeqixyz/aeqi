@@ -197,6 +197,8 @@ pub struct ChatEngine {
     pub task_notify: Arc<tokio::sync::Notify>,
     /// Per-project memory stores for knowledge-aware chat.
     pub memory_stores: HashMap<String, Arc<dyn Memory>>,
+    /// LLM-backed intent classifier for ambiguous messages.
+    pub intent_classifier: Option<Arc<crate::intent::IntentClassifier>>,
 }
 
 impl ChatEngine {
@@ -448,6 +450,8 @@ impl ChatEngine {
     /// Handle a chat message (quick path): intent detection + status queries.
     /// Returns immediately. For messages that don't match an intent, returns None
     /// to signal the caller should use `handle_message_full` instead.
+    ///
+    /// Uses keyword fast path first, then LLM classifier for ambiguous messages.
     pub async fn handle_message(&self, msg: &ChatMessage) -> Option<ChatResponse> {
         if msg.message.is_empty() {
             return Some(ChatResponse::error("message is required"));
@@ -458,12 +462,12 @@ impl ChatEngine {
 
         let msg_lower = msg.message.to_lowercase();
 
-        // Intent: create task.
+        // ── Fast path: keyword matching (no API call) ──
+
+        // Intent: create task (explicit prefix).
         if msg_lower.starts_with("create task")
             || msg_lower.starts_with("new task")
             || msg_lower.starts_with("add task")
-            || msg_lower.contains("create a task")
-            || msg_lower.contains("add a task")
         {
             let response = self.handle_create_task(msg).await;
             self.record_exchange(msg, &response.context).await;
@@ -471,19 +475,15 @@ impl ChatEngine {
             return Some(response);
         }
 
-        // Intent: close task.
-        if msg_lower.starts_with("close task")
-            || msg_lower.starts_with("done with")
-            || msg_lower.contains("close task")
-            || msg_lower.contains("mark done")
-        {
+        // Intent: close task (explicit prefix).
+        if msg_lower.starts_with("close task") || msg_lower.starts_with("done with") {
             let response = self.handle_close_task(msg).await;
             self.record_exchange(msg, &response.context).await;
             self.record_response_action_event(msg, &response).await;
             return Some(response);
         }
 
-        // Intent: blackboard post.
+        // Intent: blackboard post (explicit prefix).
         if msg_lower.starts_with("note:")
             || msg_lower.starts_with("remember:")
             || msg_lower.starts_with("blackboard:")
@@ -494,7 +494,42 @@ impl ChatEngine {
             return Some(response);
         }
 
-        // No intent matched — caller should use handle_message_full.
+        // ── Slow path: LLM classification for ambiguous messages ──
+
+        if let Some(ref classifier) = self.intent_classifier {
+            use crate::intent::ChatIntent;
+            let intent = classifier.classify(&msg.message).await;
+            match intent {
+                ChatIntent::CreateTask => {
+                    let response = self.handle_create_task(msg).await;
+                    self.record_exchange(msg, &response.context).await;
+                    self.record_response_action_event(msg, &response).await;
+                    return Some(response);
+                }
+                ChatIntent::CloseTask => {
+                    let response = self.handle_close_task(msg).await;
+                    self.record_exchange(msg, &response.context).await;
+                    self.record_response_action_event(msg, &response).await;
+                    return Some(response);
+                }
+                ChatIntent::BlackboardPost => {
+                    let response = self.handle_blackboard_post(msg).await;
+                    self.record_exchange(msg, &response.context).await;
+                    self.record_response_action_event(msg, &response).await;
+                    return Some(response);
+                }
+                ChatIntent::StatusQuery => {
+                    // Status queries go to full path for comprehensive response.
+                    return None;
+                }
+                ChatIntent::FullPath | ChatIntent::Unknown => {
+                    // Complex or ambiguous — proceed to full path.
+                    return None;
+                }
+            }
+        }
+
+        // No classifier available — fall through to full path.
         None
     }
 
@@ -1616,6 +1651,7 @@ mod tests {
             pending_tasks: Arc::new(Mutex::new(HashMap::new())),
             task_notify: Arc::new(tokio::sync::Notify::new()),
             memory_stores: HashMap::new(),
+            intent_classifier: None,
         };
 
         (engine, project, registry, project_dir, conv_dir, conv_path)
@@ -1828,6 +1864,7 @@ mod tests {
             pending_tasks: Arc::new(Mutex::new(HashMap::new())),
             task_notify: Arc::new(tokio::sync::Notify::new()),
             memory_stores: HashMap::new(),
+            intent_classifier: None,
         };
 
         let msg = ChatMessage {
@@ -2013,6 +2050,7 @@ mod tests {
             pending_tasks: Arc::new(Mutex::new(HashMap::new())),
             task_notify: Arc::new(tokio::sync::Notify::new()),
             memory_stores: HashMap::new(),
+            intent_classifier: None,
         };
 
         let project_scoped = engine

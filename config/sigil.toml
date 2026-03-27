@@ -10,8 +10,7 @@ auth_secret = "${SIGIL_WEB_SECRET}"
 
 [providers.openrouter]
 api_key = "${OPENROUTER_API_KEY}"
-default_model = "minimax/minimax-m2.5"
-fallback_model = "deepseek/deepseek-v3.2"
+default_model = "xiaomi/mimo-v2-pro"
 embedding_model = "openai/text-embedding-3-small"
 
 [security]
@@ -36,7 +35,7 @@ default_interval_minutes = 30
 # Agent lifecycle engine — autonomous reflection, evolution, proactive scanning
 [lifecycle]
 enabled = true
-model = "minimax/MiniMax-M1"
+model = "xiaomi/mimo-v2-pro"
 
 # Global repo pool — all agents can access all repos
 [repos]
@@ -56,11 +55,10 @@ unifutures = "/home/claudedev/unifutures"
 [team]
 leader = "rei"
 agents = ["rei"]
-router_model = "google/gemini-2.0-flash-001"
+router_model = "xiaomi/mimo-v2-pro"
 router_cooldown_secs = 60
 max_background_cost_usd = 0.50
 
-# Agents discovered from agents/{name}/agent.toml files on disk.
 # Agents discovered from agents/{name}/agent.toml files on disk.
 # Active: rei, engineer, trader, designer, researcher, reviewer
 
@@ -73,11 +71,11 @@ debounce_window_ms = 3000
 [orchestrator]
 expertise_routing = true
 adaptive_retry = true
-failure_analysis_model = "minimax/minimax-m2.5"
+failure_analysis_model = "xiaomi/mimo-v2-pro"
 preflight_enabled = true
-preflight_model = "minimax/minimax-m2.5"
+preflight_model = "xiaomi/mimo-v2-pro"
 preflight_max_cost_usd = 0.02
-decomposition_model = "minimax/minimax-m2.5"
+decomposition_model = "xiaomi/mimo-v2-pro"
 auto_redecompose = true
 infer_deps_threshold = 0.6
 blackboard_transient_ttl_hours = 48
@@ -155,10 +153,10 @@ message = "3+ worker timeouts across projects in 30 minutes"
 name = "sigil"
 prefix = "sg"
 repo = "/home/claudedev/sigil"
-model = "claude-opus-4-6"
+model = "xiaomi/mimo-v2-pro"
 max_workers = 2
 worktree_root = "/home/claudedev/worktrees"
-execution_mode = "claude_code"
+execution_mode = "agent"
 max_turns = 25
 worker_timeout_secs = 3600
 team.leader = "engineer"
@@ -181,10 +179,10 @@ description = "Web dashboard, UX, landing page"
 name = "algostaking"
 prefix = "as"
 repo = "/home/claudedev/algostaking-backend"
-model = "claude-opus-4-6"
+model = "xiaomi/mimo-v2-pro"
 max_workers = 3
 worktree_root = "/home/claudedev/worktrees"
-execution_mode = "claude_code"
+execution_mode = "agent"
 max_turns = 50
 worker_timeout_secs = 1800
 team.leader = "trader"
@@ -213,9 +211,9 @@ description = "Model evaluation, feature research, backtesting"
 name = "aeqi"
 prefix = "aq"
 repo = "/home/claudedev/aeqi-core"
-model = "claude-opus-4-6"
+model = "xiaomi/mimo-v2-pro"
 max_workers = 2
-execution_mode = "claude_code"
+execution_mode = "agent"
 worker_timeout_secs = 1800
 team.leader = "engineer"
 team.agents = ["engineer", "designer"]
@@ -225,9 +223,9 @@ team.agents = ["engineer", "designer"]
 name = "riftdecks-shop"
 prefix = "rd"
 repo = "/home/claudedev/riftdecks"
-model = "claude-opus-4-6"
+model = "xiaomi/mimo-v2-pro"
 max_workers = 2
-execution_mode = "claude_code"
+execution_mode = "agent"
 worker_timeout_secs = 1800
 team.leader = "designer"
 team.agents = ["designer"]
@@ -237,9 +235,9 @@ team.agents = ["designer"]
 name = "entity-legal"
 prefix = "el"
 repo = "/home/claudedev/sigil/projects/entity-legal/web"
-model = "claude-opus-4-6"
+model = "xiaomi/mimo-v2-pro"
 max_workers = 2
-execution_mode = "claude_code"
+execution_mode = "agent"
 worker_timeout_secs = 1800
 team.leader = "designer"
 team.agents = ["designer"]
@@ -249,9 +247,9 @@ team.agents = ["designer"]
 name = "unifutures"
 prefix = "uf"
 repo = "/home/claudedev/unifutures"
-model = "claude-opus-4-6"
+model = "xiaomi/mimo-v2-pro"
 max_workers = 1
-execution_mode = "claude_code"
+execution_mode = "agent"
 worker_timeout_secs = 1800
 team.leader = "engineer"
 team.agents = ["engineer"]

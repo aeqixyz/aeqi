@@ -121,7 +121,7 @@ pub struct OpenRouterConfig {
 }
 
 fn default_openrouter_model() -> String {
-    "anthropic/claude-sonnet-4.6".to_string()
+    "xiaomi/mimo-v2-pro".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -384,7 +384,7 @@ impl Default for TeamConfig {
         Self {
             leader: "leader".to_string(),
             agents: Vec::new(),
-            router_model: "google/gemini-2.0-flash-001".to_string(),
+            router_model: default_router_model(),
             router_cooldown_secs: 60,
             max_background_cost_usd: 0.50,
         }
@@ -426,7 +426,7 @@ fn default_leader() -> String {
     "leader".to_string()
 }
 fn default_router_model() -> String {
-    "google/gemini-2.0-flash-001".to_string()
+    "xiaomi/mimo-v2-pro".to_string()
 }
 fn default_router_cooldown() -> u64 {
     60
@@ -840,7 +840,7 @@ pub struct OrchestratorConfig {
     /// Max task description size in chars before truncation.
     #[serde(default = "default_max_description_chars")]
     pub max_description_chars: usize,
-    /// Max retries for Claude Code executor on transient failures.
+    /// Max retries for transient worker execution failures.
     #[serde(default = "default_executor_max_retries")]
     pub executor_max_retries: u32,
     /// Dispatch TTL in seconds.
@@ -979,11 +979,10 @@ fn default_preflight_max_cost_usd() -> f64 {
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionMode {
-    /// Lightweight internal agent loop (for orchestration/triage).
+    /// Native Sigil agent loop.
     #[default]
+    #[serde(alias = "claude_code")]
     Agent,
-    /// Spawn Claude Code CLI instance (for real code work).
-    ClaudeCode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1070,19 +1069,21 @@ fn default_worker_timeout() -> u64 {
 
 impl SigilConfig {
     fn built_in_runtime_preset(name: &str) -> Option<RuntimePresetConfig> {
-        let (provider, execution_mode) = match name {
+        let provider = match name {
             "openrouter_agent" => (ProviderKind::OpenRouter, ExecutionMode::Agent),
-            "openrouter_claude_code" => (ProviderKind::OpenRouter, ExecutionMode::ClaudeCode),
             "anthropic_agent" => (ProviderKind::Anthropic, ExecutionMode::Agent),
-            "anthropic_claude_code" => (ProviderKind::Anthropic, ExecutionMode::ClaudeCode),
             "ollama_agent" => (ProviderKind::Ollama, ExecutionMode::Agent),
-            "ollama_claude_code" => (ProviderKind::Ollama, ExecutionMode::ClaudeCode),
+            // Legacy preset names retained as aliases so existing configs degrade
+            // cleanly to the native Sigil agent runtime.
+            "openrouter_claude_code" => (ProviderKind::OpenRouter, ExecutionMode::Agent),
+            "anthropic_claude_code" => (ProviderKind::Anthropic, ExecutionMode::Agent),
+            "ollama_claude_code" => (ProviderKind::Ollama, ExecutionMode::Agent),
             _ => return None,
         };
 
         Some(RuntimePresetConfig {
-            provider,
-            execution_mode: Some(execution_mode),
+            provider: provider.0,
+            execution_mode: Some(provider.1),
             model: None,
         })
     }
@@ -2792,10 +2793,10 @@ role = "orchestrator"
             name: "test".to_string(),
             prefix: "tt".to_string(),
             model: Some("claude-opus-4-6".to_string()),
-            runtime: Some("anthropic_claude_code".to_string()),
+            runtime: Some("anthropic_agent".to_string()),
             role: AgentRole::Advisor,
             voice: AgentVoice::Vocal,
-            execution_mode: ExecutionMode::ClaudeCode,
+            execution_mode: ExecutionMode::Agent,
             max_workers: 2,
             max_turns: Some(15),
             max_budget_usd: Some(1.0),
@@ -2811,9 +2812,9 @@ role = "orchestrator"
         assert_eq!(loaded.name, "test");
         assert_eq!(loaded.prefix, "tt");
         assert_eq!(loaded.model.as_deref(), Some("claude-opus-4-6"));
-        assert_eq!(loaded.runtime.as_deref(), Some("anthropic_claude_code"));
+        assert_eq!(loaded.runtime.as_deref(), Some("anthropic_agent"));
         assert_eq!(loaded.role, AgentRole::Advisor);
-        assert_eq!(loaded.execution_mode, ExecutionMode::ClaudeCode);
+        assert_eq!(loaded.execution_mode, ExecutionMode::Agent);
         assert_eq!(loaded.max_workers, 2);
         assert_eq!(loaded.max_turns, Some(15));
         assert_eq!(loaded.expertise, vec!["testing"]);
@@ -2824,7 +2825,7 @@ role = "orchestrator"
         let toml = r#"
 [sigil]
 name = "test"
-default_runtime = "anthropic_claude_code"
+default_runtime = "anthropic_agent"
 
 [providers.anthropic]
 api_key = "${ANTHROPIC_API_KEY}"
@@ -2846,7 +2847,7 @@ repo = "/tmp/sigil"
         assert_eq!(project_runtime.provider, ProviderKind::Anthropic);
         assert_eq!(
             config.execution_mode_for_project("sigil"),
-            ExecutionMode::ClaudeCode
+            ExecutionMode::Agent
         );
         assert_eq!(
             config.model_for_project("sigil"),
@@ -2857,7 +2858,41 @@ repo = "/tmp/sigil"
         assert_eq!(agent_runtime.provider, ProviderKind::Anthropic);
         assert_eq!(
             config.execution_mode_for_agent("leader"),
-            ExecutionMode::ClaudeCode
+            ExecutionMode::Agent
+        );
+    }
+
+    #[test]
+    fn test_legacy_claude_runtime_alias_resolves_to_agent_mode() {
+        let toml = r#"
+[sigil]
+name = "test"
+default_runtime = "anthropic_claude_code"
+
+[providers.anthropic]
+api_key = "${ANTHROPIC_API_KEY}"
+default_model = "claude-sonnet-4-20250514"
+
+[[agents]]
+name = "leader"
+prefix = "ld"
+role = "orchestrator"
+
+[[projects]]
+name = "sigil"
+prefix = "sg"
+repo = "/tmp/sigil"
+execution_mode = "claude_code"
+"#;
+        let config = SigilConfig::parse(toml).unwrap();
+
+        assert_eq!(
+            config.execution_mode_for_project("sigil"),
+            ExecutionMode::Agent
+        );
+        assert_eq!(
+            config.execution_mode_for_agent("leader"),
+            ExecutionMode::Agent
         );
     }
 

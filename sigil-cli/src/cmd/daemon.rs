@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use sigil_core::config::TelegramChatRouteConfig;
 use sigil_core::traits::{Channel, Memory};
-use sigil_core::{ExecutionMode, Identity, SecretStore};
+use sigil_core::{Identity, SecretStore};
 use sigil_gates::TelegramChannel;
 use sigil_orchestrator::tools::build_orchestration_tools;
 use sigil_orchestrator::{
@@ -192,25 +192,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     .unwrap_or_default();
                 witness.skills_dirs = vec![project_skills_dir, shared_skills_dir];
 
-                // Configure execution mode for workers.
-                if config.execution_mode_for_project(&project_cfg.name) == ExecutionMode::ClaudeCode
-                {
-                    let cc_model = config.model_for_project(&project_cfg.name);
-                    let cc_max_turns = project_cfg.max_turns.unwrap_or(25);
-                    witness.set_claude_code_mode(
-                        rig.repo.clone(),
-                        cc_model,
-                        cc_max_turns,
-                        project_cfg.max_budget_usd,
-                    );
-                    info!(
-                        project = %project_cfg.name,
-                        model = %witness.model,
-                        max_turns = cc_max_turns,
-                        team_leader = %witness.escalation_target,
-                        "registered with claude_code execution mode"
-                    );
-                }
+                witness.worker_max_budget_usd = project_cfg.max_budget_usd;
 
                 registry.register_project(rig.clone(), witness).await;
 
@@ -288,14 +270,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 );
                 agent_scout.event_broadcaster = Some(event_broadcaster.clone());
 
-                if config.execution_mode_for_agent(&agent_cfg.name) == ExecutionMode::ClaudeCode {
-                    agent_scout.set_claude_code_mode(
-                        agent_workdir.clone(),
-                        agent_model.clone(),
-                        agent_cfg.max_turns.unwrap_or(15),
-                        agent_cfg.max_budget_usd,
-                    );
-                }
+                agent_scout.worker_max_budget_usd = agent_cfg.max_budget_usd;
 
                 // Wire memory + reflection for advisor agents (same pattern as project supervisors).
                 if let Ok(mem) = open_memory(&config, Some(&agent_cfg.name)) {
@@ -348,6 +323,17 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             // Build the unified ChatEngine.
             let council_advisors: Arc<Vec<sigil_core::config::PeerAgentConfig>> =
                 Arc::new(config.advisor_agents().into_iter().cloned().collect());
+            // Build intent classifier if OpenRouter key is available.
+            let intent_classifier = if !classifier_api_key.is_empty() {
+                let model = config.team.router_model.clone();
+                Some(Arc::new(sigil_orchestrator::intent::IntentClassifier::new(
+                    classifier_api_key.clone(),
+                    model,
+                )))
+            } else {
+                None
+            };
+
             let chat_engine = registry.conversation_store.as_ref().map(|cs| {
                 Arc::new(sigil_orchestrator::ChatEngine {
                     conversations: cs.clone(),
@@ -358,6 +344,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     pending_tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                     task_notify: fa_task_notify.clone(),
                     memory_stores: chat_memory_stores,
+                    intent_classifier,
                 })
             });
 
@@ -556,23 +543,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 fa_witness.emotional_state_path = Some(emo_path);
             }
 
-            // Configure Claude Code execution mode for leader agent.
-            if config.execution_mode_for_agent(&leader_name) == ExecutionMode::ClaudeCode {
-                let cc_model = config.model_for_agent(&leader_name);
-                let cc_max_turns = leader_cfg.max_turns.unwrap_or(25);
-                fa_witness.set_claude_code_mode(
-                    fa_workdir.clone(),
-                    cc_model.clone(),
-                    cc_max_turns,
-                    leader_cfg.max_budget_usd,
-                );
-                info!(
-                    agent = %leader_name,
-                    model = %cc_model,
-                    max_turns = cc_max_turns,
-                    "registered leader agent with claude_code execution mode"
-                );
-            }
+            fa_witness.worker_max_budget_usd = leader_cfg.max_budget_usd;
 
             registry.register_project(fa_rig, fa_witness).await;
 

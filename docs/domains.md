@@ -7,7 +7,7 @@ A **project** is an isolated business unit in Sigil. Each project has its own:
 - Memory database (`.sigil/memory.db` -- SQLite + FTS5)
 - Identity files (PERSONA.md, IDENTITY.md, AGENTS.md, KNOWLEDGE.md)
 - Skills and workflow templates (pipelines)
-- Worker pool (concurrent Claude Code executors)
+- Worker pool (concurrent Sigil native workers)
 - Checkpoints (`.sigil/checkpoints/` -- worker work-in-progress)
 
 ## Creating a Project
@@ -21,9 +21,9 @@ In `config/sigil.toml`:
 name = "myproject"
 prefix = "mp"                                    # Task ID prefix (mp-001, mp-002, ...)
 repo = "/home/user/myproject"                    # Git repo path
-model = "claude-sonnet-4-6"                      # LLM model for workers
+model = "xiaomi/mimo-v2-pro"                     # LLM model for workers
 max_workers = 3                                  # Max concurrent workers
-execution_mode = "claude_code"                   # "claude_code" or "agent"
+execution_mode = "agent"                         # native Sigil worker runtime
 worker_timeout_secs = 1800                       # 30 min timeout for hung workers
 worktree_root = "/home/user/worktrees"           # Git worktree root (optional)
 max_turns = 25                                   # Max agentic turns per worker
@@ -210,7 +210,7 @@ When a worker executes, its system prompt is built from these layers (in order):
 6. WORKER_PROTOCOL              (output format: DONE/BLOCKED/FAILED)
 7. Checkpoint context           (max 8k chars, 5 most recent)
 8. Memory recall                (relevant memories from SQLite)
-9. Repo CLAUDE.md               (auto-discovered by Claude Code via --cwd)
+9. Repo-local operating context (project identity and knowledge files)
 ```
 
 Total budget: ~40k chars (~10k tokens). The `ContextBudget` system truncates layers at newline boundaries and summarizes old checkpoints as one-liners.

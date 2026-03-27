@@ -384,8 +384,7 @@ impl TaskBoard {
         counts
     }
 
-    /// Reload all tasks from disk, picking up externally-created tasks
-    /// (e.g., from `rm assign` CLI or Claude Code workers).
+    /// Reload all tasks from disk, picking up externally-created tasks.
     /// Compacts all prefix files after reload to remove duplicate entries.
     pub fn reload(&mut self) -> Result<()> {
         self.tasks.clear();

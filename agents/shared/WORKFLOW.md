@@ -69,7 +69,7 @@ Task triage is the orchestrator's job. If tasks have dependencies, sequence them
 
 ## Sub-Agent Orchestration
 
-Workers have full access to Claude Code's Agent tool. Each worker IS an orchestrator.
+Workers should use Sigil's delegation and tooling surfaces aggressively when available. Each worker IS an orchestrator.
 
 ### Adaptive Pipeline
 

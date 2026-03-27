@@ -16,8 +16,8 @@ pub enum Commands {
     Init,
     /// Bootstrap a ready-to-run Sigil workspace.
     Setup {
-        /// Default runtime preset (for example: openrouter_claude_code, anthropic_agent, ollama_agent).
-        #[arg(long, default_value = "openrouter_claude_code")]
+        /// Default runtime preset (for example: openrouter_agent, anthropic_agent, ollama_agent).
+        #[arg(long, default_value = "openrouter_agent")]
         runtime: String,
         /// Install a per-user daemon service after bootstrapping the workspace.
         #[arg(long)]
@@ -215,7 +215,7 @@ pub enum Commands {
         action: WebAction,
     },
 
-    /// Run as MCP (Model Context Protocol) server for Claude Code integration.
+    /// Run as an MCP (Model Context Protocol) server.
     Mcp,
 }
 

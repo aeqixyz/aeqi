@@ -1,5 +1,5 @@
 use anyhow::Result;
-use sigil_core::config::{ExecutionMode, ProjectTeamConfig};
+use sigil_core::config::ProjectTeamConfig;
 use sigil_core::traits::{
     Channel, ChatRequest, Memory, Message, MessageContent, OutgoingMessage, Provider, Role, Tool,
 };
@@ -17,7 +17,7 @@ use crate::decomposition::DecompositionResult;
 use crate::emotional_state::EmotionalState;
 use crate::escalation::{EscalationPolicy, EscalationTracker};
 use crate::execution_events::EventBroadcaster;
-use crate::executor::{ClaudeCodeExecutor, TaskOutcome};
+use crate::executor::TaskOutcome;
 use crate::expertise::{ExpertiseLedger, ExpertiseRecord, TaskOutcomeKind};
 use crate::message::{Dispatch, DispatchBus, DispatchKind};
 use crate::metrics::SigilMetrics;
@@ -39,12 +39,8 @@ struct TrackedWorker {
     handle: tokio::task::JoinHandle<()>,
     task_id: String,
     started_at: std::time::Instant,
-    /// PID of the Claude Code child process (for process group kill on timeout).
-    child_pid: std::sync::Arc<std::sync::atomic::AtomicU32>,
     /// Effective timeout for the running worker.
     timeout_secs: u64,
-    /// Real-time progress from the Claude Code executor.
-    progress_rx: Option<tokio::sync::watch::Receiver<crate::executor::ExecutionProgress>>,
 }
 
 /// Supervisor: per-rig supervisor. Runs patrol cycles, manages workers,
@@ -55,20 +51,14 @@ pub struct Supervisor {
     pub patrol_interval_secs: u64,
     pub dispatch_bus: Arc<DispatchBus>,
     pub tasks: Arc<Mutex<TaskBoard>>,
-    /// Execution mode for this rig's workers.
-    pub execution_mode: ExecutionMode,
-    // Agent-mode fields (used when execution_mode == Agent).
     pub provider: Arc<dyn Provider>,
     pub tools: Vec<Arc<dyn Tool>>,
     pub model: String,
     pub identity: sigil_core::Identity,
-    // ClaudeCode-mode fields (used when execution_mode == ClaudeCode).
-    /// Rig's repo path for Claude Code working directory.
+    /// Repo path used for checkpoint capture and verification context.
     pub repo: Option<std::path::PathBuf>,
-    /// Max turns per Claude Code execution.
-    pub cc_max_turns: u32,
-    /// Max budget per Claude Code execution.
-    pub cc_max_budget_usd: Option<f64>,
+    /// Optional per-worker budget passed into middleware cost tracking.
+    pub worker_max_budget_usd: Option<f64>,
     /// Background worker tasks with age tracking.
     running_tasks: Vec<TrackedWorker>,
     /// Timeout in seconds for worker execution. Hung workers are aborted after this.
@@ -221,14 +211,12 @@ impl Supervisor {
             patrol_interval_secs: 60,
             dispatch_bus,
             tasks: project.tasks.clone(),
-            execution_mode: ExecutionMode::Agent,
             provider,
             tools,
             model: project.model.clone(),
             identity: project.project_identity.clone(),
-            repo: None,
-            cc_max_turns: 25,
-            cc_max_budget_usd: None,
+            repo: Some(project.repo.clone()),
+            worker_max_budget_usd: None,
             running_tasks: Vec::new(),
             worker_timeout_secs: project.worker_timeout_secs,
             last_report: (0, 0),
@@ -278,21 +266,6 @@ impl Supervisor {
         self.team = Some(team);
     }
 
-    /// Set execution mode to Claude Code with rig-specific settings.
-    pub fn set_claude_code_mode(
-        &mut self,
-        repo: std::path::PathBuf,
-        model: String,
-        max_turns: u32,
-        max_budget_usd: Option<f64>,
-    ) {
-        self.execution_mode = ExecutionMode::ClaudeCode;
-        self.repo = Some(repo);
-        self.model = model;
-        self.cc_max_turns = max_turns;
-        self.cc_max_budget_usd = max_budget_usd;
-    }
-
     /// Look up a skill's system prompt by name from skills directories.
     /// Also extracts tool allow/deny lists and appends advisory restrictions to the prompt.
     fn load_skill_prompt(&self, skill_name: &str) -> Option<String> {
@@ -308,7 +281,7 @@ impl Supervisor {
             {
                 let mut prompt = system.to_string();
 
-                // Extract tool restrictions for advisory prompt injection (ClaudeCode mode).
+                // Extract tool restrictions for advisory prompt injection.
                 let allow: Vec<String> = value
                     .get("tools")
                     .and_then(|t| t.get("allow"))
@@ -365,17 +338,13 @@ impl Supervisor {
         None
     }
 
-    /// Create a worker based on the rig's execution mode.
-    /// Returns the worker and an optional progress receiver (ClaudeCode mode only).
+    /// Create a native Sigil worker for a task.
     async fn create_worker(
         &self,
         agent_name: String,
         worker_name: String,
         task: &sigil_tasks::Task,
-    ) -> (
-        AgentWorker,
-        Option<tokio::sync::watch::Receiver<crate::executor::ExecutionProgress>>,
-    ) {
+    ) -> AgentWorker {
         // Enrich identity with emotional state context if available.
         let identity = if let Some(ref emo) = self.emotional_state {
             let emo_guard = emo.lock().await;
@@ -393,49 +362,26 @@ impl Supervisor {
             self.identity.clone()
         };
 
-        let mut progress_rx = None;
-        let mut worker = match self.execution_mode {
-            ExecutionMode::Agent => AgentWorker::new(
-                agent_name.clone(),
-                worker_name,
-                self.project_name.clone(),
-                self.provider.clone(),
-                self.tools.clone(),
-                identity.clone(),
-                self.model.clone(),
-                self.dispatch_bus.clone(),
-                self.tasks.clone(),
-                self.task_notify.clone(),
-            ),
-            ExecutionMode::ClaudeCode => {
-                let workdir = self.repo.clone().unwrap_or_default();
-                // Use one generous turn budget for the adaptive pipeline.
-                let adaptive_turns = self.cc_max_turns.max(50);
-                let executor = ClaudeCodeExecutor::new(
-                    workdir,
-                    self.model.clone(),
-                    adaptive_turns,
-                    self.cc_max_budget_usd,
-                );
-                let (executor, rx) = executor.with_progress_channel();
-                progress_rx = Some(rx);
-                AgentWorker::new_claude_code(
-                    agent_name,
-                    worker_name,
-                    self.project_name.clone(),
-                    executor,
-                    identity.clone(),
-                    self.dispatch_bus.clone(),
-                    self.tasks.clone(),
-                    self.task_notify.clone(),
-                )
-            }
-        };
+        let mut worker = AgentWorker::new(
+            agent_name.clone(),
+            worker_name,
+            self.project_name.clone(),
+            self.provider.clone(),
+            self.tools.clone(),
+            identity.clone(),
+            self.model.clone(),
+            self.dispatch_bus.clone(),
+            self.tasks.clone(),
+            self.task_notify.clone(),
+        );
         if let Some(ref mem) = self.memory {
             worker = worker.with_memory(mem.clone());
         }
         if let Some(ref provider) = self.reflect_provider {
             worker = worker.with_reflect(provider.clone(), self.reflect_model.clone());
+        }
+        if let Some(ref repo) = self.repo {
+            worker = worker.with_project_dir(repo.clone());
         }
 
         // Pass adaptive retry config to the worker.
@@ -481,13 +427,11 @@ impl Supervisor {
                 );
             }
 
-            // For Agent mode: filter tools by skill allow/deny policy.
-            if matches!(self.execution_mode, ExecutionMode::Agent)
-                && let Some(skill) = self.load_skill(skill_name)
+            if let Some(skill) = self.load_skill(skill_name)
                 && (!skill.tools.allow.is_empty() || !skill.tools.deny.is_empty())
-                && let crate::agent_worker::WorkerExecution::Agent { ref mut tools, .. } =
-                    worker.execution
             {
+                let crate::agent_worker::WorkerExecution::Agent { ref mut tools, .. } =
+                    worker.execution;
                 let before = tools.len();
                 tools.retain(|t| skill.is_tool_allowed(t.name()));
                 info!(
@@ -508,7 +452,7 @@ impl Supervisor {
         }
 
         // Build default middleware chain for this worker.
-        let budget = self.cc_max_budget_usd.unwrap_or(10.0);
+        let budget = self.worker_max_budget_usd.unwrap_or(10.0);
         let chain = MiddlewareChain::new(vec![
             Box::new(LoopDetectionMiddleware::new()),
             Box::new(CostTrackingMiddleware::new(budget)),
@@ -526,10 +470,7 @@ impl Supervisor {
             worker.set_broadcaster(broadcaster.clone());
         }
 
-        (
-            worker.with_max_task_retries(self.max_task_retries),
-            progress_rx,
-        )
+        worker.with_max_task_retries(self.max_task_retries)
     }
 
     /// Run one patrol cycle: reap finished tasks, detect timeouts,
@@ -541,8 +482,7 @@ impl Supervisor {
         let patrol_start = std::time::Instant::now();
         debug!(project = %self.project_name, "patrol cycle");
 
-        // 0. Reload tasks from disk to pick up externally-created tasks
-        //    (e.g., from `sg assign` CLI or Claude Code workers).
+        // 0. Reload tasks from disk to pick up externally-created tasks.
         {
             let mut store = self.tasks.lock().await;
             if let Err(e) = store.reload() {
@@ -585,9 +525,6 @@ impl Supervisor {
             }
             let timeout = std::time::Duration::from_secs(t.timeout_secs);
             if t.started_at.elapsed() > timeout {
-                // Kill the entire process group first, then abort the tokio task.
-                let pid = t.child_pid.load(std::sync::atomic::Ordering::Relaxed);
-                ClaudeCodeExecutor::kill_process_group(pid);
                 t.handle.abort();
                 timed_out.push(t.task_id.clone());
                 return false;
@@ -875,7 +812,7 @@ impl Supervisor {
                 agent = %agent_name,
                 task = %task.id,
                 subject = %task.subject,
-                mode = ?self.execution_mode,
+                mode = "agent",
                 "assigning work"
             );
 
@@ -892,7 +829,7 @@ impl Supervisor {
                 );
             }
 
-            let (mut worker, worker_progress_rx) = self
+            let mut worker = self
                 .create_worker(agent_name.clone(), worker_name.clone(), &task)
                 .await;
 
@@ -932,7 +869,6 @@ impl Supervisor {
 
             worker.assign(&task);
 
-            let child_pid_tracker = worker.child_pid();
             let task_id = task.id.0.clone();
 
             // Fire-and-forget: worker handles its own task updates + dispatch notifications.
@@ -966,7 +902,10 @@ impl Supervisor {
             let task_subject = task.subject.clone();
             let agent_name_for_records = agent_name.clone();
             let verification_enabled = self.verification_enabled;
-            let verification_provider = self.reflect_provider.clone().unwrap_or_else(|| self.provider.clone());
+            let verification_provider = self
+                .reflect_provider
+                .clone()
+                .unwrap_or_else(|| self.provider.clone());
             let verification_model = self.preflight_model.clone();
             let verification_repo = self.repo.clone();
             let task_description = task.description.clone();
@@ -991,11 +930,11 @@ impl Supervisor {
                                 project: project_name_task.clone(),
                                 task_id: task_id_clone.clone(),
                                 worker: "worker".to_string(),
-                                cost_usd: 0.0, // Claude Code Max subscription = no cost
+                                cost_usd,
                                 turns,
                                 timestamp: chrono::Utc::now(),
-                                source: "claude_code".to_string(),
-                                tokens: 0, // TODO: extract from Claude Code result
+                                source: "agent".to_string(),
+                                tokens: 0,
                             });
                         }
 
@@ -1146,8 +1085,10 @@ impl Supervisor {
                                     };
 
                                     let pipeline = if !verification_model.is_empty() {
-                                        VerificationPipeline::with_defaults()
-                                            .with_provider(verification_provider.clone(), verification_model.clone())
+                                        VerificationPipeline::with_defaults().with_provider(
+                                            verification_provider.clone(),
+                                            verification_model.clone(),
+                                        )
                                     } else {
                                         VerificationPipeline::with_defaults()
                                     };
@@ -1193,7 +1134,9 @@ impl Supervisor {
                                              Suggestions:\n{}",
                                             result.confidence,
                                             result.reason,
-                                            result.suggestions.iter()
+                                            result
+                                                .suggestions
+                                                .iter()
                                                 .map(|s| format!("- {s}"))
                                                 .collect::<Vec<_>>()
                                                 .join("\n")
@@ -1316,9 +1259,7 @@ impl Supervisor {
                 handle,
                 task_id,
                 started_at: std::time::Instant::now(),
-                child_pid: child_pid_tracker,
                 timeout_secs: self.worker_timeout_secs.max(1800),
-                progress_rx: worker_progress_rx,
             });
         }
 
@@ -1778,24 +1719,12 @@ impl Supervisor {
             .iter()
             .filter(|t| !t.handle.is_finished())
             .map(|t| {
-                let (turns, cost, last_tool, status_msg) = match &t.progress_rx {
-                    Some(rx) => {
-                        let p = rx.borrow();
-                        (
-                            p.turns_so_far,
-                            p.cost_so_far,
-                            p.last_tool.clone(),
-                            p.status_message.clone(),
-                        )
-                    }
-                    None => (0, 0.0, None, None),
-                };
                 serde_json::json!({
                     "task_id": t.task_id,
-                    "turns": turns,
-                    "cost_usd": cost,
-                    "last_tool": last_tool,
-                    "status": status_msg,
+                    "turns": 0,
+                    "cost_usd": 0.0,
+                    "last_tool": serde_json::Value::Null,
+                    "status": "running",
                     "elapsed_secs": t.started_at.elapsed().as_secs(),
                     "timeout_secs": t.timeout_secs,
                 })
@@ -1929,8 +1858,6 @@ impl Supervisor {
         // Kill process group + abort the running worker if one exists for this task.
         self.running_tasks.retain(|t| {
             if t.task_id == task_id {
-                let pid = t.child_pid.load(std::sync::atomic::Ordering::Relaxed);
-                ClaudeCodeExecutor::kill_process_group(pid);
                 t.handle.abort();
                 info!(task_id, "cancelled running worker task");
                 false

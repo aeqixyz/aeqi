@@ -26,7 +26,7 @@ ChatEngine (orchestrator/src/chat_engine.rs)
     │   → Immediate response from daemon data
     └─ FULL PATH: complex work
         → Creates task → Supervisor assigns to worker
-        → Worker runs Claude Code → Outcome parsed
+        → Worker runs native Sigil agent loop → Outcome parsed
         → ChatEngine polls completion → Response delivered
 ```
 
@@ -35,7 +35,7 @@ ChatEngine (orchestrator/src/chat_engine.rs)
 2. Supervisor patrol picks up task → expertise routing → preflight assessment → spawn worker
 3. AgentWorker builds context (memory + blackboard + checkpoints + skill prompt)
 4. Middleware chain runs: on_start → [before_model → model → after_model → before_tool → tool → after_tool]* → on_complete
-5. Worker executes via Claude Code subprocess or internal agent loop
+5. Worker executes via the native Sigil agent loop
 6. Outcome: DONE (close task), BLOCKED (escalate), HANDOFF (re-queue), FAILED (analyze + retry)
 7. Reflection extracts insights → stored in memory SQLite
 8. ChatEngine detects completion → delivers response to channel
@@ -66,7 +66,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 - `sigil web start` — Axum REST API on :8400 (systemd: sigil-web.service)
 - `sigil run` — one-shot agent execution
 - IPC via Unix socket at `~/.sigil/rm.sock` (JSON-line protocol)
-- Claude Code execution: shells out to external `claude` binary
+- Worker execution: native Sigil agent runtime via configured provider
 
 ## IPC Commands
 
