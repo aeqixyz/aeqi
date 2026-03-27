@@ -332,7 +332,8 @@ impl AgentWorker {
             Some(h) => h.clone(),
             None => {
                 warn!(worker = %self.name, "no hook assigned, nothing to do");
-                let outcome = TaskOutcome::Done("no work assigned".to_string());
+                let runtime_outcome = RuntimeOutcome::done("no work assigned", Vec::new());
+                let outcome = TaskOutcome::from_runtime_outcome(&runtime_outcome);
                 let mut session = RuntimeSession::new(
                     "unassigned",
                     self.name.clone(),
@@ -340,7 +341,6 @@ impl AgentWorker {
                     self.execution_model(),
                 );
                 session.mark_phase(RuntimePhase::Prime, "Worker had no hook assigned");
-                let runtime_outcome = RuntimeOutcome::from_task_outcome(&outcome, Vec::new());
                 session.finish(&runtime_outcome);
                 return Ok((
                     outcome,
@@ -394,8 +394,9 @@ impl AgentWorker {
                         RuntimePhase::Frame,
                         "Middleware halted execution before run",
                     );
-                    let outcome = TaskOutcome::Failed(format!("Middleware halted: {reason}"));
-                    let runtime_outcome = RuntimeOutcome::from_task_outcome(&outcome, Vec::new());
+                    let runtime_outcome =
+                        RuntimeOutcome::failed(format!("Middleware halted: {reason}"), Vec::new());
+                    let outcome = TaskOutcome::from_runtime_outcome(&runtime_outcome);
                     runtime_session.finish(&runtime_outcome);
                     let runtime_execution = RuntimeExecution {
                         session: runtime_session,
@@ -619,19 +620,25 @@ impl AgentWorker {
         }
 
         // Parse into structured outcome.
-        let (outcome, cost, turns) = match raw_result {
-            Ok((result_text, cost, turns)) => (TaskOutcome::parse(&result_text), cost, turns),
+        let runtime_artifacts = self.collect_runtime_artifacts();
+        let (outcome, mut runtime_outcome, cost, turns) = match raw_result {
+            Ok((result_text, cost, turns)) => {
+                let runtime_outcome =
+                    RuntimeOutcome::from_agent_response(&result_text, runtime_artifacts);
+                let outcome = TaskOutcome::from_runtime_outcome(&runtime_outcome);
+                (outcome, runtime_outcome, cost, turns)
+            }
             Err(e) => {
                 // Run middleware on_error.
                 if let Some(ref chain) = self.middleware_chain {
                     let error_str = e.to_string();
                     chain.run_on_error(&mut worker_ctx, &error_str).await;
                 }
-                (TaskOutcome::Failed(e.to_string()), 0.0, 0)
+                let runtime_outcome = RuntimeOutcome::failed(e.to_string(), runtime_artifacts);
+                let outcome = TaskOutcome::from_runtime_outcome(&runtime_outcome);
+                (outcome, runtime_outcome, 0.0, 0)
             }
         };
-        let mut runtime_outcome =
-            RuntimeOutcome::from_task_outcome(&outcome, self.collect_runtime_artifacts());
         let runtime_artifact_refs = runtime_outcome.artifact_refs();
         runtime_session.mark_phase(
             RuntimePhase::Verify,

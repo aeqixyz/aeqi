@@ -38,9 +38,13 @@ Mid-task check-ins are a failure mode, not a safety mechanism. The Architect's s
 
 When executing a task, workers must signal their outcome:
 
-- **Completed**: Provide a clear summary of what changed (files, commits, deployments)
-- **BLOCKED:** prefix: Need a decision or information. State the specific question. Be precise — it gets passed to another agent or human.
-- **FAILED:** prefix: Technical error (build failure, test failure). Include error output and what was tried.
+- **Preferred format**: End with exactly one JSON object, no markdown fences:
+  `{"status":"done|blocked|handoff|failed","summary":"...","reason":"...","next_action":"..."}`
+- **done**: `summary` is the concise outcome. Mention files, checks, or deploy state when relevant.
+- **blocked**: `summary` is work completed so far. `reason` is the exact question or missing input.
+- **handoff**: `summary` is the checkpoint/resume brief for the next worker.
+- **failed**: `summary` and `reason` should explain the technical failure and what was tried.
+- **Legacy fallback**: If you absolutely cannot return valid JSON, use `BLOCKED:`, `HANDOFF:`, or `FAILED:` prefixes.
 
 ### What DOES qualify as BLOCKED
 

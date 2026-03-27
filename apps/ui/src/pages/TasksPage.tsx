@@ -4,6 +4,7 @@ import StatusBadge from "@/components/StatusBadge";
 import EmptyState from "@/components/EmptyState";
 import { PRIORITY_COLORS } from "@/lib/constants";
 import { api } from "@/lib/api";
+import { runtimeLabel, summarizeTaskRuntime } from "@/lib/runtime";
 
 export default function TasksPage() {
   const [tasks, setTasks] = useState<any[]>([]);
@@ -133,30 +134,50 @@ export default function TasksPage() {
         <EmptyState title="No tasks" description="No tasks match the current filters." />
       ) : (
         <div className="task-table">
-          {tasks.map((task: any) => (
-            <div key={task.id} className="task-row">
-              <span
-                className="task-priority-bar"
-                style={{ backgroundColor: PRIORITY_COLORS[task.priority] || "var(--text-primary)" }}
-              />
-              <code className="task-id">{task.id}</code>
-              <span className="task-subject">{task.subject}</span>
-              <div className="task-meta">
-                <StatusBadge status={task.status} size="sm" />
-                <span>{task.assignee || "—"}</span>
-                <span>{task.project}</span>
-                {task.status !== "done" && task.status !== "cancelled" && (
-                  <button
-                    className="btn"
-                    style={{ padding: "1px 8px", fontSize: "var(--font-size-xs)" }}
-                    onClick={() => handleClose(task.id)}
-                  >
-                    close
-                  </button>
-                )}
+          {tasks.map((task: any) => {
+            const label = runtimeLabel(task.runtime);
+            const detail = summarizeTaskRuntime(task.runtime, task.closed_reason);
+
+            return (
+              <div key={task.id} className="task-row">
+                <span
+                  className="task-priority-bar"
+                  style={{ backgroundColor: PRIORITY_COLORS[task.priority] || "var(--text-primary)" }}
+                />
+                <code className="task-id">{task.id}</code>
+                <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" }}>
+                  <span className="task-subject">{task.subject}</span>
+                  {(label || detail) && (
+                    <span
+                      style={{
+                        fontSize: "var(--font-size-xs)",
+                        color: "var(--text-muted)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {[label, detail].filter(Boolean).join(" • ")}
+                    </span>
+                  )}
+                </div>
+                <div className="task-meta">
+                  <StatusBadge status={task.status} size="sm" />
+                  <span>{task.assignee || "—"}</span>
+                  <span>{task.project}</span>
+                  {task.status !== "done" && task.status !== "cancelled" && (
+                    <button
+                      className="btn"
+                      style={{ padding: "1px 8px", fontSize: "var(--font-size-xs)" }}
+                      onClick={() => handleClose(task.id)}
+                    >
+                      close
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </>

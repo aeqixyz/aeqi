@@ -2,7 +2,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::executor::TaskOutcome;
 use crate::verification::VerificationResult;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -144,44 +143,54 @@ pub struct RuntimeOutcome {
 }
 
 impl RuntimeOutcome {
-    pub fn from_task_outcome(outcome: &TaskOutcome, artifacts: Vec<Artifact>) -> Self {
-        match outcome {
-            TaskOutcome::Done(summary) => Self {
-                status: RuntimeOutcomeStatus::Done,
-                summary: summary.clone(),
-                reason: None,
-                next_action: None,
-                artifacts,
-                verification: None,
-            },
-            TaskOutcome::Blocked {
-                question,
-                full_text,
-            } => Self {
-                status: RuntimeOutcomeStatus::Blocked,
-                summary: full_text.clone(),
-                reason: Some(question.clone()),
-                next_action: Some("await_operator_input".to_string()),
-                artifacts,
-                verification: None,
-            },
-            TaskOutcome::Handoff { checkpoint } => Self {
-                status: RuntimeOutcomeStatus::Handoff,
-                summary: checkpoint.clone(),
-                reason: Some(checkpoint.clone()),
-                next_action: Some("resume_from_checkpoint".to_string()),
-                artifacts,
-                verification: None,
-            },
-            TaskOutcome::Failed(error) => Self {
-                status: RuntimeOutcomeStatus::Failed,
-                summary: error.clone(),
-                reason: Some(error.clone()),
-                next_action: Some("inspect_failure".to_string()),
-                artifacts,
-                verification: None,
-            },
+    pub fn done(summary: impl Into<String>, artifacts: Vec<Artifact>) -> Self {
+        Self::new(RuntimeOutcomeStatus::Done, summary, None, None, artifacts)
+    }
+
+    pub fn blocked(
+        summary: impl Into<String>,
+        reason: impl Into<String>,
+        artifacts: Vec<Artifact>,
+    ) -> Self {
+        Self::new(
+            RuntimeOutcomeStatus::Blocked,
+            summary,
+            Some(reason.into()),
+            Some("await_operator_input".to_string()),
+            artifacts,
+        )
+    }
+
+    pub fn handoff(summary: impl Into<String>, artifacts: Vec<Artifact>) -> Self {
+        let summary = summary.into();
+        Self::new(
+            RuntimeOutcomeStatus::Handoff,
+            summary.clone(),
+            Some(summary),
+            Some("resume_from_checkpoint".to_string()),
+            artifacts,
+        )
+    }
+
+    pub fn failed(summary: impl Into<String>, artifacts: Vec<Artifact>) -> Self {
+        let summary = summary.into();
+        Self::new(
+            RuntimeOutcomeStatus::Failed,
+            summary.clone(),
+            Some(summary),
+            Some("inspect_failure".to_string()),
+            artifacts,
+        )
+    }
+
+    pub fn from_agent_response(result_text: &str, artifacts: Vec<Artifact>) -> Self {
+        let trimmed = result_text.trim();
+
+        if let Some(contract) = RuntimeOutcomeContract::parse(trimmed) {
+            return Self::from_contract(contract, artifacts);
         }
+
+        Self::from_legacy_text(trimmed, artifacts)
     }
 
     pub fn artifact_refs(&self) -> Vec<String> {
@@ -189,6 +198,181 @@ impl RuntimeOutcome {
             .iter()
             .map(|artifact| artifact.reference.clone())
             .collect()
+    }
+
+    fn new(
+        status: RuntimeOutcomeStatus,
+        summary: impl Into<String>,
+        reason: Option<String>,
+        next_action: Option<String>,
+        artifacts: Vec<Artifact>,
+    ) -> Self {
+        Self {
+            status,
+            summary: summary.into(),
+            reason,
+            next_action,
+            artifacts,
+            verification: None,
+        }
+    }
+
+    fn from_contract(contract: RuntimeOutcomeContract, artifacts: Vec<Artifact>) -> Self {
+        let summary = contract.summary.trim().to_string();
+        let summary = if summary.is_empty() {
+            contract
+                .reason
+                .clone()
+                .unwrap_or_else(|| "Worker returned empty response".to_string())
+        } else {
+            summary
+        };
+        let reason = contract
+            .reason
+            .map(|reason| reason.trim().to_string())
+            .filter(|reason| !reason.is_empty());
+        let next_action = contract
+            .next_action
+            .map(|action| action.trim().to_string())
+            .filter(|action| !action.is_empty())
+            .or_else(|| Self::default_next_action(contract.status));
+
+        match contract.status {
+            RuntimeOutcomeStatus::Done => Self::new(
+                RuntimeOutcomeStatus::Done,
+                summary,
+                None,
+                next_action,
+                artifacts,
+            ),
+            RuntimeOutcomeStatus::Blocked => Self::new(
+                RuntimeOutcomeStatus::Blocked,
+                summary.clone(),
+                reason.or_else(|| Some(summary)),
+                next_action,
+                artifacts,
+            ),
+            RuntimeOutcomeStatus::Handoff => Self::new(
+                RuntimeOutcomeStatus::Handoff,
+                summary.clone(),
+                reason.or_else(|| Some(summary)),
+                next_action,
+                artifacts,
+            ),
+            RuntimeOutcomeStatus::Failed => Self::new(
+                RuntimeOutcomeStatus::Failed,
+                summary.clone(),
+                reason.or_else(|| Some(summary)),
+                next_action,
+                artifacts,
+            ),
+        }
+    }
+
+    fn from_legacy_text(trimmed: &str, artifacts: Vec<Artifact>) -> Self {
+        if trimmed.is_empty() {
+            return Self::failed("Worker returned empty response", artifacts);
+        }
+
+        let first_line = trimmed
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or("")
+            .trim();
+
+        if first_line.starts_with("BLOCKED:") {
+            let question = if first_line == "BLOCKED:" {
+                trimmed.strip_prefix("BLOCKED:").unwrap_or(trimmed).trim()
+            } else {
+                first_line.strip_prefix("BLOCKED:").unwrap_or("").trim()
+            }
+            .split("\n\n")
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+
+            return Self::blocked(trimmed.to_string(), question, artifacts);
+        }
+
+        if first_line.starts_with("HANDOFF:") {
+            let checkpoint = trimmed
+                .strip_prefix("HANDOFF:")
+                .unwrap_or(trimmed)
+                .trim()
+                .to_string();
+            return Self::handoff(checkpoint, artifacts);
+        }
+
+        if first_line.starts_with("FAILED:") {
+            return Self::failed(trimmed.to_string(), artifacts);
+        }
+
+        Self::done(trimmed.to_string(), artifacts)
+    }
+
+    fn default_next_action(status: RuntimeOutcomeStatus) -> Option<String> {
+        match status {
+            RuntimeOutcomeStatus::Done => None,
+            RuntimeOutcomeStatus::Blocked => Some("await_operator_input".to_string()),
+            RuntimeOutcomeStatus::Handoff => Some("resume_from_checkpoint".to_string()),
+            RuntimeOutcomeStatus::Failed => Some("inspect_failure".to_string()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RuntimeOutcomeContract {
+    status: RuntimeOutcomeStatus,
+    summary: String,
+    #[serde(default)]
+    reason: Option<String>,
+    #[serde(default)]
+    next_action: Option<String>,
+}
+
+impl RuntimeOutcomeContract {
+    fn parse(text: &str) -> Option<Self> {
+        Self::json_candidates(text)
+            .into_iter()
+            .find_map(|candidate| serde_json::from_str::<Self>(&candidate).ok())
+    }
+
+    fn json_candidates(text: &str) -> Vec<String> {
+        let trimmed = text.trim();
+        let mut candidates = Vec::new();
+
+        if trimmed.starts_with('{') && trimmed.ends_with('}') {
+            candidates.push(trimmed.to_string());
+        }
+
+        if trimmed.starts_with("```") {
+            let mut lines = trimmed.lines();
+            let _opening = lines.next();
+            let mut fenced = Vec::new();
+            for line in lines {
+                if line.trim_start().starts_with("```") {
+                    break;
+                }
+                fenced.push(line);
+            }
+            let fenced = fenced.join("\n");
+            let fenced = fenced.trim();
+            if fenced.starts_with('{') && fenced.ends_with('}') {
+                candidates.push(fenced.to_string());
+            }
+        }
+
+        if let (Some(start), Some(end)) = (trimmed.find('{'), trimmed.rfind('}'))
+            && start < end
+        {
+            let slice = trimmed[start..=end].trim();
+            if slice.starts_with('{') && slice.ends_with('}') {
+                candidates.push(slice.to_string());
+            }
+        }
+
+        candidates
     }
 }
 
@@ -274,4 +458,56 @@ impl RuntimeSession {
 pub struct RuntimeExecution {
     pub session: RuntimeSession,
     pub outcome: RuntimeOutcome,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RuntimeOutcome, RuntimeOutcomeStatus};
+
+    #[test]
+    fn parses_structured_runtime_outcome_json() {
+        let runtime = RuntimeOutcome::from_agent_response(
+            r#"{"status":"done","summary":"Implemented runtime cards","reason":null,"next_action":null}"#,
+            Vec::new(),
+        );
+
+        assert_eq!(runtime.status, RuntimeOutcomeStatus::Done);
+        assert_eq!(runtime.summary, "Implemented runtime cards");
+        assert_eq!(runtime.reason, None);
+    }
+
+    #[test]
+    fn parses_structured_runtime_outcome_from_code_fence() {
+        let runtime = RuntimeOutcome::from_agent_response(
+            "```json\n{\"status\":\"blocked\",\"summary\":\"Need API token\",\"reason\":\"Which staging token should I use?\"}\n```",
+            Vec::new(),
+        );
+
+        assert_eq!(runtime.status, RuntimeOutcomeStatus::Blocked);
+        assert_eq!(runtime.summary, "Need API token");
+        assert_eq!(
+            runtime.reason.as_deref(),
+            Some("Which staging token should I use?")
+        );
+        assert_eq!(runtime.next_action.as_deref(), Some("await_operator_input"));
+    }
+
+    #[test]
+    fn falls_back_to_legacy_prefixes() {
+        let runtime = RuntimeOutcome::from_agent_response(
+            "HANDOFF:\nImplemented runtime persistence, remaining: task view rendering.",
+            Vec::new(),
+        );
+
+        assert_eq!(runtime.status, RuntimeOutcomeStatus::Handoff);
+        assert!(runtime.summary.contains("Implemented runtime persistence"));
+    }
+
+    #[test]
+    fn empty_response_is_failed() {
+        let runtime = RuntimeOutcome::from_agent_response("  \n", Vec::new());
+
+        assert_eq!(runtime.status, RuntimeOutcomeStatus::Failed);
+        assert_eq!(runtime.summary, "Worker returned empty response");
+    }
 }

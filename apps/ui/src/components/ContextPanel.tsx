@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useChatStore } from "@/store/chat";
 import { api } from "@/lib/api";
+import { runtimeLabel } from "@/lib/runtime";
 
 function NotesTab({ channel }: { channel: string | null }) {
   const [content, setContent] = useState("");
@@ -149,6 +150,9 @@ function GlobalContext() {
               <div key={t.id} className="ctx-task">
                 <code className="ctx-task-id">{t.id}</code>
                 <span className="ctx-task-subject">{t.subject}</span>
+                {runtimeLabel(t.runtime) && (
+                  <span className="ctx-task-status">{runtimeLabel(t.runtime)}</span>
+                )}
               </div>
             ))}
           </div>
@@ -234,7 +238,7 @@ function ProjectContext({ project }: { project: string }) {
                 <code className="ctx-task-id">{t.id}</code>
                 <span className="ctx-task-subject">{t.subject}</span>
                 <span className={`ctx-task-status ctx-task-status-${t.status}`}>
-                  {t.status === "in_progress" ? "active" : t.status}
+                  {runtimeLabel(t.runtime) || (t.status === "in_progress" ? "active" : t.status)}
                 </span>
               </div>
             ))}

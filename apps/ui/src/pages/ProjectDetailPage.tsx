@@ -6,6 +6,7 @@ import MissionCard from "@/components/MissionCard";
 import AuditEntryComponent from "@/components/AuditEntry";
 import { PRIORITY_COLORS } from "@/lib/constants";
 import { api } from "@/lib/api";
+import { runtimeLabel, summarizeTaskRuntime } from "@/lib/runtime";
 
 export default function ProjectDetailPage() {
   const { name } = useParams<{ name: string }>();
@@ -135,25 +136,45 @@ export default function ProjectDetailPage() {
 
           {/* Tasks Tab */}
           {tab === "tasks" && (
-            <div className="task-table">
-              {tasks.length === 0 ? (
-                <div className="dash-empty">No tasks in this project</div>
-              ) : (
-                tasks.slice(0, 50).map((task: any) => (
-                  <div key={task.id} className="task-row">
-                    <span
-                      className="task-priority-bar"
-                      style={{ backgroundColor: PRIORITY_COLORS[task.priority] || "var(--text-primary)" }}
-                    />
-                    <code className="task-id">{task.id}</code>
-                    <span className="task-subject">{task.subject}</span>
-                    <div className="task-meta">
-                      <StatusBadge status={task.status} size="sm" />
-                      <span>{task.assignee || "—"}</span>
-                    </div>
-                  </div>
-                ))
-              )}
+                <div className="task-table">
+                  {tasks.length === 0 ? (
+                    <div className="dash-empty">No tasks in this project</div>
+                  ) : (
+                    tasks.slice(0, 50).map((task: any) => {
+                      const label = runtimeLabel(task.runtime);
+                      const detail = summarizeTaskRuntime(task.runtime, task.closed_reason);
+
+                      return (
+                        <div key={task.id} className="task-row">
+                          <span
+                            className="task-priority-bar"
+                            style={{ backgroundColor: PRIORITY_COLORS[task.priority] || "var(--text-primary)" }}
+                          />
+                          <code className="task-id">{task.id}</code>
+                          <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <span className="task-subject">{task.subject}</span>
+                            {(label || detail) && (
+                              <span
+                                style={{
+                                  fontSize: "var(--font-size-xs)",
+                                  color: "var(--text-muted)",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {[label, detail].filter(Boolean).join(" • ")}
+                              </span>
+                            )}
+                          </div>
+                          <div className="task-meta">
+                            <StatusBadge status={task.status} size="sm" />
+                            <span>{task.assignee || "—"}</span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
               {tasks.length > 50 && (
                 <div className="dash-empty">
                   <Link to={`/tasks?project=${name}`}>View all {tasks.length} tasks</Link>

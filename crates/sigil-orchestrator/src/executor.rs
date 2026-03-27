@@ -1,3 +1,5 @@
+use crate::runtime::{RuntimeOutcome, RuntimeOutcomeStatus};
+
 /// Parsed outcome from a worker's result text.
 #[derive(Debug, Clone)]
 pub enum TaskOutcome {
@@ -20,52 +22,31 @@ pub enum TaskOutcome {
 }
 
 impl TaskOutcome {
-    /// Parse a worker's result text into a structured outcome.
-    ///
-    /// Checks the first non-empty line for BLOCKED:, HANDOFF:, or FAILED:.
-    /// This prevents false positives from code blocks that happen to
-    /// contain these words in the middle of output.
+    /// Legacy compatibility parser while callers migrate to runtime-first outcomes.
     pub fn parse(result_text: &str) -> Self {
-        let trimmed = result_text.trim();
+        let runtime = RuntimeOutcome::from_agent_response(result_text, Vec::new());
+        Self::from_runtime_outcome(&runtime)
+    }
 
-        // Empty or whitespace-only responses are failures — never silently mark done.
-        if trimmed.is_empty() {
-            return Self::Failed("Worker returned empty response".to_string());
-        }
-
-        let first_line = trimmed
-            .lines()
-            .find(|l| !l.trim().is_empty())
-            .unwrap_or("")
-            .trim();
-
-        if first_line.starts_with("BLOCKED:") {
-            let after_prefix = if first_line == "BLOCKED:" {
-                trimmed.strip_prefix("BLOCKED:").unwrap_or(trimmed).trim()
-            } else {
-                first_line.strip_prefix("BLOCKED:").unwrap_or("").trim()
-            };
-            let question = after_prefix
-                .split("\n\n")
-                .next()
-                .unwrap_or(after_prefix)
-                .trim()
-                .to_string();
-            Self::Blocked {
-                question,
-                full_text: result_text.to_string(),
-            }
-        } else if first_line.starts_with("HANDOFF:") {
-            let checkpoint = trimmed
-                .strip_prefix("HANDOFF:")
-                .unwrap_or(trimmed)
-                .trim()
-                .to_string();
-            Self::Handoff { checkpoint }
-        } else if first_line.starts_with("FAILED:") {
-            Self::Failed(result_text.to_string())
-        } else {
-            Self::Done(result_text.to_string())
+    pub fn from_runtime_outcome(runtime: &RuntimeOutcome) -> Self {
+        match runtime.status {
+            RuntimeOutcomeStatus::Done => Self::Done(runtime.summary.clone()),
+            RuntimeOutcomeStatus::Blocked => Self::Blocked {
+                question: runtime
+                    .reason
+                    .clone()
+                    .unwrap_or_else(|| runtime.summary.clone()),
+                full_text: runtime.summary.clone(),
+            },
+            RuntimeOutcomeStatus::Handoff => Self::Handoff {
+                checkpoint: runtime.summary.clone(),
+            },
+            RuntimeOutcomeStatus::Failed => Self::Failed(
+                runtime
+                    .reason
+                    .clone()
+                    .unwrap_or_else(|| runtime.summary.clone()),
+            ),
         }
     }
 }
@@ -117,6 +98,20 @@ mod tests {
                 assert!(checkpoint.contains("Implemented the worker queue"));
             }
             _ => panic!("expected handoff"),
+        }
+    }
+
+    #[test]
+    fn parses_structured_json_output() {
+        let outcome = TaskOutcome::parse(
+            r#"{"status":"failed","summary":"cargo test failed","reason":"workspace has compile errors"}"#,
+        );
+
+        match outcome {
+            TaskOutcome::Failed(reason) => {
+                assert_eq!(reason, "workspace has compile errors");
+            }
+            _ => panic!("expected failed"),
         }
     }
 }
