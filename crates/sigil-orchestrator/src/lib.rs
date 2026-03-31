@@ -8,6 +8,7 @@
 //! Workers run through Sigil's native agent loop. The supervisor enforces budgets
 //! and escalation chains (worker → project leader → system leader → human).
 
+pub mod agent_registry;
 pub mod agent_router;
 pub mod agent_worker;
 pub mod audit;
