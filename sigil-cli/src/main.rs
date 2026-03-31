@@ -140,6 +140,7 @@ async fn main() -> Result<()> {
             cmd::deps::cmd_deps(&cli.config, &project, apply).await
         }
         Some(Commands::Web { action }) => cmd::web::cmd_web(&cli.config, action).await,
+        Some(Commands::Graph { action }) => cmd::graph::cmd_graph(&cli.config, action).await,
         Some(Commands::Mcp) => cmd::mcp::cmd_mcp(&cli.config).map(|_| ()),
     }
 }

@@ -220,8 +220,31 @@ pub enum Commands {
         action: WebAction,
     },
 
+    /// Code intelligence graph — index, query, and analyze code structure.
+    Graph {
+        #[command(subcommand)]
+        action: GraphAction,
+    },
+
     /// Run as an MCP (Model Context Protocol) server.
     Mcp,
+}
+
+#[derive(Subcommand)]
+pub enum GraphAction {
+    /// Index (or re-index) the code graph for a project.
+    Index {
+        #[arg(short = 'r', long = "project", alias = "rig")]
+        project: String,
+        /// Full re-index instead of incremental (git-diff based).
+        #[arg(long)]
+        full: bool,
+    },
+    /// Show graph statistics for a project.
+    Stats {
+        #[arg(short = 'r', long = "project", alias = "rig")]
+        project: String,
+    },
 }
 
 #[derive(Subcommand)]

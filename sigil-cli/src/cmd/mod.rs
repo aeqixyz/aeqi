@@ -7,6 +7,7 @@ pub(crate) mod cron;
 pub(crate) mod daemon;
 pub(crate) mod deps;
 pub(crate) mod doctor;
+pub(crate) mod graph;
 pub(crate) mod hooks;
 pub(crate) mod init;
 pub(crate) mod mcp;
