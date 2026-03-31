@@ -11,6 +11,7 @@ pub mod chat_stream;
 pub mod config;
 pub mod identity;
 pub mod security;
+pub mod streaming_executor;
 pub mod traits;
 
 pub use agent::{
