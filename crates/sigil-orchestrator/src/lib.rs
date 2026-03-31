@@ -56,7 +56,7 @@ pub mod watchdog;
 pub use agent_router::{AgentRouter, RouteDecision};
 pub use agent_worker::{AgentWorker, WorkerState};
 pub use audit::{AuditEvent, AuditLog, DecisionType};
-pub use blackboard::Blackboard;
+pub use blackboard::{AgentVisibility, Blackboard};
 pub use chat_engine::ChatEngine;
 pub use checkpoint::AgentCheckpoint;
 pub use context_budget::ContextBudget;

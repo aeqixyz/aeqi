@@ -56,9 +56,24 @@ impl Tool for GitWorktreeTool {
 
                 let result = self.run_git(&["worktree", "add", &path_str, "-b", branch]);
                 match result {
-                    Ok(output) => Ok(ToolResult::success(format!(
-                        "Created worktree at {path_str}\n{output}"
-                    ))),
+                    Ok(output) => {
+                        // Configure the worktree to use the main repo's scripts/ as its
+                        // hooks directory so post-commit (graph reindex) etc. fire correctly.
+                        let hooks_path = self.repo_root.join("scripts");
+                        let _ = Command::new("git")
+                            .args([
+                                "-C",
+                                &path_str,
+                                "config",
+                                "core.hooksPath",
+                                &hooks_path.to_string_lossy(),
+                            ])
+                            .output();
+
+                        Ok(ToolResult::success(format!(
+                            "Created worktree at {path_str}\n{output}"
+                        )))
+                    }
                     Err(e) => Ok(ToolResult::error(format!("Failed to create worktree: {e}"))),
                 }
             }

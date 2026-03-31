@@ -55,6 +55,17 @@ pub struct BlackboardEntry {
     pub expires_at: DateTime<Utc>,
 }
 
+/// Describes which scoped key prefixes an agent is allowed to see.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AgentVisibility {
+    /// The agent's own UUID — grants access to `agent:{uuid}:*` entries.
+    pub agent_id: Option<String>,
+    /// The project the agent belongs to — grants access to `project:{name}:*` entries.
+    pub project: Option<String>,
+    /// The department the agent belongs to — grants access to `dept:{name}:*` entries.
+    pub department: Option<String>,
+}
+
 /// SQLite-backed inter-agent blackboard.
 pub struct Blackboard {
     conn: Mutex<Connection>,
@@ -315,6 +326,34 @@ impl Blackboard {
         Ok(matched)
     }
 
+    /// Query entries filtered by the caller's visibility scope.
+    ///
+    /// Key prefix rules:
+    /// - `system:*` → always visible
+    /// - `project:{name}:*` → visible if `visibility.project` matches `{name}`
+    /// - `dept:{name}:*` → visible if `visibility.department` matches `{name}`
+    /// - `agent:{uuid}:*` → visible only if `visibility.agent_id` matches `{uuid}`
+    /// - `session:*` → always visible (session entries are already scoped by task)
+    /// - No recognised prefix → always visible (backwards compatible)
+    pub fn query_scoped(
+        &self,
+        project: &str,
+        visibility: &AgentVisibility,
+        tags: &[String],
+        limit: usize,
+    ) -> Result<Vec<BlackboardEntry>> {
+        // Fetch unfiltered entries (use a generous internal limit).
+        let raw = self.query(project, tags, 1000)?;
+
+        let mut filtered: Vec<BlackboardEntry> = raw
+            .into_iter()
+            .filter(|e| entry_visible(&e.key, visibility))
+            .collect();
+
+        filtered.truncate(limit);
+        Ok(filtered)
+    }
+
     /// Query entries created after `since` for efficient polling.
     pub fn query_since(
         &self,
@@ -529,6 +568,33 @@ impl Blackboard {
             expires_at,
         })
     }
+}
+
+/// Check whether a blackboard key is visible to the given agent scope.
+fn entry_visible(key: &str, vis: &AgentVisibility) -> bool {
+    if key.starts_with("system:") || key.starts_with("session:") {
+        return true;
+    }
+    if let Some(rest) = key.strip_prefix("project:") {
+        return match vis.project.as_deref() {
+            Some(p) => rest.starts_with(&format!("{p}:")),
+            None => false,
+        };
+    }
+    if let Some(rest) = key.strip_prefix("dept:") {
+        return match vis.department.as_deref() {
+            Some(d) => rest.starts_with(&format!("{d}:")),
+            None => false,
+        };
+    }
+    if let Some(rest) = key.strip_prefix("agent:") {
+        return match vis.agent_id.as_deref() {
+            Some(id) => rest.starts_with(&format!("{id}:")),
+            None => false,
+        };
+    }
+    // No recognised scope prefix — backwards-compatible, always visible.
+    true
 }
 
 #[cfg(test)]
@@ -838,5 +904,97 @@ mod tests {
         // Different agent can now claim
         let result = bb.claim("src/main.rs", "worker-2", "proj", "taking over").unwrap();
         assert_eq!(result, ClaimResult::Acquired);
+    }
+
+    // ── Scoped visibility tests ──────────────────────────────────────
+
+    #[test]
+    fn test_entry_visible_helper() {
+        let vis = AgentVisibility {
+            agent_id: Some("a-123".into()),
+            project: Some("alpha".into()),
+            department: Some("eng".into()),
+        };
+
+        // system: always visible
+        assert!(super::entry_visible("system:config", &vis));
+
+        // session: always visible
+        assert!(super::entry_visible("session:abc:step1", &vis));
+
+        // project: matching
+        assert!(super::entry_visible("project:alpha:schema", &vis));
+        // project: non-matching
+        assert!(!super::entry_visible("project:beta:schema", &vis));
+
+        // dept: matching
+        assert!(super::entry_visible("dept:eng:oncall", &vis));
+        // dept: non-matching
+        assert!(!super::entry_visible("dept:sales:pipeline", &vis));
+
+        // agent: matching
+        assert!(super::entry_visible("agent:a-123:scratch", &vis));
+        // agent: non-matching
+        assert!(!super::entry_visible("agent:b-456:scratch", &vis));
+
+        // No prefix — backwards compatible
+        assert!(super::entry_visible("finding:something", &vis));
+        assert!(super::entry_visible("plain-key", &vis));
+
+        // Empty visibility — only system/session/unprefixed visible
+        let empty = AgentVisibility::default();
+        assert!(super::entry_visible("system:x", &empty));
+        assert!(super::entry_visible("session:x", &empty));
+        assert!(super::entry_visible("plain-key", &empty));
+        assert!(!super::entry_visible("project:alpha:x", &empty));
+        assert!(!super::entry_visible("dept:eng:x", &empty));
+        assert!(!super::entry_visible("agent:a-123:x", &empty));
+    }
+
+    #[test]
+    fn test_query_scoped() {
+        let (bb, _dir) = temp_bb();
+        let proj = "proj";
+
+        // Post entries with various scoped keys
+        bb.post("system:config", "global cfg", "w", proj, &[], EntryDurability::Transient).unwrap();
+        bb.post("project:proj:schema", "table def", "w", proj, &[], EntryDurability::Transient).unwrap();
+        bb.post("project:other:schema", "other table", "w", proj, &[], EntryDurability::Transient).unwrap();
+        bb.post("dept:eng:oncall", "alice", "w", proj, &[], EntryDurability::Transient).unwrap();
+        bb.post("dept:sales:quota", "100", "w", proj, &[], EntryDurability::Transient).unwrap();
+        bb.post("agent:a1:scratch", "private", "w", proj, &[], EntryDurability::Transient).unwrap();
+        bb.post("agent:a2:scratch", "other private", "w", proj, &[], EntryDurability::Transient).unwrap();
+        bb.post("session:s1:step", "step data", "w", proj, &[], EntryDurability::Transient).unwrap();
+        bb.post("plain-finding", "no prefix", "w", proj, &[], EntryDurability::Transient).unwrap();
+
+        // Agent in project "proj", dept "eng", id "a1"
+        let vis = AgentVisibility {
+            agent_id: Some("a1".into()),
+            project: Some("proj".into()),
+            department: Some("eng".into()),
+        };
+
+        let results = bb.query_scoped(proj, &vis, &[], 100).unwrap();
+        let keys: Vec<&str> = results.iter().map(|e| e.key.as_str()).collect();
+
+        // Should see: system:config, project:proj:schema, dept:eng:oncall,
+        //             agent:a1:scratch, session:s1:step, plain-finding
+        assert!(keys.contains(&"system:config"));
+        assert!(keys.contains(&"project:proj:schema"));
+        assert!(keys.contains(&"dept:eng:oncall"));
+        assert!(keys.contains(&"agent:a1:scratch"));
+        assert!(keys.contains(&"session:s1:step"));
+        assert!(keys.contains(&"plain-finding"));
+
+        // Should NOT see: project:other:schema, dept:sales:quota, agent:a2:scratch
+        assert!(!keys.contains(&"project:other:schema"));
+        assert!(!keys.contains(&"dept:sales:quota"));
+        assert!(!keys.contains(&"agent:a2:scratch"));
+
+        assert_eq!(results.len(), 6);
+
+        // Test limit
+        let limited = bb.query_scoped(proj, &vis, &[], 3).unwrap();
+        assert_eq!(limited.len(), 3);
     }
 }

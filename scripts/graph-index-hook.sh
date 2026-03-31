@@ -10,7 +10,28 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SIGIL_ROOT="${SIGIL_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+
+# Resolve SIGIL_ROOT: if SCRIPT_DIR is inside a worktree (no config/ sibling),
+# walk up from the git common dir to find the real repo root.
+if [ -n "${SIGIL_ROOT:-}" ]; then
+    : # already set
+elif [ -d "$SCRIPT_DIR/../config" ]; then
+    SIGIL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+else
+    # We're likely running from a worktree's hooks dir or core.hooksPath.
+    # git-common-dir gives the main .git dir (works in both worktrees & main repo).
+    _git_common="$(git rev-parse --git-common-dir 2>/dev/null)" || true
+    if [ -n "$_git_common" ]; then
+        SIGIL_ROOT="$(cd "$_git_common/.." && pwd)"
+    else
+        SIGIL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+    fi
+fi
+
+# Re-point SCRIPT_DIR to the canonical scripts/ inside SIGIL_ROOT so that
+# detect-project.sh and other helpers are always found.
+SCRIPT_DIR="$SIGIL_ROOT/scripts"
+
 CONFIG="${SIGIL_CONFIG:-$SIGIL_ROOT/config/sigil.toml}"
 DATA_DIR="${SIGIL_DATA_DIR:-$HOME/.sigil}"
 
@@ -20,6 +41,7 @@ if [ -z "$PROJECT" ] && [ -f "$SCRIPT_DIR/detect-project.sh" ]; then
     PROJECT=$(bash "$SCRIPT_DIR/detect-project.sh" 2>/dev/null) || true
 fi
 if [ -z "$PROJECT" ]; then
+    # --show-toplevel returns the worktree root in a worktree, fall back to git-common-dir parent.
     PROJECT=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null) || true
 fi
 
