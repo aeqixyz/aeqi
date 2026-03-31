@@ -1799,6 +1799,7 @@ impl Daemon {
                                 project_hint: project_hint.map(|s| s.to_string()),
                                 department_hint: department_hint.map(|s| s.to_string()),
                                 channel_name: channel_name.map(|s| s.to_string()),
+                                agent_id: None,
                             };
 
                             // Try quick path first (intent detection).
@@ -1830,6 +1831,7 @@ impl Daemon {
                         .get("sender")
                         .and_then(|v| v.as_str())
                         .unwrap_or("user");
+                    let agent_id = request_field(&request, "agent_id");
 
                     match &chat_engine {
                         Some(engine) => {
@@ -1851,6 +1853,7 @@ impl Daemon {
                                     project_hint: project_hint.map(|s| s.to_string()),
                                     department_hint: department_hint.map(|s| s.to_string()),
                                     channel_name: channel_name.map(|s| s.to_string()),
+                                    agent_id: agent_id.map(|s| s.to_string()),
                                 };
 
                                 // Try quick path first.

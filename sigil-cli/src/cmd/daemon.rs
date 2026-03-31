@@ -1119,6 +1119,7 @@ async fn telegram_message_loop(
                                 project_hint: fast_project,
                                 department_hint: fast_department,
                                 channel_name: fast_channel,
+                                agent_id: None,
                             };
                             fast_engine.record_exchange(&chat_msg, &reply).await;
                             let out = sigil_core::traits::OutgoingMessage {
@@ -1146,6 +1147,7 @@ async fn telegram_message_loop(
                         project_hint: project_hint.clone(),
                         department_hint: department_hint.clone(),
                         channel_name: channel_name.clone(),
+                        agent_id: None,
                     };
 
                     if let Some(response) = engine.handle_message(&chat_msg).await {
@@ -1180,6 +1182,7 @@ async fn telegram_message_loop(
                             project_hint,
                             department_hint,
                             channel_name,
+                            agent_id: None,
                         };
 
                         match engine2.handle_message_full(&chat_msg, None).await {

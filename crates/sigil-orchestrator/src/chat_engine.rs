@@ -57,6 +57,8 @@ pub struct ChatMessage {
     pub project_hint: Option<String>,
     pub department_hint: Option<String>,
     pub channel_name: Option<String>,
+    /// Persistent agent UUID for entity memory scoping and routing.
+    pub agent_id: Option<String>,
 }
 
 impl ChatMessage {
@@ -1702,6 +1704,7 @@ mod tests {
             project_hint: None,
             department_hint: None,
             channel_name: None,
+            agent_id: None,
         };
 
         let response = engine.handle_message(&msg).await.unwrap();
@@ -1726,6 +1729,7 @@ mod tests {
             project_hint: None,
             department_hint: None,
             channel_name: None,
+            agent_id: None,
         };
 
         let handle = engine.handle_message_full(&msg, None).await.unwrap();
@@ -1756,6 +1760,7 @@ mod tests {
             project_hint: None,
             department_hint: None,
             channel_name: None,
+            agent_id: None,
         };
 
         let handle = engine.handle_message_full(&msg, None).await.unwrap();
@@ -1843,6 +1848,7 @@ mod tests {
             project_hint: None,
             department_hint: None,
             channel_name: None,
+            agent_id: None,
         };
 
         let _handle = engine.handle_message_full(&msg, None).await.unwrap();
@@ -1887,6 +1893,7 @@ mod tests {
             project_hint: Some("app".to_string()),
             department_hint: None,
             channel_name: Some("app-ops".to_string()),
+            agent_id: None,
         };
 
         let handle = engine.handle_message_full(&msg, None).await.unwrap();
@@ -2114,6 +2121,7 @@ mod tests {
             project_hint: None,
             department_hint: None,
             channel_name: None,
+            agent_id: None,
         };
         let handle = engine.handle_message_full(&normal, None).await.unwrap();
         let released = engine.get_timeline(88, 10, 0).await.unwrap();
@@ -2133,6 +2141,7 @@ mod tests {
             project_hint: None,
             department_hint: None,
             channel_name: None,
+            agent_id: None,
         };
         let explicit_handle = engine.handle_message_full(&explicit, None).await.unwrap();
         let held = engine.get_timeline(89, 10, 0).await.unwrap();
