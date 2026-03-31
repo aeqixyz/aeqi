@@ -136,6 +136,10 @@ pub struct AgentConfig {
     pub session_file: Option<PathBuf>,
     /// Session type — Perpetual (never ends, can self-delegate) or Async (runs to completion).
     pub session_type: SessionType,
+    /// Optional token budget for auto-continuation. When set, the agent continues
+    /// automatically after end-turn if total output tokens < budget * 0.9.
+    /// Parsed from "+500k" or "use 2m tokens" syntax in the user prompt.
+    pub token_budget: Option<u32>,
 }
 
 impl Default for AgentConfig {
@@ -160,6 +164,47 @@ impl Default for AgentConfig {
             persist_dir: None,
             session_file: None,
             session_type: SessionType::Async,
+            token_budget: None,
+        }
+    }
+}
+
+impl AgentConfig {
+    /// Parse a token budget from the user prompt. Recognizes:
+    /// - "+500k", "+2m" (at start or end of prompt)
+    /// - "use 500k tokens", "spend 2m tokens"
+    pub fn parse_token_budget(prompt: &str) -> Option<u32> {
+        let lower = prompt.to_lowercase();
+
+        // Pattern: +Nk or +Nm at start or end.
+        for word in lower.split_whitespace() {
+            let word = word.trim_start_matches('+');
+            if let Some(n) = Self::parse_token_shorthand(word) {
+                return Some(n);
+            }
+        }
+
+        // Pattern: "use Nk tokens" or "spend Nm tokens".
+        if let Some(pos) = lower.find("use ").or_else(|| lower.find("spend ")) {
+            let after = &lower[pos..];
+            for word in after.split_whitespace().skip(1) {
+                if let Some(n) = Self::parse_token_shorthand(word) {
+                    return Some(n);
+                }
+            }
+        }
+
+        None
+    }
+
+    fn parse_token_shorthand(s: &str) -> Option<u32> {
+        let s = s.trim_end_matches("tokens").trim_end_matches("token").trim();
+        if let Some(n) = s.strip_suffix('k') {
+            n.parse::<f32>().ok().map(|v| (v * 1000.0) as u32)
+        } else if let Some(n) = s.strip_suffix('m') {
+            n.parse::<f32>().ok().map(|v| (v * 1_000_000.0) as u32)
+        } else {
+            s.parse::<u32>().ok().filter(|&n| n > 1000)
         }
     }
 }
@@ -293,11 +338,16 @@ const SNIP_THRESHOLD_FACTOR: f32 = 0.85;
 const DIMINISHING_RETURNS_THRESHOLD: u32 = 500;
 const DIMINISHING_RETURNS_COUNT: u32 = 3;
 
-/// A recently-read file tracked for post-compact restoration.
+/// Token budget auto-continuation: stop when this fraction of budget is used.
+const TOKEN_BUDGET_COMPLETION_THRESHOLD: f32 = 0.90;
+
+/// A recently-read file tracked for post-compact restoration and change detection.
 #[derive(Debug, Clone)]
 struct RecentFile {
     path: String,
     content: String,
+    /// File modification time at the point we read it (epoch secs).
+    mtime_secs: u64,
 }
 
 /// Tool_use/tool_result pairing repair marker.
@@ -825,6 +875,36 @@ impl Agent {
                         break;
                     }
                     LoopAction::Continue => {
+                        // Token budget auto-continuation: if budget set and not exhausted,
+                        // inject nudge message and keep going.
+                        if let Some(budget) = self.config.token_budget {
+                            let used = tracker.total_completion_tokens;
+                            let threshold =
+                                (budget as f32 * TOKEN_BUDGET_COMPLETION_THRESHOLD) as u32;
+                            if used < threshold {
+                                let pct = (used as f32 / budget as f32 * 100.0) as u32;
+                                info!(
+                                    agent = %self.config.name,
+                                    used, budget, pct,
+                                    "token budget not exhausted, auto-continuing"
+                                );
+                                if let Some(ref text) = response.content {
+                                    messages.push(Message {
+                                        role: Role::Assistant,
+                                        content: MessageContent::text(text),
+                                    });
+                                }
+                                messages.push(Message {
+                                    role: Role::User,
+                                    content: MessageContent::text(format!(
+                                        "Stopped at {pct}% of token target ({used} / {budget}). \
+                                         Keep working — do not summarize or ask if you should continue."
+                                    )),
+                                });
+                                transition = LoopTransition::AfterTurnContinue;
+                                continue;
+                            }
+                        }
                         // Accept the stop.
                         break;
                     }
@@ -1071,9 +1151,16 @@ impl Agent {
                 {
                     // Dedup by path (keep most recent).
                     recent_files.retain(|f| f.path != path);
+                    let mtime_secs = std::fs::metadata(&path)
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
                     recent_files.push(RecentFile {
                         path,
                         content: r.output.clone(),
+                        mtime_secs,
                     });
                     // Keep only the most recent N files.
                     if recent_files.len() > POST_COMPACT_MAX_FILES * 2 {
@@ -1132,6 +1219,17 @@ impl Agent {
                         );
                     }
                 }
+            }
+
+            // --- Detect file changes since last read (mid-turn enrichment) ---
+            let file_change_msgs = Self::detect_file_changes(&recent_files).await;
+            if !file_change_msgs.is_empty() {
+                debug!(
+                    agent = %self.config.name,
+                    changes = file_change_msgs.len(),
+                    "injecting file change notifications"
+                );
+                messages.extend(file_change_msgs);
             }
 
             // --- Collect enrichments from observers ---
@@ -1552,6 +1650,45 @@ impl Agent {
         }
 
         messages
+    }
+
+    /// Detect files that changed externally since we last read them.
+    /// Returns system messages with change notifications for injection between turns.
+    async fn detect_file_changes(recent_files: &[RecentFile]) -> Vec<Message> {
+        let mut changes = Vec::new();
+
+        for file in recent_files {
+            if file.mtime_secs == 0 {
+                continue; // No mtime recorded — skip.
+            }
+
+            let current_mtime = match tokio::fs::metadata(&file.path).await {
+                Ok(meta) => meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+                Err(_) => continue, // File deleted or inaccessible — skip silently.
+            };
+
+            if current_mtime > file.mtime_secs {
+                // File was modified externally.
+                let notice = format!(
+                    "<system-reminder>\nFile modified externally: {}\n\
+                     The file has changed since you last read it. \
+                     Re-read it before making edits to avoid overwriting external changes.\n\
+                     </system-reminder>",
+                    file.path
+                );
+                changes.push(Message {
+                    role: Role::User,
+                    content: MessageContent::text(notice),
+                });
+            }
+        }
+
+        changes
     }
 
     /// Build post-compact skill restoration messages from invoked skills.
@@ -2774,6 +2911,32 @@ mod tests {
         assert!(config.fallback_model.is_none());
         assert!(config.persist_dir.is_none());
         assert!((config.compact_threshold - 0.80).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_parse_token_budget_shorthand() {
+        assert_eq!(AgentConfig::parse_token_budget("+500k"), Some(500_000));
+        assert_eq!(AgentConfig::parse_token_budget("+2m"), Some(2_000_000));
+        assert_eq!(AgentConfig::parse_token_budget("fix the bug +500k"), Some(500_000));
+        assert_eq!(AgentConfig::parse_token_budget("+1.5m"), Some(1_500_000));
+    }
+
+    #[test]
+    fn test_parse_token_budget_verbose() {
+        assert_eq!(
+            AgentConfig::parse_token_budget("use 500k tokens"),
+            Some(500_000)
+        );
+        assert_eq!(
+            AgentConfig::parse_token_budget("spend 2m tokens on this"),
+            Some(2_000_000)
+        );
+    }
+
+    #[test]
+    fn test_parse_token_budget_none() {
+        assert_eq!(AgentConfig::parse_token_budget("fix the bug"), None);
+        assert_eq!(AgentConfig::parse_token_budget("hello world"), None);
     }
 
     #[test]
