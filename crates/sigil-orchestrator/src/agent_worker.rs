@@ -1314,6 +1314,29 @@ impl AgentWorker {
             agent = agent.with_memory(mem.clone());
         }
 
+        // Wire chat stream: create sender, subscribe in background task to
+        // forward ChatStreamEvents to the EventBroadcaster as ChatStream events.
+        if let Some(ref broadcaster) = self.event_broadcaster {
+            let task_id = self
+                .hook
+                .as_ref()
+                .map(|h| h.task_id.0.clone())
+                .unwrap_or_default();
+            let (sender, mut rx) = sigil_core::ChatStreamSender::new(512);
+            let bc = Arc::clone(broadcaster);
+            let tid = task_id.clone();
+            tokio::spawn(async move {
+                while let Ok(event) = rx.recv().await {
+                    bc.publish(crate::execution_events::ExecutionEvent::ChatStream {
+                        task_id: tid.clone(),
+                        chat_id: 0, // Filled by ChatEngine when routing
+                        event,
+                    });
+                }
+            });
+            agent = agent.with_chat_stream(sender);
+        }
+
         agent.run(task_context).await
     }
 

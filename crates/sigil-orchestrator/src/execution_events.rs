@@ -5,6 +5,7 @@
 /// to receive events as they happen. This replaces polling-based progress tracking
 /// with push-based streaming.
 use serde::Serialize;
+use sigil_core::chat_stream::ChatStreamEvent;
 use tokio::sync::broadcast;
 use tracing::debug;
 
@@ -81,6 +82,13 @@ pub enum ExecutionEvent {
         options: Vec<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         runtime: Option<RuntimeExecution>,
+    },
+    /// Real-time chat stream event from the agent loop.
+    /// Used by CLI TUI and WebSocket chat clients for token-by-token rendering.
+    ChatStream {
+        task_id: String,
+        chat_id: i64,
+        event: ChatStreamEvent,
     },
 }
 

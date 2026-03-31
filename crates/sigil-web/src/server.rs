@@ -75,7 +75,8 @@ pub async fn start(config: &SigilConfig) -> Result<()> {
     let public = Router::new()
         .route("/api/health", axum::routing::get(health_handler))
         .route("/api/auth/login", axum::routing::post(login_handler))
-        .route("/api/ws", axum::routing::get(ws::handler));
+        .route("/api/ws", axum::routing::get(ws::handler))
+        .route("/api/chat/stream", axum::routing::get(crate::chat_ws::handler));
 
     let mut app = Router::new()
         .nest("/api", protected)
