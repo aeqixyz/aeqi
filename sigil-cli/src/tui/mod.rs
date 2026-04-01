@@ -481,20 +481,61 @@ pub async fn run(
     };
 
     let agent_id = agent.as_ref().map(|a| a.id.clone());
+    let agent_record = agent.clone();
 
-    // WebSocket connection.
-    let bind = &config.web.bind;
-    let port = bind
-        .rsplit(':')
-        .next()
-        .and_then(|p| p.parse::<u16>().ok())
-        .unwrap_or(8400);
-    let ws_url = format!("ws://127.0.0.1:{port}/api/chat/stream");
+    // Decide mode: daemon (WebSocket) or direct (in-process agent loop).
+    let daemon_running = is_daemon_running(&config);
 
     let (event_tx, event_rx) = mpsc::channel::<ChatStreamEvent>();
     let (cmd_tx, cmd_rx) = mpsc::channel::<WsCommand>();
+    let mut ws_handle: Option<std::thread::JoinHandle<()>> = None;
+    let mut _direct_input_tx: Option<tokio::sync::mpsc::UnboundedSender<String>> = None;
 
-    let ws_handle = spawn_ws_thread(ws_url, cmd_rx, event_tx);
+    if daemon_running {
+        // Daemon mode: connect via WebSocket.
+        let bind = &config.web.bind;
+        let port = bind
+            .rsplit(':')
+            .next()
+            .and_then(|p| p.parse::<u16>().ok())
+            .unwrap_or(8400);
+        let ws_url = format!("ws://127.0.0.1:{port}/api/chat/stream");
+        ws_handle = Some(spawn_ws_thread(ws_url, cmd_rx, event_tx.clone()));
+        eprintln!("  \x1b[90m(connected to daemon)\x1b[0m");
+    } else {
+        // Direct mode: run agent loop in-process.
+        eprintln!("  \x1b[90m(direct mode — no daemon)\x1b[0m");
+        let direct_result = spawn_direct_agent(
+            &config,
+            agent_record.as_ref(),
+            event_tx.clone(),
+        );
+        match direct_result {
+            Ok((input_tx, _join)) => {
+                _direct_input_tx = Some(input_tx.clone());
+                // Bridge: WsCommand::Send → parse message → push to input_tx
+                let input_tx_for_bridge = input_tx;
+                std::thread::spawn(move || {
+                    while let Ok(cmd) = cmd_rx.recv() {
+                        match cmd {
+                            WsCommand::Send(json) => {
+                                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json) {
+                                    if let Some(msg) = parsed.get("message").and_then(|v| v.as_str()) {
+                                        let _ = input_tx_for_bridge.send(msg.to_string());
+                                    }
+                                }
+                            }
+                            WsCommand::Quit => break,
+                        }
+                    }
+                });
+            }
+            Err(e) => {
+                eprintln!("  \x1b[31m✗ Failed to start agent: {e}\x1b[0m");
+                return Ok(());
+            }
+        }
+    }
 
     // Enter raw mode for input handling (NOT alternate screen).
     terminal::enable_raw_mode()?;
@@ -637,12 +678,123 @@ pub async fn run(
     let _ = cmd_tx.send(WsCommand::Quit);
     term.clear()?;
     terminal::disable_raw_mode()?;
-    let _ = ws_handle.join();
+    if let Some(handle) = ws_handle {
+        let _ = handle.join();
+    }
 
     let face = state.agent.face("idle");
     eprintln!("\n  \x1b[90m{face} goodbye\x1b[0m\n");
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Direct mode — in-process agent loop
+// ---------------------------------------------------------------------------
+
+/// Check if the daemon is running by testing the IPC socket.
+fn is_daemon_running(config: &sigil_core::SigilConfig) -> bool {
+    let sock_path = config.data_dir().join("rm.sock");
+    std::os::unix::net::UnixStream::connect(&sock_path).is_ok()
+}
+
+/// Spawn the agent loop directly in-process (no daemon).
+/// Returns a sender for pushing messages + a join handle.
+fn spawn_direct_agent(
+    config: &sigil_core::SigilConfig,
+    agent_record: Option<&sigil_orchestrator::agent_registry::PersistentAgent>,
+    event_tx: mpsc::Sender<ChatStreamEvent>,
+) -> Result<(
+    tokio::sync::mpsc::UnboundedSender<String>,
+    tokio::task::JoinHandle<()>,
+)> {
+    use crate::helpers::{build_provider_for_runtime, build_tools};
+    use sigil_core::traits::LogObserver;
+    use sigil_core::{Agent, AgentConfig, Identity, ProviderKind, SessionType};
+
+    // Build provider from config.
+    let model_override = agent_record.and_then(|a| a.model.as_deref());
+    let provider = build_provider_for_runtime(config, ProviderKind::OpenRouter, model_override)?;
+
+    // Build tools with cwd.
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let tools = build_tools(&cwd);
+
+    // Build identity from agent record.
+    let identity = if let Some(a) = agent_record {
+        Identity {
+            persona: Some(a.system_prompt.clone()),
+            ..Identity::default()
+        }
+    } else {
+        Identity::default()
+    };
+
+    // Agent config.
+    let model = agent_record
+        .and_then(|a| a.model.as_deref())
+        .unwrap_or("stepfun/step-3.5-flash:free")
+        .to_string();
+
+    let agent_config = AgentConfig {
+        model,
+        max_iterations: 90,
+        name: agent_record
+            .map(|a| a.name.clone())
+            .unwrap_or_else(|| "shadow".into()),
+        entity_id: agent_record.map(|a| a.id.clone()),
+        session_type: SessionType::Perpetual,
+        session_file: agent_record.map(|a| {
+            config
+                .data_dir()
+                .join("sessions")
+                .join(format!("{}.json", a.id))
+        }),
+        ..Default::default()
+    };
+
+    // Build agent with perpetual input channel.
+    let observer: std::sync::Arc<dyn sigil_core::traits::Observer> =
+        std::sync::Arc::new(LogObserver);
+
+    let mut agent = Agent::new(agent_config, provider, tools, observer, identity);
+
+    // Chat stream sender for TUI events.
+    let (stream_sender, mut stream_rx) = sigil_core::ChatStreamSender::new(64);
+    agent = agent.with_chat_stream(stream_sender);
+
+    // Perpetual input channel.
+    let (agent_with_input, input_tx) = agent.with_perpetual_input();
+
+    // Bridge: ChatStreamEvent from agent → event_tx for TUI.
+    tokio::spawn(async move {
+        while let Ok(evt) = stream_rx.recv().await {
+            if event_tx.send(evt).is_err() {
+                break;
+            }
+        }
+    });
+
+    // Spawn the agent loop.
+    let join = tokio::spawn(async move {
+        match agent_with_input
+            .run("The user just connected. Greet them briefly.")
+            .await
+        {
+            Ok(result) => {
+                tracing::info!(
+                    stop = ?result.stop_reason,
+                    iterations = result.iterations,
+                    "direct agent session ended"
+                );
+            }
+            Err(e) => {
+                tracing::error!("direct agent error: {e}");
+            }
+        }
+    });
+
+    Ok((input_tx, join))
 }
 
 // ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@ pub(crate) mod agent;
 pub(crate) mod audit;
 pub(crate) mod blackboard;
 pub(crate) mod chat;
-pub(crate) mod chat_tui;
+// chat_tui replaced by tui/ module
 pub(crate) mod config;
 pub(crate) mod daemon;
 pub(crate) mod deps;
