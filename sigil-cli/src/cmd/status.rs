@@ -12,9 +12,6 @@ pub(crate) async fn cmd_status(config_path: &Option<PathBuf>) -> Result<()> {
 
     // Show system team.
     println!("Sigil Team: leader={}", config.leader());
-    if !config.team.agents.is_empty() {
-        println!("  agents: {}", config.team.agents.join(", "));
-    }
     println!();
 
     // Show agents.

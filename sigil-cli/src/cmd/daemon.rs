@@ -292,16 +292,9 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             let council_advisors: Arc<Vec<sigil_core::config::PeerAgentConfig>> =
                 Arc::new(config.advisor_agents().into_iter().cloned().collect());
             let auto_council_enabled = config.team.max_background_cost_usd > 0.0;
-            // Build intent classifier if OpenRouter key is available.
-            let intent_classifier = if !classifier_api_key.is_empty() {
-                let model = config.team.router_model.clone();
-                Some(Arc::new(sigil_orchestrator::intent::IntentClassifier::new(
-                    classifier_api_key.clone(),
-                    model,
-                )))
-            } else {
-                None
-            };
+            // Intent classifier (legacy — no longer used for routing).
+            let intent_classifier: Option<Arc<sigil_orchestrator::intent::IntentClassifier>> =
+                None;
 
             let chat_engine = registry.conversation_store.as_ref().map(|cs| {
                 Arc::new(sigil_orchestrator::ChatEngine {

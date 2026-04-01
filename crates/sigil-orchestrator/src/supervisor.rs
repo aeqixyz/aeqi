@@ -29,7 +29,6 @@ use crate::middleware::{
 use crate::preflight::{PreflightAssessment, PreflightVerdict};
 use crate::project::Project;
 use crate::verification::{TaskContext, VerificationPipeline};
-use std::collections::HashMap;
 
 /// Label prefix for tracking escalation depth on tasks.
 const ESCALATION_LABEL_PREFIX: &str = "escalation:";
@@ -134,74 +133,14 @@ pub struct Supervisor {
 }
 
 impl Supervisor {
-    fn candidate_agents(&self) -> Vec<String> {
-        self.team
-            .as_ref()
-            .map(ProjectTeamConfig::effective_agents)
-            .filter(|agents| !agents.is_empty())
-            .unwrap_or_else(|| vec![self.escalation_target.clone()])
-    }
-
+    /// Select which agent runs a task. In the current architecture tasks are
+    /// always agent-bound (one supervisor per project), so we simply return the
+    /// project name as the agent identity.
     async fn select_agent_for_task(
         &self,
-        task: &sigil_tasks::Task,
+        _task: &sigil_tasks::Task,
     ) -> (String, Option<String>, Vec<String>) {
-        let candidates = self.candidate_agents();
-        if candidates.is_empty() {
-            return (self.escalation_target.clone(), None, Vec::new());
-        }
-
-        let domain = ExpertiseLedger::extract_domain(&task.labels, &task.subject);
-        let mut ranking_info = Vec::new();
-
-        if self.expertise_routing
-            && let Some(ref ledger) = self.expertise_ledger
-        {
-            let rankings = ledger.rank_for_domain(&domain).unwrap_or_default();
-            ranking_info = rankings
-                .iter()
-                .filter(|score| candidates.contains(&score.agent_name))
-                .take(3)
-                .map(|score| format!("{}({:.0}%)", score.agent_name, score.confidence * 100.0))
-                .collect();
-
-            for score in rankings {
-                if candidates.contains(&score.agent_name)
-                    && !ledger
-                        .is_deprioritized(&score.agent_name, &domain)
-                        .unwrap_or(false)
-                {
-                    return (score.agent_name, Some(domain), ranking_info);
-                }
-            }
-        }
-
-        let store = self.tasks.lock().await;
-        let mut load_by_agent: HashMap<String, usize> =
-            candidates.iter().cloned().map(|agent| (agent, 0)).collect();
-        for queued_task in store.all() {
-            if queued_task.is_closed() {
-                continue;
-            }
-            if let Some(assignee) = &queued_task.assignee
-                && let Some(load) = load_by_agent.get_mut(assignee)
-            {
-                *load += 1;
-            }
-        }
-        drop(store);
-
-        let selected = candidates
-            .iter()
-            .min_by_key(|agent| {
-                (
-                    load_by_agent.get(*agent).copied().unwrap_or(0),
-                    agent.as_str(),
-                )
-            })
-            .cloned()
-            .unwrap_or_else(|| self.escalation_target.clone());
-        (selected, Some(domain), ranking_info)
+        (self.project_name.clone(), None, Vec::new())
     }
 
     pub fn new(

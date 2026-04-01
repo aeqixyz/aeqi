@@ -12,10 +12,6 @@ pub(crate) async fn cmd_team(
     // Show system team.
     println!("Sigil Team");
     println!("  leader: {}", config.leader());
-    if !config.team.agents.is_empty() {
-        println!("  agents: {}", config.team.agents.join(", "));
-    }
-    println!("  router: {}", config.team.router_model);
     println!("  cooldown: {}s", config.team.router_cooldown_secs);
     println!("  max_bg_cost: ${:.2}", config.team.max_background_cost_usd);
     println!();

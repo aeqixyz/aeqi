@@ -183,8 +183,6 @@ temporal_decay_halflife_days = 30\n\
 \n\
 [team]\n\
 leader = \"leader\"\n\
-agents = [\"leader\", \"researcher\", \"reviewer\"]\n\
-router_model = \"{default_model}\"\n\
 router_cooldown_secs = 60\n\
 max_background_cost_usd = 0.5\n\
 \n\

@@ -305,19 +305,13 @@ fn default_agent_max_workers() -> u32 {
     1
 }
 
-/// System-level team settings — manages the overarching orchestrator and router.
+/// System-level team settings — manages the overarching orchestrator.
 /// This is the "system team" that coordinates across all projects.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TeamConfig {
     /// Name of the team leader (system-level orchestrator).
     #[serde(default = "default_leader")]
     pub leader: String,
-    /// Agents in the system team (typically just the orchestrator).
-    #[serde(default)]
-    pub agents: Vec<String>,
-    /// Model used for the router classifier.
-    #[serde(default = "default_router_model")]
-    pub router_model: String,
     /// Cooldown in seconds before same advisor can be re-invoked.
     #[serde(default = "default_router_cooldown")]
     pub router_cooldown_secs: u64,
@@ -330,8 +324,6 @@ impl Default for TeamConfig {
     fn default() -> Self {
         Self {
             leader: "leader".to_string(),
-            agents: Vec::new(),
-            router_model: default_router_model(),
             router_cooldown_secs: 60,
             max_background_cost_usd: 0.50,
         }
@@ -365,9 +357,6 @@ impl ProjectTeamConfig {
 
 fn default_leader() -> String {
     "leader".to_string()
-}
-fn default_router_model() -> String {
-    "xiaomi/mimo-v2-pro".to_string()
 }
 fn default_router_cooldown() -> u64 {
     60
@@ -1062,14 +1051,10 @@ impl SigilConfig {
         {
             return team.clone();
         }
-        // Fall back to system team.
+        // Fall back to system team leader.
         ProjectTeamConfig {
             leader: self.team.leader.clone(),
-            agents: if self.team.agents.is_empty() {
-                vec![self.team.leader.clone()]
-            } else {
-                self.team.agents.clone()
-            },
+            agents: vec![self.team.leader.clone()],
         }
     }
 
@@ -1096,13 +1081,6 @@ impl SigilConfig {
                 "system team leader '{}' is not a defined agent",
                 self.team.leader
             ));
-        }
-
-        // Validate system team agents.
-        for name in &self.team.agents {
-            if !agent_names.contains(name.as_str()) {
-                errors.push(format!("system team references unknown agent: '{name}'"));
-            }
         }
 
         // Validate per-project teams.
@@ -1768,14 +1746,13 @@ department = "backend"
     }
 
     #[test]
-    fn test_team_agents_field() {
+    fn test_team_leader_field() {
         let toml = r#"
 [sigil]
 name = "test"
 
 [team]
 leader = "alpha"
-agents = ["alpha"]
 
 [[agents]]
 name = "alpha"
@@ -1783,7 +1760,6 @@ prefix = "au"
 role = "orchestrator"
 "#;
         let config = SigilConfig::parse(toml).unwrap();
-        assert_eq!(config.team.agents, vec!["alpha"]);
         assert_eq!(config.leader(), "alpha");
     }
 
