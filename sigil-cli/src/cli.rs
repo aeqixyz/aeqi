@@ -123,11 +123,11 @@ pub enum Commands {
         action: PipelineAction,
     },
 
-    // --- Phase 6: Cron ---
-    /// Manage scheduled cron jobs.
-    Cron {
+    // --- Phase 6: Triggers ---
+    /// Manage agent triggers (scheduled + event-driven).
+    Trigger {
         #[command(subcommand)]
-        action: CronAction,
+        action: TriggerAction,
     },
 
     // --- Phase 7: Skills ---
@@ -414,25 +414,53 @@ pub enum ConfigAction {
 }
 
 #[derive(Subcommand)]
-pub enum CronAction {
-    /// Add a scheduled job.
-    Add {
+pub enum TriggerAction {
+    /// Create a new trigger for an agent.
+    Create {
+        /// Trigger name.
         name: String,
+        /// Agent name (must be a persistent agent).
+        #[arg(short, long)]
+        agent: String,
+        /// Cron expression or interval (e.g., "0 9 * * *" or "every 1h").
         #[arg(short, long)]
         schedule: Option<String>,
+        /// One-shot timestamp (ISO 8601).
         #[arg(long)]
         at: Option<String>,
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: String,
+        /// Event pattern: task_completed, task_failed, tool_call_completed.
         #[arg(short, long)]
-        prompt: String,
+        event: Option<String>,
+        /// Event project filter (optional).
         #[arg(long)]
-        isolated: bool,
+        event_project: Option<String>,
+        /// Event tool filter (optional).
+        #[arg(long)]
+        event_tool: Option<String>,
+        /// Cooldown in seconds for event triggers.
+        #[arg(long)]
+        cooldown: Option<u64>,
+        /// Skill to run when triggered.
+        #[arg(long)]
+        skill: String,
+        /// Maximum budget per execution in USD.
+        #[arg(long)]
+        max_budget: Option<f64>,
     },
-    /// List all cron jobs.
-    List,
-    /// Remove a cron job.
-    Remove { name: String },
+    /// List triggers.
+    List {
+        /// Filter by agent name.
+        #[arg(short, long)]
+        agent: Option<String>,
+    },
+    /// Show trigger details.
+    Show { id: String },
+    /// Enable a trigger.
+    Enable { id: String },
+    /// Disable a trigger.
+    Disable { id: String },
+    /// Delete a trigger.
+    Delete { id: String },
 }
 
 #[derive(Subcommand)]

@@ -18,6 +18,8 @@ pub struct SkillMeta {
     pub name: String,
     pub description: String,
     #[serde(default)]
+    pub phase: String,
+    #[serde(default)]
     pub triggers: Vec<String>,
 }
 

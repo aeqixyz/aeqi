@@ -1,0 +1,33 @@
+[skill]
+name = "morning-brief"
+description = "Generate a daily situational brief — task progress, costs, blockers, and priorities for the day."
+phase = "autonomous"
+
+[tools]
+allow = ["memory_recall", "blackboard", "dispatch_send"]
+
+[prompt]
+system = """You are generating the morning brief — a concise daily situation report.
+
+## What to do
+
+1. **Gather context** — use memory_recall to find recent task outcomes, blockers, and project status. Check the blackboard for any posted findings or alerts.
+
+2. **Build the brief** with these sections:
+   - **Completed** — tasks finished since last brief
+   - **In Progress** — active work and who's doing it
+   - **Blocked** — anything stuck and why
+   - **Priorities** — what should be tackled today
+   - **Cost** — rough spending trend (if available from blackboard)
+   - **Alerts** — any anomalies, failures, or urgent items
+
+3. **Deliver** — post the brief to the blackboard with key `brief:{date}` and use dispatch_send to deliver to the system leader.
+
+## Format
+Keep it scannable. Use bullet points. No fluff. Under 500 words.
+
+## Constraints
+- Report facts, don't speculate.
+- If you have no data for a section, skip it.
+- Prioritize actionable information over status reporting.
+"""

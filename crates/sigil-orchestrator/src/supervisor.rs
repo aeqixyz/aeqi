@@ -14,7 +14,6 @@ use crate::blackboard::Blackboard;
 use crate::checkpoint::AgentCheckpoint;
 use crate::cost_ledger::{CostEntry, CostLedger};
 use crate::decomposition::DecompositionResult;
-use crate::emotional_state::EmotionalState;
 use crate::escalation::{EscalationPolicy, EscalationTracker};
 use crate::execution_events::EventBroadcaster;
 use crate::executor::TaskOutcome;
@@ -84,10 +83,6 @@ pub struct Supervisor {
     pub reflect_model: String,
     /// Fires when a task closes (passed through to workers).
     pub task_notify: Arc<Notify>,
-    /// Emotional state tracking (trust, mood, interaction count).
-    pub emotional_state: Option<Arc<Mutex<EmotionalState>>>,
-    /// Path to save emotional state (agent's .sigil dir).
-    pub emotional_state_path: Option<std::path::PathBuf>,
     /// Max resolution attempts at the project level before escalating to leader.
     pub max_resolution_attempts: u32,
     /// Max task description size in chars before truncation.
@@ -132,6 +127,8 @@ pub struct Supervisor {
     /// Persistent agent registry — when set, workers look up agent identity
     /// from registry by name, loading system_prompt + entity memory scope.
     pub agent_registry: Option<Arc<crate::agent_registry::AgentRegistry>>,
+    /// Trigger store — when set, agents with manage_triggers capability get the tool.
+    pub trigger_store: Option<Arc<crate::trigger::TriggerStore>>,
 }
 
 impl Supervisor {
@@ -235,8 +232,6 @@ impl Supervisor {
             reflect_provider: None,
             reflect_model: String::new(),
             task_notify: project.task_notify.clone(),
-            emotional_state: None,
-            emotional_state_path: None,
             max_resolution_attempts: 1,
             max_description_chars: 8000,
             max_task_retries: 3,
@@ -264,6 +259,7 @@ impl Supervisor {
             }))),
             execution_mode: sigil_core::ExecutionMode::default(),
             agent_registry: None,
+            trigger_store: None,
         }
     }
 
@@ -353,35 +349,22 @@ impl Supervisor {
         worker_name: String,
         task: &sigil_tasks::Task,
     ) -> AgentWorker {
-        // Enrich identity with emotional state context if available.
-        let mut identity = if let Some(ref emo) = self.emotional_state {
-            let emo_guard = emo.lock().await;
-            let mut id = self.identity.clone();
-            let emo_ctx = emo_guard.as_context();
-            drop(emo_guard);
-            let existing = id.memory.unwrap_or_default();
-            id.memory = Some(if existing.is_empty() {
-                emo_ctx
-            } else {
-                format!("{existing}\n\n{emo_ctx}")
-            });
-            id
-        } else {
-            self.identity.clone()
-        };
+        let mut identity = self.identity.clone();
 
         // Look up persistent agent from registry — override identity if found.
+        let mut persistent_capabilities: Vec<String> = Vec::new();
         let persistent_agent_id = if let Some(ref registry) = self.agent_registry {
             if let Ok(Some(pa)) = registry.get_active_by_name(&agent_name).await {
                 // Override system prompt with persistent agent's prompt.
                 identity.persona = Some(pa.system_prompt.clone());
+                persistent_capabilities = pa.capabilities.clone();
                 info!(
                     project = %self.project_name,
                     agent = %agent_name,
                     agent_id = %pa.id,
                     "loaded persistent agent identity from registry"
                 );
-                Some(pa.id)
+                Some(pa.id.clone())
             } else {
                 None
             }
@@ -418,9 +401,11 @@ impl Supervisor {
                 self.task_notify.clone(),
             ),
         };
+        let persistent_agent_id_ref = persistent_agent_id.clone();
         if let Some(agent_id) = persistent_agent_id {
             worker = worker.with_persistent_agent(agent_id);
         }
+        let persistent_agent_id = persistent_agent_id_ref;
         if let Some(ref mem) = self.memory {
             worker = worker.with_memory(mem.clone());
         }
@@ -454,6 +439,28 @@ impl Supervisor {
                 worker.identity.memory = Some(format!(
                     "{existing}\n\n## Blackboard (shared knowledge)\n{bb_context}"
                 ));
+            }
+        }
+
+        // Inject TriggerManageTool if agent has manage_triggers capability.
+        if persistent_capabilities.iter().any(|c| c == "manage_triggers") {
+            if let (Some(ts), Some(agent_id)) =
+                (&self.trigger_store, &persistent_agent_id)
+            {
+                if let crate::agent_worker::WorkerExecution::Agent {
+                    ref mut tools, ..
+                } = worker.execution
+                {
+                    tools.push(Arc::new(crate::tools::TriggerManageTool::new(
+                        ts.clone(),
+                        agent_id.clone(),
+                    )));
+                    info!(
+                        project = %self.project_name,
+                        agent_id = %agent_id,
+                        "injected manage_triggers tool"
+                    );
+                }
             }
         }
 
@@ -942,8 +949,6 @@ impl Supervisor {
                     .with_agent(&agent_name),
                 );
             }
-            let emo_state = self.emotional_state.clone();
-            let emo_path = self.emotional_state_path.clone();
             let tasks_for_err = self.tasks.clone();
             let expertise_ledger = self.expertise_ledger.clone();
             let blackboard_worker = self.blackboard.clone();
@@ -1270,22 +1275,6 @@ impl Supervisor {
                             TaskOutcome::Handoff { .. } => {}
                         }
 
-                        // Update emotional state based on outcome.
-                        if let Some(ref emo) = emo_state {
-                            let mut state = emo.lock().await;
-                            match &outcome {
-                                TaskOutcome::Done(_) => state.record_positive(),
-                                TaskOutcome::Blocked { .. } | TaskOutcome::Handoff { .. } => {
-                                    state.record_interaction()
-                                }
-                                TaskOutcome::Failed(_) => state.record_negative(),
-                            }
-                            if let Some(ref path) = emo_path
-                                && let Err(e) = state.save(path)
-                            {
-                                warn!(error = %e, "failed to save emotional state");
-                            }
-                        }
                     }
                     Err(e) => {
                         warn!(
@@ -1304,14 +1293,6 @@ impl Supervisor {
                         }
                         if let Some(ref m) = metrics {
                             m.tasks_failed.inc();
-                        }
-                        // Record failure in emotional state.
-                        if let Some(ref emo) = emo_state {
-                            let mut state = emo.lock().await;
-                            state.record_negative();
-                            if let Some(ref path) = emo_path {
-                                let _ = state.save(path);
-                            }
                         }
                     }
                 }

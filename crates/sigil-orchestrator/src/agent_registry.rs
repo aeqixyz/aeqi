@@ -77,6 +77,30 @@ pub struct AgentTemplateFrontmatter {
     pub capabilities: Vec<String>,
     pub project: Option<String>,
     pub department: Option<String>,
+    #[serde(default)]
+    pub triggers: Vec<TemplateTrigger>,
+}
+
+/// A trigger definition within an agent template.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateTrigger {
+    pub name: String,
+    /// Schedule expression: cron ("0 9 * * *") or interval ("every 1h").
+    pub schedule: Option<String>,
+    /// One-shot timestamp (ISO 8601).
+    pub at: Option<String>,
+    /// Event pattern name: "task_completed", "task_failed", "tool_call_completed".
+    pub event: Option<String>,
+    /// Event project filter (optional, for task_completed/task_failed).
+    pub event_project: Option<String>,
+    /// Event tool filter (optional, for tool_call_completed).
+    pub event_tool: Option<String>,
+    /// Cooldown in seconds for event triggers (required for event type).
+    pub cooldown_secs: Option<u64>,
+    /// Skill to run when triggered.
+    pub skill: String,
+    /// Maximum budget per execution in USD.
+    pub max_budget_usd: Option<f64>,
 }
 
 /// Parse a template with YAML frontmatter into (frontmatter, system_prompt body).
@@ -100,17 +124,74 @@ pub fn parse_agent_template(content: &str) -> (AgentTemplateFrontmatter, String)
 }
 
 /// Minimal YAML-like parser for frontmatter key: value pairs.
+/// Supports flat key: value, inline arrays [a, b], and list-of-objects
+/// (indented `- key: value` blocks under a parent key like `triggers:`).
 fn parse_simple_yaml(text: &str) -> serde_json::Value {
     let mut map = serde_json::Map::new();
-    for line in text.lines() {
-        let line = line.trim();
+    let lines: Vec<&str> = text.lines().collect();
+    let mut i = 0;
+
+    while i < lines.len() {
+        let line = lines[i].trim();
         if line.is_empty() || line.starts_with('#') {
+            i += 1;
             continue;
         }
+
         if let Some((key, val)) = line.split_once(':') {
             let key = key.trim().to_string();
-            let val = val.trim().trim_matches('"');
+            let val = val.trim();
 
+            if val.is_empty() {
+                // Could be a list-of-objects (e.g., `triggers:` followed by `  - name: ...`)
+                let mut items: Vec<serde_json::Value> = Vec::new();
+                i += 1;
+                while i < lines.len() {
+                    let sub = lines[i];
+                    let trimmed = sub.trim();
+                    // Stop if we hit a non-indented line (next top-level key)
+                    if !sub.starts_with(' ') && !sub.starts_with('\t') && !trimmed.is_empty() {
+                        break;
+                    }
+                    if trimmed.is_empty() {
+                        i += 1;
+                        continue;
+                    }
+                    // New list item: starts with "- "
+                    if let Some(first_kv) = trimmed.strip_prefix("- ") {
+                        let mut obj = serde_json::Map::new();
+                        // Parse the first key: value on the "- " line
+                        if let Some((k, v)) = first_kv.split_once(':') {
+                            let v = v.trim().trim_matches('"');
+                            insert_typed_value(&mut obj, k.trim(), v);
+                        }
+                        i += 1;
+                        // Continue reading indented key: value lines for this object
+                        while i < lines.len() {
+                            let inner = lines[i].trim();
+                            if inner.is_empty() {
+                                i += 1;
+                                continue;
+                            }
+                            if inner.starts_with("- ") || (!lines[i].starts_with(' ') && !lines[i].starts_with('\t')) {
+                                break; // Next item or end of block
+                            }
+                            if let Some((k, v)) = inner.split_once(':') {
+                                let v = v.trim().trim_matches('"');
+                                insert_typed_value(&mut obj, k.trim(), v);
+                            }
+                            i += 1;
+                        }
+                        items.push(serde_json::Value::Object(obj));
+                    } else {
+                        i += 1;
+                    }
+                }
+                map.insert(key, serde_json::Value::Array(items));
+                continue;
+            }
+
+            let val = val.trim_matches('"');
             if val.starts_with('[') && val.ends_with(']') {
                 let items: Vec<serde_json::Value> = val[1..val.len() - 1]
                     .split(',')
@@ -121,8 +202,21 @@ fn parse_simple_yaml(text: &str) -> serde_json::Value {
                 map.insert(key, serde_json::Value::String(val.to_string()));
             }
         }
+        i += 1;
     }
     serde_json::Value::Object(map)
+}
+
+/// Insert a value into a JSON map, trying to preserve numeric types.
+fn insert_typed_value(map: &mut serde_json::Map<String, serde_json::Value>, key: &str, val: &str) {
+    let key = key.to_string();
+    if let Ok(n) = val.parse::<u64>() {
+        map.insert(key, serde_json::json!(n));
+    } else if let Ok(f) = val.parse::<f64>() {
+        map.insert(key, serde_json::json!(f));
+    } else {
+        map.insert(key, serde_json::Value::String(val.to_string()));
+    }
 }
 
 /// Lifecycle status of a persistent agent.
@@ -161,6 +255,7 @@ impl AgentRegistry {
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA busy_timeout = 5000;
+             PRAGMA foreign_keys = ON;
              CREATE TABLE IF NOT EXISTS agents (
                  id TEXT PRIMARY KEY,
                  name TEXT NOT NULL,
@@ -179,7 +274,24 @@ impl AgentRegistry {
              );
              CREATE INDEX IF NOT EXISTS idx_agents_project ON agents(project);
              CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
-             CREATE INDEX IF NOT EXISTS idx_agents_name ON agents(name);",
+             CREATE INDEX IF NOT EXISTS idx_agents_name ON agents(name);
+             CREATE TABLE IF NOT EXISTS triggers (
+                 id TEXT PRIMARY KEY,
+                 agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+                 name TEXT NOT NULL,
+                 trigger_type TEXT NOT NULL,
+                 config TEXT NOT NULL,
+                 skill TEXT NOT NULL,
+                 enabled INTEGER NOT NULL DEFAULT 1,
+                 max_budget_usd REAL,
+                 created_at TEXT NOT NULL,
+                 last_fired TEXT,
+                 fire_count INTEGER NOT NULL DEFAULT 0,
+                 total_cost_usd REAL NOT NULL DEFAULT 0.0,
+                 UNIQUE(agent_id, name)
+             );
+             CREATE INDEX IF NOT EXISTS idx_triggers_agent ON triggers(agent_id);
+             CREATE INDEX IF NOT EXISTS idx_triggers_enabled ON triggers(enabled);",
         )?;
 
         info!(path = %db_path.display(), "agent registry opened");
@@ -189,6 +301,7 @@ impl AgentRegistry {
     }
 
     /// Spawn a new persistent agent from a template string (frontmatter + prompt body).
+    /// Also creates any triggers defined in the template frontmatter.
     pub async fn spawn_from_template(
         &self,
         template_content: &str,
@@ -198,7 +311,9 @@ impl AgentRegistry {
         let (fm, system_prompt) = parse_agent_template(template_content);
         let template_name = fm.name.clone().unwrap_or_else(|| "custom".to_string());
         let name = fm.name.unwrap_or_else(|| format!("agent-{}", &uuid::Uuid::new_v4().to_string()[..8]));
-        self.spawn(
+        let triggers = fm.triggers.clone();
+
+        let agent = self.spawn(
             &name,
             fm.display_name.as_deref(),
             &template_name,
@@ -207,7 +322,32 @@ impl AgentRegistry {
             department_override.or(fm.department.as_deref()),
             fm.model.as_deref(),
             &fm.capabilities,
-        ).await
+        ).await?;
+
+        // Create triggers from template.
+        if !triggers.is_empty() {
+            let trigger_store = self.trigger_store();
+            for t in &triggers {
+                let trigger_type = template_trigger_to_type(t)?;
+                trigger_store
+                    .create(&crate::trigger::NewTrigger {
+                        agent_id: agent.id.clone(),
+                        name: t.name.clone(),
+                        trigger_type,
+                        skill: t.skill.clone(),
+                        max_budget_usd: t.max_budget_usd,
+                    })
+                    .await?;
+                info!(
+                    agent = %agent.name,
+                    trigger = %t.name,
+                    skill = %t.skill,
+                    "trigger created from template"
+                );
+            }
+        }
+
+        Ok(agent)
     }
 
     /// Spawn a new persistent agent directly.
@@ -366,6 +506,11 @@ impl AgentRegistry {
         Ok(())
     }
 
+    /// Get a TriggerStore sharing this registry's database connection.
+    pub fn trigger_store(&self) -> crate::trigger::TriggerStore {
+        crate::trigger::TriggerStore::new(self.db.clone())
+    }
+
     /// Get the default agent for a project (first active agent scoped to that project,
     /// or the first root-scoped active agent).
     pub async fn default_for_project(&self, project: Option<&str>) -> Result<Option<PersistentAgent>> {
@@ -396,6 +541,47 @@ impl AgentRegistry {
 
         Ok(agent)
     }
+}
+
+/// Convert a template trigger definition to a TriggerType.
+fn template_trigger_to_type(t: &TemplateTrigger) -> Result<crate::trigger::TriggerType> {
+    if let Some(ref schedule) = t.schedule {
+        return Ok(crate::trigger::TriggerType::Schedule {
+            expr: schedule.clone(),
+        });
+    }
+    if let Some(ref at_str) = t.at {
+        let at = chrono::DateTime::parse_from_rfc3339(at_str)
+            .map_err(|e| anyhow::anyhow!("invalid 'at' timestamp: {e}"))?
+            .with_timezone(&Utc);
+        return Ok(crate::trigger::TriggerType::Once { at });
+    }
+    if let Some(ref event) = t.event {
+        let cooldown_secs = t.cooldown_secs.unwrap_or(300);
+        if cooldown_secs < 60 {
+            anyhow::bail!("cooldown_secs must be >= 60, got {cooldown_secs}");
+        }
+        let pattern = match event.as_str() {
+            "task_completed" => crate::trigger::EventPattern::TaskCompleted {
+                project: t.event_project.clone(),
+            },
+            "task_failed" => crate::trigger::EventPattern::TaskFailed {
+                project: t.event_project.clone(),
+            },
+            "tool_call_completed" => crate::trigger::EventPattern::ToolCallCompleted {
+                tool: t.event_tool.clone(),
+            },
+            other => anyhow::bail!("unknown event pattern: {other}"),
+        };
+        return Ok(crate::trigger::TriggerType::Event {
+            pattern,
+            cooldown_secs,
+        });
+    }
+    anyhow::bail!(
+        "trigger '{}' must have one of: schedule, at, or event",
+        t.name
+    )
 }
 
 fn row_to_agent(row: &rusqlite::Row) -> PersistentAgent {
@@ -590,5 +776,44 @@ You learn everything about the user aggressively.
         assert_eq!(agent.capabilities, vec!["spawn_agents", "spawn_projects"]);
         assert!(agent.system_prompt.contains("personal assistant"));
         assert!(agent.project.is_none()); // Root scope
+    }
+
+    #[tokio::test]
+    async fn spawn_from_template_creates_triggers() {
+        let reg = test_registry().await;
+        let template = r#"---
+name: watcher
+model: anthropic/claude-sonnet-4.6
+capabilities: [manage_triggers]
+triggers:
+  - name: morning-brief
+    schedule: "0 9 * * *"
+    skill: morning-brief
+    max_budget_usd: 0.50
+  - name: failure-watch
+    event: task_failed
+    cooldown_secs: 300
+    skill: failure-triage
+    max_budget_usd: 1.00
+---
+
+You are a monitoring agent.
+"#;
+        let agent = reg.spawn_from_template(template, None, None).await.unwrap();
+        assert_eq!(agent.name, "watcher");
+
+        // Verify triggers were created.
+        let trigger_store = reg.trigger_store();
+        let triggers = trigger_store.list_for_agent(&agent.id).await.unwrap();
+        assert_eq!(triggers.len(), 2);
+
+        let brief = triggers.iter().find(|t| t.name == "morning-brief").unwrap();
+        assert_eq!(brief.skill, "morning-brief");
+        assert!(matches!(brief.trigger_type, crate::trigger::TriggerType::Schedule { ref expr } if expr == "0 9 * * *"));
+        assert_eq!(brief.max_budget_usd, Some(0.50));
+
+        let watch = triggers.iter().find(|t| t.name == "failure-watch").unwrap();
+        assert_eq!(watch.skill, "failure-triage");
+        assert!(matches!(watch.trigger_type, crate::trigger::TriggerType::Event { cooldown_secs: 300, .. }));
     }
 }

@@ -1238,3 +1238,251 @@ pub fn build_orchestration_tools(
 
     tools
 }
+
+// ---------------------------------------------------------------------------
+// TriggerManageTool — CRUD for agent-owned triggers
+// ---------------------------------------------------------------------------
+
+/// Tool for creating, listing, enabling, disabling, and deleting triggers.
+/// Scoped to the calling agent's own triggers.
+pub struct TriggerManageTool {
+    trigger_store: Arc<crate::trigger::TriggerStore>,
+    agent_id: String,
+}
+
+impl TriggerManageTool {
+    pub fn new(trigger_store: Arc<crate::trigger::TriggerStore>, agent_id: String) -> Self {
+        Self {
+            trigger_store,
+            agent_id,
+        }
+    }
+}
+
+#[async_trait]
+impl Tool for TriggerManageTool {
+    async fn execute(&self, args: serde_json::Value) -> Result<ToolResult> {
+        let action = args
+            .get("action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("list");
+
+        match action {
+            "create" => {
+                let name = args
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("'name' is required"))?;
+                let skill = args
+                    .get("skill")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("'skill' is required"))?;
+                let max_budget_usd = args.get("max_budget_usd").and_then(|v| v.as_f64());
+
+                // Determine trigger type from args.
+                let trigger_type = if let Some(schedule) = args.get("schedule").and_then(|v| v.as_str()) {
+                    crate::trigger::TriggerType::Schedule {
+                        expr: schedule.to_string(),
+                    }
+                } else if let Some(event) = args.get("event_pattern").and_then(|v| v.as_str()) {
+                    let cooldown = args
+                        .get("cooldown_secs")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(300);
+                    if cooldown < 60 {
+                        return Ok(ToolResult {
+                            output: "cooldown_secs must be >= 60".to_string(),
+                            is_error: true,
+                        });
+                    }
+                    let pattern = match event {
+                        "task_completed" => crate::trigger::EventPattern::TaskCompleted {
+                            project: args.get("project_filter").and_then(|v| v.as_str()).map(String::from),
+                        },
+                        "task_failed" => crate::trigger::EventPattern::TaskFailed {
+                            project: args.get("project_filter").and_then(|v| v.as_str()).map(String::from),
+                        },
+                        "tool_call_completed" => crate::trigger::EventPattern::ToolCallCompleted {
+                            tool: args.get("tool_filter").and_then(|v| v.as_str()).map(String::from),
+                        },
+                        other => {
+                            return Ok(ToolResult {
+                                output: format!("unknown event pattern: {other}"),
+                                is_error: true,
+                            });
+                        }
+                    };
+                    crate::trigger::TriggerType::Event {
+                        pattern,
+                        cooldown_secs: cooldown,
+                    }
+                } else {
+                    return Ok(ToolResult {
+                        output: "provide 'schedule' or 'event_pattern'".to_string(),
+                        is_error: true,
+                    });
+                };
+
+                match self
+                    .trigger_store
+                    .create(&crate::trigger::NewTrigger {
+                        agent_id: self.agent_id.clone(),
+                        name: name.to_string(),
+                        trigger_type,
+                        skill: skill.to_string(),
+                        max_budget_usd,
+                    })
+                    .await
+                {
+                    Ok(trigger) => Ok(ToolResult {
+                        output: format!(
+                            "Trigger '{}' created (id: {}, skill: {}, type: {})",
+                            trigger.name,
+                            trigger.id,
+                            trigger.skill,
+                            trigger.trigger_type.type_str()
+                        ),
+                        is_error: false,
+                    }),
+                    Err(e) => Ok(ToolResult {
+                        output: format!("Failed to create trigger: {e}"),
+                        is_error: true,
+                    }),
+                }
+            }
+
+            "list" => {
+                let triggers = self
+                    .trigger_store
+                    .list_for_agent(&self.agent_id)
+                    .await
+                    .unwrap_or_default();
+                let items: Vec<String> = triggers
+                    .iter()
+                    .map(|t| {
+                        format!(
+                            "- {} (id: {}, type: {}, skill: {}, enabled: {}, fires: {})",
+                            t.name,
+                            t.id,
+                            t.trigger_type.type_str(),
+                            t.skill,
+                            t.enabled,
+                            t.fire_count
+                        )
+                    })
+                    .collect();
+                Ok(ToolResult {
+                    output: if items.is_empty() {
+                        "No triggers.".to_string()
+                    } else {
+                        items.join("\n")
+                    },
+                    is_error: false,
+                })
+            }
+
+            "enable" | "disable" => {
+                let id = args
+                    .get("trigger_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("'trigger_id' is required"))?;
+                let enabled = action == "enable";
+                match self.trigger_store.update_enabled(id, enabled).await {
+                    Ok(()) => Ok(ToolResult {
+                        output: format!("Trigger {id} {}.", if enabled { "enabled" } else { "disabled" }),
+                        is_error: false,
+                    }),
+                    Err(e) => Ok(ToolResult {
+                        output: format!("Failed: {e}"),
+                        is_error: true,
+                    }),
+                }
+            }
+
+            "delete" => {
+                let id = args
+                    .get("trigger_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("'trigger_id' is required"))?;
+                match self.trigger_store.delete(id).await {
+                    Ok(()) => Ok(ToolResult {
+                        output: format!("Trigger {id} deleted."),
+                        is_error: false,
+                    }),
+                    Err(e) => Ok(ToolResult {
+                        output: format!("Failed: {e}"),
+                        is_error: true,
+                    }),
+                }
+            }
+
+            other => Ok(ToolResult {
+                output: format!("Unknown action: {other}. Use: create, list, enable, disable, delete"),
+                is_error: true,
+            }),
+        }
+    }
+
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "manage_triggers".to_string(),
+            description: "Create, list, enable, disable, or delete triggers for this agent. Triggers automate recurring tasks on a schedule or in response to events.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["create", "list", "enable", "disable", "delete"],
+                        "description": "Action to perform"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Trigger name (for create)"
+                    },
+                    "schedule": {
+                        "type": "string",
+                        "description": "Cron expression or interval (e.g., '0 9 * * *' or 'every 1h')"
+                    },
+                    "event_pattern": {
+                        "type": "string",
+                        "enum": ["task_completed", "task_failed", "tool_call_completed"],
+                        "description": "Event to react to"
+                    },
+                    "cooldown_secs": {
+                        "type": "integer",
+                        "description": "Minimum seconds between event trigger fires (>= 60)"
+                    },
+                    "skill": {
+                        "type": "string",
+                        "description": "Skill to run when triggered"
+                    },
+                    "max_budget_usd": {
+                        "type": "number",
+                        "description": "Maximum budget per execution in USD"
+                    },
+                    "trigger_id": {
+                        "type": "string",
+                        "description": "Trigger ID (for enable/disable/delete)"
+                    },
+                    "project_filter": {
+                        "type": "string",
+                        "description": "Filter events by project (optional)"
+                    },
+                    "tool_filter": {
+                        "type": "string",
+                        "description": "Filter tool_call_completed events by tool name (optional)"
+                    }
+                },
+                "required": ["action"]
+            }),
+        }
+    }
+
+    fn name(&self) -> &str {
+        "manage_triggers"
+    }
+
+    fn is_concurrent_safe(&self, _input: &serde_json::Value) -> bool {
+        false
+    }
+}

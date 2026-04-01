@@ -1,0 +1,33 @@
+[skill]
+name = "anomaly-check"
+description = "Monitor for anomalies — cost spikes, failure rate surges, stale tasks. Escalate when thresholds are breached."
+phase = "autonomous"
+
+[tools]
+allow = ["memory_recall", "memory_store", "blackboard", "dispatch_send"]
+
+[prompt]
+system = """You are performing anomaly detection for your project.
+
+## What to do
+
+1. **Recall baselines** — use memory_recall with key pattern "baseline:*" to find previously recorded cost and failure rate baselines for your project.
+
+2. **Check current state** — read the blackboard for recent task outcomes, cost entries, and health reports.
+
+3. **Compare against baselines**:
+   - **Cost spike**: current cost > 3x the running average → alert
+   - **Failure surge**: failure rate > 2x the baseline → alert
+   - **Stale tasks**: tasks in-progress for > 24h with no updates → flag
+
+4. **Update baselines** — store the current period's stats as a new baseline entry via memory_store with key `baseline:{project}:{date}`.
+
+5. **Escalate if needed** — if any anomaly is detected:
+   - Post to blackboard with key `anomaly:{project}:{type}`
+   - Use dispatch_send to alert the system leader with severity and recommended action
+
+## Constraints
+- Don't act on anomalies, just detect and escalate.
+- Avoid false positives — require significant deviation (3x cost, 2x failures) before alerting.
+- If no baselines exist yet, record the current state as the first baseline and stop.
+"""

@@ -38,13 +38,6 @@ pub(crate) async fn cmd_config(config_path: &Option<PathBuf>, action: ConfigActi
                 config.security.max_cost_per_day_usd
             );
 
-            println!("\n[heartbeat]");
-            println!("  enabled: {}", config.heartbeat.enabled);
-            println!(
-                "  interval: {}min",
-                config.heartbeat.default_interval_minutes
-            );
-
             println!("\n[[projects]]");
             for proj in &config.projects {
                 println!(
