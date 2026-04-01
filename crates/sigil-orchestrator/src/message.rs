@@ -40,11 +40,6 @@ pub enum DispatchKind {
         attempts: u32,
     },
 
-    HeartbeatAlert {
-        project: String,
-        issues: String,
-    },
-
     Resolution {
         task_id: String,
         answer: String,
@@ -105,7 +100,6 @@ impl DispatchKind {
                 | Self::TaskBlocked { .. }
                 | Self::TaskFailed { .. }
                 | Self::WorkerCrashed { .. }
-                | Self::HeartbeatAlert { .. }
                 | Self::Resolution { .. }
                 | Self::Escalation { .. }
         )
@@ -119,7 +113,6 @@ impl DispatchKind {
             Self::PatrolReport { .. } => "PATROL",
             Self::WorkerCrashed { .. } => "WORKER_CRASHED",
             Self::Escalation { .. } => "ESCALATE",
-            Self::HeartbeatAlert { .. } => "HEARTBEAT_ALERT",
             Self::Resolution { .. } => "RESOLVED",
             Self::TaskProposal { .. } => "TASK_PROPOSAL",
             Self::AgentAdvice { .. } => "AGENT_ADVICE",
@@ -162,9 +155,6 @@ impl DispatchKind {
                      Full description:\n{description}\n\n\
                      Blocked after {attempts} resolution attempt(s).",
             ),
-            Self::HeartbeatAlert { project, issues } => {
-                format!("Project {project} heartbeat detected issues:\n{issues}")
-            }
             Self::Resolution { task_id, answer } => {
                 format!("Resolution for task {task_id}: {answer}")
             }

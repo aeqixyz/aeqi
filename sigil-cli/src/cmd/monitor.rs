@@ -27,7 +27,6 @@ struct DaemonMonitor {
     configured_projects: Option<u64>,
     configured_advisors: Option<u64>,
     max_workers: Option<u64>,
-    pulses: Option<u64>,
     cost_today_usd: Option<f64>,
     daily_budget_usd: Option<f64>,
     budget_remaining_usd: Option<f64>,
@@ -176,7 +175,6 @@ async fn load_daemon_monitor(config_path: &Option<PathBuf>) -> DaemonMonitor {
         configured_projects: json_u64(&response, "configured_projects"),
         configured_advisors: json_u64(&response, "configured_advisors"),
         max_workers: json_u64(&response, "max_workers"),
-        pulses: json_u64(&response, "pulses"),
         cost_today_usd: response
             .get("cost_today_usd")
             .and_then(serde_json::Value::as_f64),
@@ -454,11 +452,7 @@ fn render_monitor_report(report: &MonitorReport) {
             );
         }
         if let Some(max_workers) = report.daemon.max_workers {
-            println!(
-                "  worker capacity: {} max across {} pulse(s)",
-                max_workers,
-                report.daemon.pulses.unwrap_or(0)
-            );
+            println!("  worker capacity: {} max", max_workers);
         }
         if let (Some(spent), Some(budget), Some(remaining)) = (
             report.daemon.cost_today_usd,

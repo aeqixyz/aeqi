@@ -5,7 +5,7 @@ use std::path::Path;
 ///
 /// Two-source loading:
 ///   - Agent personality (PERSONA, IDENTITY, PREFERENCES, MEMORY) from `agents/{name}/`
-///   - Project context (AGENTS, KNOWLEDGE, HEARTBEAT) from `projects/{name}/`
+///   - Project context (AGENTS, KNOWLEDGE) from `projects/{name}/`
 ///   - Shared workflow from `agents/shared/WORKFLOW.md`
 #[derive(Debug, Clone, Default)]
 pub struct Identity {
@@ -17,8 +17,6 @@ pub struct Identity {
     pub operational: Option<String>,
     /// Operating instructions (AGENTS.md — from project dir).
     pub agents: Option<String>,
-    /// Periodic check instructions (HEARTBEAT.md — from project dir).
-    pub heartbeat: Option<String>,
     /// Accumulated evolution patches (EVOLUTION.md — from agent dir, written by lifecycle engine).
     pub evolution: Option<String>,
     /// Persistent memories (MEMORY.md — from agent dir).
@@ -37,7 +35,7 @@ impl Identity {
     /// Load identity files from an agent directory + optional project directory.
     ///
     /// Agent personality files (PERSONA, IDENTITY, PREFERENCES, MEMORY) from `agent_dir`.
-    /// Project context files (AGENTS, KNOWLEDGE, HEARTBEAT) from `project_dir`.
+    /// Project context files (AGENTS, KNOWLEDGE) from `project_dir`.
     /// Shared workflow from `agent_dir/../shared/WORKFLOW.md`.
     pub fn load(agent_dir: &Path, domain_dir: Option<&Path>) -> Result<Self> {
         let shared_dir = agent_dir.parent().map(|p| p.join("shared"));
@@ -56,10 +54,6 @@ impl Identity {
                 .flatten(),
             knowledge: domain_dir
                 .map(|d| load_optional(d, "KNOWLEDGE.md"))
-                .transpose()?
-                .flatten(),
-            heartbeat: domain_dir
-                .map(|d| load_optional(d, "HEARTBEAT.md"))
                 .transpose()?
                 .flatten(),
             // Shared
@@ -94,7 +88,6 @@ impl Identity {
             operational: load_optional(dir, "OPERATIONAL.md")?,
             evolution: load_optional(dir, "EVOLUTION.md")?,
             agents: load_optional(dir, "AGENTS.md")?,
-            heartbeat: load_optional(dir, "HEARTBEAT.md")?,
             memory: load_optional(dir, "MEMORY.md")?,
             knowledge: load_optional(dir, "KNOWLEDGE.md")?,
             preferences: load_optional(dir, "PREFERENCES.md")?,
@@ -213,7 +206,6 @@ mod tests {
         assert_eq!(id.knowledge.as_deref(), Some("Project uses Rust."));
         assert!(id.operational.is_none());
         assert!(id.evolution.is_none());
-        assert!(id.heartbeat.is_none());
     }
 
     #[test]
@@ -242,7 +234,6 @@ mod tests {
             knowledge: Some("knowledge".into()),
             preferences: Some("preferences".into()),
             memory: Some("memory".into()),
-            heartbeat: None,
             skill_prompt: Some("skill".into()),
         };
 

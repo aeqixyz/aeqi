@@ -689,8 +689,13 @@ impl AgentWorker {
                 );
                 let executor = crate::claude_code::ClaudeCodeExecutor::new(cwd.clone())
                     .with_budget(*max_budget_usd);
+                // Use execute_with_identity to pass the enriched identity
+                // (persona, memory, blackboard, resume brief) to Claude Code.
+                // Previously this was silently dropped — the CC agent ran
+                // without any of the worker's context.
+                let identity_prompt = enriched_identity.system_prompt();
                 executor
-                    .execute(&task_context)
+                    .execute_with_identity(&identity_prompt, &task_context)
                     .await
                     .map(|cc_result| {
                         info!(

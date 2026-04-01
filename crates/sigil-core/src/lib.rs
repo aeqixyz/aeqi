@@ -11,9 +11,14 @@ pub mod chat_stream;
 pub mod config;
 pub mod identity;
 pub mod security;
+pub mod shell_hooks;
+pub mod streaming_executor;
 pub mod traits;
 
-pub use agent::{Agent, AgentConfig, AgentResult, AgentStopReason, SessionState, SessionType};
+pub use agent::{
+    Agent, AgentConfig, AgentResult, AgentStopReason, ContentReplacementState, LoopNotification,
+    NotificationReceiver, NotificationSender, SessionState, SessionType,
+};
 pub use chat_stream::{ChatStreamEvent, ChatStreamSender};
 pub use config::{
     AgentOrgContext, AgentRole, AgentVoice, ContextBudgetConfig, ExecutionMode, MissionDef,

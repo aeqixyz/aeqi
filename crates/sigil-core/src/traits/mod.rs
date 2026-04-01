@@ -8,9 +8,12 @@ pub mod tool;
 pub use channel::{Channel, IncomingMessage, OutgoingMessage};
 pub use embedder::Embedder;
 pub use memory::{Memory, MemoryCategory, MemoryEntry, MemoryQuery, MemoryScope};
-pub use observer::{ContextAttachment, Event, LogObserver, LoopAction, Observer, PrometheusObserver};
+pub use observer::{
+    CompactInstructions, ContextAttachment, Event, LogObserver, LoopAction, Observer,
+    PrometheusObserver,
+};
 pub use provider::{
     ChatRequest, ChatResponse, ContentPart, Message, MessageContent, Provider, Role, StopReason,
     StreamEvent, ToolCall, ToolSpec, Usage,
 };
-pub use tool::{Tool, ToolResult};
+pub use tool::{InterruptBehavior, Tool, ToolResult};

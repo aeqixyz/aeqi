@@ -1,0 +1,33 @@
+[skill]
+name = "memory-consolidation"
+description = "Consolidate and compress agent memories. Deduplicate similar entries, merge related knowledge, prune stale facts."
+phase = "autonomous"
+
+[tools]
+allow = ["memory_recall", "memory_store"]
+
+[prompt]
+system = """You are performing memory consolidation — housekeeping for your knowledge.
+
+## What to do
+
+1. **Recall all entity memories** — use memory_recall with scope "entity", broad query like "all recent knowledge and experiences". Also recall domain memories for your project.
+
+2. **Identify redundancy** — look for:
+   - Duplicate entries saying the same thing differently
+   - Superseded facts (old state replaced by newer knowledge)
+   - Entries that can be merged into a single comprehensive entry
+
+3. **Consolidate** — for each cluster of related/redundant memories:
+   - Write ONE clean consolidated entry via memory_store
+   - Use the most informative key from the cluster
+   - Preserve all unique information, discard only true duplicates
+
+4. **Prune stale facts** — if you find memories about things that are clearly no longer true (completed tasks described as in-progress, old deadlines, etc.), note them but don't delete — just store a consolidation note.
+
+## Constraints
+- Never discard information that might still be relevant.
+- Prefer merging over deleting.
+- Keep consolidated entries clear and scannable.
+- If memories are already clean, say so and stop.
+"""

@@ -19,8 +19,6 @@ pub struct SigilConfig {
     #[serde(default)]
     pub memory: MemoryConfig,
     #[serde(default)]
-    pub heartbeat: HeartbeatConfig,
-    #[serde(default)]
     pub channels: ChannelsConfig,
     /// Global repo pool — all agents can access all repos.
     #[serde(default)]
@@ -46,9 +44,6 @@ pub struct SigilConfig {
     /// Orchestration tuning parameters (retries, timeouts, limits).
     #[serde(default)]
     pub orchestrator: OrchestratorConfig,
-    /// Watchdog rules — event-driven automation (Phase 8).
-    #[serde(default)]
-    pub watchdogs: Vec<toml::Value>,
     /// Web API server settings.
     #[serde(default)]
     pub web: WebConfig,
@@ -252,36 +247,6 @@ fn default_chunk_size() -> usize {
 }
 fn default_chunk_overlap() -> usize {
     80
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HeartbeatConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default = "default_pulse_interval")]
-    pub default_interval_minutes: u32,
-    #[serde(default)]
-    pub reflection_enabled: bool,
-    #[serde(default = "default_reflection_interval")]
-    pub reflection_interval_minutes: u32,
-}
-
-impl Default for HeartbeatConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            default_interval_minutes: 30,
-            reflection_enabled: false,
-            reflection_interval_minutes: 240,
-        }
-    }
-}
-
-fn default_pulse_interval() -> u32 {
-    30
-}
-fn default_reflection_interval() -> u32 {
-    240
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -1041,6 +1006,24 @@ pub struct ProjectConfig {
     /// Departments within this project (org chart hierarchy).
     #[serde(default)]
     pub departments: Vec<DepartmentConfig>,
+    /// Domain hints: keyword → skill/doc file mappings. Used by the Supervisor
+    /// to inject domain-specific context when tasks match keyword patterns.
+    /// Replaces the hardcoded keyword map in supervisor.rs.
+    #[serde(default)]
+    pub domain_hints: Vec<DomainHintConfig>,
+    /// Custom compaction instructions for this project. Appended to the 9-section
+    /// compaction prompt when agents working on this project need to compact.
+    #[serde(default)]
+    pub compact_instructions: Option<String>,
+}
+
+/// Domain keyword → file mapping for automatic context injection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DomainHintConfig {
+    /// Keywords that trigger this hint (matched case-insensitively against task subject + labels).
+    pub keywords: Vec<String>,
+    /// Skill/doc files to inject when keywords match (relative to project skills dir).
+    pub files: Vec<String>,
 }
 
 /// A department within a project — defines a team channel with its own agents.

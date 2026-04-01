@@ -1629,6 +1629,8 @@ mod tests {
             orchestrator: None,
             missions: Vec::new(),
             departments: Vec::new(),
+            domain_hints: Vec::new(),
+            compact_instructions: None,
         };
         let project = Project::from_config(&config, dir.path(), "test-model")?;
         Ok((Arc::new(project), dir))
@@ -1992,6 +1994,8 @@ mod tests {
                 agents: vec!["reviewer".to_string()],
                 description: None,
             }],
+            domain_hints: Vec::new(),
+            compact_instructions: None,
         };
         let project = Arc::new(Project::from_config(&config, dir.path(), "test-model").unwrap());
         let provider: Arc<dyn Provider> = Arc::new(DoneProvider);

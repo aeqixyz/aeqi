@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, info, warn};
 
 use crate::identity::Identity;
@@ -9,6 +10,19 @@ use crate::traits::{
     MemoryCategory, MemoryQuery, MemoryScope, Message, MessageContent, Observer, Provider, Role,
     StopReason, Tool, ToolResult, ToolSpec, Usage,
 };
+
+/// Generic notification that can be injected into the agent loop between turns.
+/// Used by background agents to deliver results to the parent.
+#[derive(Debug, Clone)]
+pub struct LoopNotification {
+    /// Content to inject as a user-role message (e.g., XML task-notification).
+    pub content: String,
+}
+
+/// Sender half for injecting notifications into an agent loop.
+pub type NotificationSender = mpsc::UnboundedSender<LoopNotification>;
+/// Receiver half for draining notifications inside the agent loop.
+pub type NotificationReceiver = mpsc::UnboundedReceiver<LoopNotification>;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -26,8 +40,32 @@ const CHARS_PER_TOKEN: usize = 4;
 /// Maximum compaction attempts per agent run to prevent infinite loops.
 const MAX_COMPACTIONS_PER_RUN: u32 = 3;
 
+/// Minimum total prompt tokens before session memory extraction starts.
+const SESSION_MEMORY_MIN_TOKENS: u32 = 50_000;
+
+/// Key prefix for session memory entries.
+const SESSION_MEMORY_KEY: &str = "session-notes";
+
 /// Maximum mid-loop memory recalls.
 const MAX_MID_LOOP_RECALLS: u32 = 2;
+
+/// Microcompact: keep the N most recent compactable tool results.
+const MICROCOMPACT_KEEP_RECENT: usize = 5;
+
+/// Tool names whose results can be cleared by microcompact.
+const COMPACTABLE_TOOLS: &[&str] = &[
+    "read", "read_file", "readfile", "cat",
+    "shell", "bash",
+    "grep",
+    "glob",
+    "web_search", "websearch",
+    "web_fetch", "webfetch",
+    "edit", "edit_file", "fileedit",
+    "write", "write_file", "filewrite",
+];
+
+/// Cleared content marker for microcompacted tool results.
+const MICROCOMPACT_CLEARED: &str = "[Old tool result content cleared]";
 
 /// Consecutive failures before switching to fallback model.
 const FALLBACK_TRIGGER_COUNT: u32 = 3;
@@ -40,7 +78,7 @@ const PERSIST_PREVIEW_SIZE: usize = 2000;
 // ---------------------------------------------------------------------------
 
 /// Session type — determines what the agent loop is allowed to do.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum SessionType {
     /// Perpetual session (Telegram/Discord channel). Never ends.
     /// Can self-delegate async sessions. The only session type that
@@ -50,13 +88,8 @@ pub enum SessionType {
     /// Cannot spawn async sessions on itself. Can delegate to
     /// ephemeral subagents (different identity) but they also
     /// cannot delegate (no recursion).
+    #[default]
     Async,
-}
-
-impl Default for SessionType {
-    fn default() -> Self {
-        Self::Async
-    }
 }
 
 /// Configuration for an agent loop.
@@ -109,6 +142,18 @@ pub struct AgentConfig {
     pub session_file: Option<PathBuf>,
     /// Session type — Perpetual (never ends, can self-delegate) or Async (runs to completion).
     pub session_type: SessionType,
+    /// Optional token budget for auto-continuation. When set, the agent continues
+    /// automatically after end-turn if total output tokens < budget * 0.9.
+    /// Parsed from "+500k" or "use 2m tokens" syntax in the user prompt.
+    pub token_budget: Option<u32>,
+    /// Use streaming tool execution — start executing tools as they stream in
+    /// from the provider instead of waiting for the full response. Requires the
+    /// provider to support chat_stream(). Default: false.
+    pub use_streaming_tools: bool,
+    /// Optional per-project/per-agent compaction instructions appended to the
+    /// 9-section compaction prompt. Example: "Always preserve trade positions
+    /// and PnL numbers in the summary."
+    pub compact_instructions: Option<String>,
 }
 
 impl Default for AgentConfig {
@@ -133,6 +178,49 @@ impl Default for AgentConfig {
             persist_dir: None,
             session_file: None,
             session_type: SessionType::Async,
+            token_budget: None,
+            use_streaming_tools: false,
+            compact_instructions: None,
+        }
+    }
+}
+
+impl AgentConfig {
+    /// Parse a token budget from the user prompt. Recognizes:
+    /// - "+500k", "+2m" (at start or end of prompt)
+    /// - "use 500k tokens", "spend 2m tokens"
+    pub fn parse_token_budget(prompt: &str) -> Option<u32> {
+        let lower = prompt.to_lowercase();
+
+        // Pattern: +Nk or +Nm at start or end.
+        for word in lower.split_whitespace() {
+            let word = word.trim_start_matches('+');
+            if let Some(n) = Self::parse_token_shorthand(word) {
+                return Some(n);
+            }
+        }
+
+        // Pattern: "use Nk tokens" or "spend Nm tokens".
+        if let Some(pos) = lower.find("use ").or_else(|| lower.find("spend ")) {
+            let after = &lower[pos..];
+            for word in after.split_whitespace().skip(1) {
+                if let Some(n) = Self::parse_token_shorthand(word) {
+                    return Some(n);
+                }
+            }
+        }
+
+        None
+    }
+
+    fn parse_token_shorthand(s: &str) -> Option<u32> {
+        let s = s.trim_end_matches("tokens").trim_end_matches("token").trim();
+        if let Some(n) = s.strip_suffix('k') {
+            n.parse::<f32>().ok().map(|v| (v * 1000.0) as u32)
+        } else if let Some(n) = s.strip_suffix('m') {
+            n.parse::<f32>().ok().map(|v| (v * 1_000_000.0) as u32)
+        } else {
+            s.parse::<u32>().ok().filter(|&n| n > 1000)
         }
     }
 }
@@ -226,8 +314,20 @@ pub enum LoopTransition {
     OutputTruncated { attempt: u32 },
     ContextCompacted,
     ContextLengthRecovery,
+    /// Reactive compaction: 413/context-length error recovered via emergency compact.
+    ReactiveCompact,
+    /// Snip compaction removed old rounds (no API call).
+    SnipCompacted { tokens_freed: u32 },
     FallbackModelSwitch,
     AfterTurnContinue,
+}
+
+/// A skill that was invoked during this session — tracked for post-compact restoration.
+#[derive(Debug, Clone)]
+struct InvokedSkill {
+    name: String,
+    content: String,
+    invoked_at: std::time::Instant,
 }
 
 /// Intermediate tool result during processing.
@@ -238,21 +338,92 @@ struct ProcessedToolResult {
     is_error: bool,
 }
 
+/// Tracks which tool results have been replaced/persisted, ensuring consistent
+/// decisions across compactions and subagent forks (cache coherency).
+#[derive(Debug, Clone, Default)]
+pub struct ContentReplacementState {
+    /// tool_use_id → replacement type applied.
+    replacements: std::collections::HashMap<String, ReplacementType>,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // Fields read by future session-memory-compact path
+enum ReplacementType {
+    /// Content persisted to disk (file path recorded).
+    Persisted(String),
+    /// Content truncated in-place.
+    Truncated,
+    /// Content cleared by microcompact.
+    Cleared,
+}
+
+impl ContentReplacementState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record that a tool result was persisted to disk.
+    pub fn mark_persisted(&mut self, tool_use_id: &str, path: &str) {
+        self.replacements.insert(
+            tool_use_id.to_string(),
+            ReplacementType::Persisted(path.to_string()),
+        );
+    }
+
+    /// Record that a tool result was truncated.
+    pub fn mark_truncated(&mut self, tool_use_id: &str) {
+        self.replacements
+            .insert(tool_use_id.to_string(), ReplacementType::Truncated);
+    }
+
+    /// Record that a tool result was cleared by microcompact.
+    pub fn mark_cleared(&mut self, tool_use_id: &str) {
+        self.replacements
+            .insert(tool_use_id.to_string(), ReplacementType::Cleared);
+    }
+
+    /// Check if a tool result has already been replaced.
+    pub fn is_replaced(&self, tool_use_id: &str) -> bool {
+        self.replacements.contains_key(tool_use_id)
+    }
+
+    /// Number of tracked replacements.
+    pub fn len(&self) -> usize {
+        self.replacements.len()
+    }
+
+    /// Whether any replacements have been tracked.
+    pub fn is_empty(&self) -> bool {
+        self.replacements.is_empty()
+    }
+}
+
 /// Post-compact restoration constants.
 const POST_COMPACT_MAX_FILES: usize = 5;
 const POST_COMPACT_MAX_TOKENS_PER_FILE: usize = 5_000;
 const POST_COMPACT_FILE_BUDGET: usize = 50_000;
+const POST_COMPACT_MAX_TOKENS_PER_SKILL: usize = 5_000;
+const POST_COMPACT_SKILLS_BUDGET: usize = 25_000;
+
+/// Snip compaction: early threshold factor. Fires at threshold * SNIP_FACTOR
+/// before full compaction at threshold * 1.0.
+const SNIP_THRESHOLD_FACTOR: f32 = 0.85;
 
 /// Minimum tokens per continuation to consider productive. 3+ continuations
 /// below this threshold trigger diminishing returns detection.
 const DIMINISHING_RETURNS_THRESHOLD: u32 = 500;
 const DIMINISHING_RETURNS_COUNT: u32 = 3;
 
-/// A recently-read file tracked for post-compact restoration.
+/// Token budget auto-continuation: stop when this fraction of budget is used.
+const TOKEN_BUDGET_COMPLETION_THRESHOLD: f32 = 0.90;
+
+/// A recently-read file tracked for post-compact restoration and change detection.
 #[derive(Debug, Clone)]
 struct RecentFile {
     path: String,
     content: String,
+    /// File modification time at the point we read it (epoch secs).
+    mtime_secs: u64,
 }
 
 /// Tool_use/tool_result pairing repair marker.
@@ -309,6 +480,8 @@ pub struct Agent {
     identity: Identity,
     memory: Option<Arc<dyn Memory>>,
     chat_stream: Option<crate::chat_stream::ChatStreamSender>,
+    /// Receiver for notifications from background agents. Drained between turns.
+    notification_rx: Option<Arc<Mutex<NotificationReceiver>>>,
 }
 
 impl Agent {
@@ -327,6 +500,7 @@ impl Agent {
             identity,
             memory: None,
             chat_stream: None,
+            notification_rx: None,
         }
     }
 
@@ -339,6 +513,13 @@ impl Agent {
     /// Attach a chat stream sender for real-time event streaming to clients.
     pub fn with_chat_stream(mut self, sender: crate::chat_stream::ChatStreamSender) -> Self {
         self.chat_stream = Some(sender);
+        self
+    }
+
+    /// Attach a notification receiver for background agent results.
+    /// Notifications are drained between turns and injected as user-role messages.
+    pub fn with_notification_rx(mut self, rx: NotificationReceiver) -> Self {
+        self.notification_rx = Some(Arc::new(Mutex::new(rx)));
         self
     }
 
@@ -385,22 +566,22 @@ impl Agent {
         let mut consecutive_low_output: u32 = 0;
 
         // --- Session resume: restore from checkpoint if available ---
-        if let Some(ref session_file) = self.config.session_file {
-            if let Some(state) = Self::load_session(session_file).await {
-                messages = state.messages;
-                iterations = state.iterations;
-                tracker.total_prompt_tokens = state.total_prompt_tokens;
-                tracker.total_completion_tokens = state.total_completion_tokens;
-                tracker.compactions = state.compactions;
-                // Inject a resume prompt so the model knows it's continuing.
-                messages.push(Message {
-                    role: Role::User,
-                    content: MessageContent::text(
-                        "Session resumed from checkpoint. Continue where you left off. \
-                         Do not repeat completed work.",
-                    ),
-                });
-            }
+        if let Some(ref session_file) = self.config.session_file
+            && let Some(state) = Self::load_session(session_file).await
+        {
+            messages = state.messages;
+            iterations = state.iterations;
+            tracker.total_prompt_tokens = state.total_prompt_tokens;
+            tracker.total_completion_tokens = state.total_completion_tokens;
+            tracker.compactions = state.compactions;
+            // Inject a resume prompt so the model knows it's continuing.
+            messages.push(Message {
+                role: Role::User,
+                content: MessageContent::text(
+                    "Session resumed from checkpoint. Continue where you left off. \
+                     Do not repeat completed work.",
+                ),
+            });
         }
         let mut mid_loop_recalls = 0u32;
         let mut output_recovery_count = 0u32;
@@ -409,6 +590,9 @@ impl Agent {
         let mut consecutive_errors = 0u32;
         let mut active_model = self.config.model.clone();
         let mut persist_dir_created: Option<PathBuf> = None;
+        let invoked_skills: Vec<InvokedSkill> = Vec::new();
+        let mut has_attempted_reactive_compact = false;
+        let mut replacement_state = ContentReplacementState::new();
 
         loop {
             iterations += 1;
@@ -448,46 +632,77 @@ impl Agent {
                 Self::estimate_tokens_from_messages(&messages)
             };
 
-            let threshold =
+            let full_threshold =
                 (self.config.context_window as f32 * self.config.compact_threshold) as u32;
+            let snip_threshold =
+                (self.config.context_window as f32 * self.config.compact_threshold * SNIP_THRESHOLD_FACTOR) as u32;
+            let protected =
+                self.config.compact_preserve_head + self.config.compact_preserve_tail;
 
-            if estimated_tokens > threshold && tracker.compactions < MAX_COMPACTIONS_PER_RUN {
-                let protected =
-                    self.config.compact_preserve_head + self.config.compact_preserve_tail;
-                if messages.len() > protected {
-                    // Stage 1: Digest old tool results to reduce size cheaply.
-                    Self::digest_old_tool_results(
-                        &mut messages,
-                        self.config.compact_preserve_tail,
+            // --- Stage 0: Snip — remove entire old API rounds (no API call, ~free) ---
+            if estimated_tokens > snip_threshold && messages.len() > protected {
+                let freed = Self::snip_compact(
+                    &mut messages,
+                    self.config.compact_preserve_head,
+                    self.config.compact_preserve_tail,
+                );
+                if freed > 0 {
+                    debug!(
+                        agent = %self.config.name,
+                        tokens_freed = freed,
+                        "snip compaction freed tokens"
                     );
+                    transition = LoopTransition::SnipCompacted { tokens_freed: freed };
+                }
+            }
 
-                    // Re-check after digest.
-                    let post_digest = Self::estimate_tokens_from_messages(&messages);
-                    if post_digest > threshold {
-                        // Stage 2+3: Full compaction (head + LLM summary + tail).
-                        info!(
-                            agent = %self.config.name,
-                            estimated_tokens = post_digest,
-                            threshold,
-                            compaction = tracker.compactions + 1,
-                            "context approaching limit, compacting"
-                        );
-                        self.compact_messages(&mut messages, &recent_files).await;
-                    }
-                    tracker.compactions += 1;
-                    transition = LoopTransition::ContextCompacted;
+            // Re-estimate after snip.
+            let estimated_tokens = if matches!(transition, LoopTransition::SnipCompacted { .. }) {
+                Self::estimate_tokens_from_messages(&messages)
+            } else {
+                estimated_tokens
+            };
 
-                    // Save session checkpoint after compaction.
-                    if let Some(ref sf) = self.config.session_file {
-                        Self::save_session(
-                            &messages,
-                            &tracker,
-                            iterations,
-                            &active_model,
-                            sf,
-                        )
-                        .await;
-                    }
+            // --- Stage 1: Microcompact — clear old tool results by name + keep recent N ---
+            if estimated_tokens > snip_threshold && messages.len() > protected {
+                Self::microcompact(
+                    &mut messages,
+                    self.config.compact_preserve_tail,
+                    MICROCOMPACT_KEEP_RECENT,
+                );
+            }
+
+            // Re-estimate after microcompact.
+            let estimated_tokens = Self::estimate_tokens_from_messages(&messages);
+
+            // --- Stage 2: Full compaction (LLM summary + restoration) ---
+            if estimated_tokens > full_threshold
+                && tracker.compactions < MAX_COMPACTIONS_PER_RUN
+                && messages.len() > protected
+            {
+                info!(
+                    agent = %self.config.name,
+                    estimated_tokens,
+                    threshold = full_threshold,
+                    compaction = tracker.compactions + 1,
+                    "context approaching limit, compacting"
+                );
+                self.compact_messages(&mut messages, &recent_files, &invoked_skills)
+                    .await;
+                tracker.compactions += 1;
+                has_attempted_reactive_compact = false; // Reset after successful compact
+                transition = LoopTransition::ContextCompacted;
+
+                // Save session checkpoint after compaction.
+                if let Some(ref sf) = self.config.session_file {
+                    Self::save_session(
+                        &messages,
+                        &tracker,
+                        iterations,
+                        &active_model,
+                        sf,
+                    )
+                    .await;
                 }
             }
 
@@ -528,8 +743,9 @@ impl Agent {
                     let err_str = e.to_string();
                     consecutive_errors += 1;
 
-                    // Context-length error → compact and retry this iteration.
+                    // Context-length error → reactive compact and retry.
                     if Self::is_context_length_error(&err_str)
+                        && !has_attempted_reactive_compact
                         && tracker.compactions < MAX_COMPACTIONS_PER_RUN
                     {
                         let protected =
@@ -537,16 +753,25 @@ impl Agent {
                         if messages.len() > protected {
                             warn!(
                                 agent = %self.config.name,
-                                "context too long, compacting and retrying"
+                                "reactive compact: context too long, emergency compaction"
                             );
-                            Self::digest_old_tool_results(
+                            // Full pipeline: snip → microcompact → full compact.
+                            Self::snip_compact(
                                 &mut messages,
+                                self.config.compact_preserve_head,
                                 self.config.compact_preserve_tail,
                             );
-                            self.compact_messages(&mut messages, &recent_files).await;
+                            Self::microcompact(
+                                &mut messages,
+                                self.config.compact_preserve_tail,
+                                MICROCOMPACT_KEEP_RECENT,
+                            );
+                            self.compact_messages(&mut messages, &recent_files, &invoked_skills)
+                                .await;
                             tracker.compactions += 1;
+                            has_attempted_reactive_compact = true;
                             iterations -= 1;
-                            transition = LoopTransition::ContextLengthRecovery;
+                            transition = LoopTransition::ReactiveCompact;
                             continue;
                         }
                     }
@@ -600,12 +825,12 @@ impl Agent {
                 .await;
 
             // Emit text delta for chat stream.
-            if let Some(ref text) = response.content {
-                if !text.is_empty() {
-                    self.emit(crate::chat_stream::ChatStreamEvent::TextDelta {
-                        text: text.clone(),
-                    });
-                }
+            if let Some(ref text) = response.content
+                && !text.is_empty()
+            {
+                self.emit(crate::chat_stream::ChatStreamEvent::TextDelta {
+                    text: text.clone(),
+                });
             }
 
             self.emit(crate::chat_stream::ChatStreamEvent::TurnComplete {
@@ -727,6 +952,36 @@ impl Agent {
                         break;
                     }
                     LoopAction::Continue => {
+                        // Token budget auto-continuation: if budget set and not exhausted,
+                        // inject nudge message and keep going.
+                        if let Some(budget) = self.config.token_budget {
+                            let used = tracker.total_completion_tokens;
+                            let threshold =
+                                (budget as f32 * TOKEN_BUDGET_COMPLETION_THRESHOLD) as u32;
+                            if used < threshold {
+                                let pct = (used as f32 / budget as f32 * 100.0) as u32;
+                                info!(
+                                    agent = %self.config.name,
+                                    used, budget, pct,
+                                    "token budget not exhausted, auto-continuing"
+                                );
+                                if let Some(ref text) = response.content {
+                                    messages.push(Message {
+                                        role: Role::Assistant,
+                                        content: MessageContent::text(text),
+                                    });
+                                }
+                                messages.push(Message {
+                                    role: Role::User,
+                                    content: MessageContent::text(format!(
+                                        "Stopped at {pct}% of token target ({used} / {budget}). \
+                                         Keep working — do not summarize or ask if you should continue."
+                                    )),
+                                });
+                                transition = LoopTransition::AfterTurnContinue;
+                                continue;
+                            }
+                        }
                         // Accept the stop.
                         break;
                     }
@@ -812,54 +1067,80 @@ impl Agent {
                 break;
             }
 
-            // --- Execute tools with concurrency classification ---
-            let mut safe_calls = Vec::new();
-            let mut unsafe_calls = Vec::new();
-
-            for tc in &allowed_calls {
-                let is_safe = self
-                    .tools
-                    .iter()
-                    .find(|t| t.name() == tc.name)
-                    .map(|t| t.is_concurrent_safe(&tc.arguments))
-                    .unwrap_or(true);
-
-                if is_safe {
-                    safe_calls.push(*tc);
-                } else {
-                    unsafe_calls.push(*tc);
-                }
-            }
-
+            // --- Execute tools ---
+            // Two paths: streaming (StreamingToolExecutor with concurrent batching)
+            // or legacy (manual safe/unsafe partition with join_all).
             let mut all_results: Vec<(String, String, Result<ToolResult, anyhow::Error>, u64)> =
                 Vec::new();
 
-            // Run safe tools in parallel.
-            if !safe_calls.is_empty() {
-                let futures: Vec<_> = safe_calls
+            if self.config.use_streaming_tools {
+                // Streaming path: uses StreamingToolExecutor for concurrent execution.
+                let allowed_tool_calls: Vec<crate::traits::ToolCall> = allowed_calls
                     .iter()
-                    .map(|tc| {
-                        let tools = self.tools.clone();
-                        let name = tc.name.clone();
-                        let args = tc.arguments.clone();
-                        let id = tc.id.clone();
-                        async move {
-                            let start = std::time::Instant::now();
-                            let result = Self::execute_tool_static(&tools, &name, args).await;
-                            (id, name, result, start.elapsed().as_millis() as u64)
-                        }
+                    .map(|tc| crate::traits::ToolCall {
+                        id: tc.id.clone(),
+                        name: tc.name.clone(),
+                        arguments: tc.arguments.clone(),
                     })
                     .collect();
-                all_results.extend(futures::future::join_all(futures).await);
-            }
+                let streaming_results =
+                    Self::execute_tools_streaming(&self.tools, &allowed_tool_calls).await;
+                for r in streaming_results {
+                    let result = if r.is_error {
+                        Ok(ToolResult::error(r.output))
+                    } else {
+                        Ok(ToolResult::success(r.output))
+                    };
+                    all_results.push((r.id, r.name, result, 0));
+                }
+            } else {
+                // Legacy path: manual safe/unsafe partition.
+                let mut safe_calls = Vec::new();
+                let mut unsafe_calls = Vec::new();
 
-            // Run unsafe tools sequentially.
-            for tc in &unsafe_calls {
-                let start = std::time::Instant::now();
-                let result =
-                    Self::execute_tool_static(&self.tools, &tc.name, tc.arguments.clone()).await;
-                let duration_ms = start.elapsed().as_millis() as u64;
-                all_results.push((tc.id.clone(), tc.name.clone(), result, duration_ms));
+                for tc in &allowed_calls {
+                    let is_safe = self
+                        .tools
+                        .iter()
+                        .find(|t| t.name() == tc.name)
+                        .map(|t| t.is_concurrent_safe(&tc.arguments))
+                        .unwrap_or(true);
+
+                    if is_safe {
+                        safe_calls.push(*tc);
+                    } else {
+                        unsafe_calls.push(*tc);
+                    }
+                }
+
+                // Run safe tools in parallel.
+                if !safe_calls.is_empty() {
+                    let futures: Vec<_> = safe_calls
+                        .iter()
+                        .map(|tc| {
+                            let tools = self.tools.clone();
+                            let name = tc.name.clone();
+                            let args = tc.arguments.clone();
+                            let id = tc.id.clone();
+                            async move {
+                                let start = std::time::Instant::now();
+                                let result = Self::execute_tool_static(&tools, &name, args).await;
+                                (id, name, result, start.elapsed().as_millis() as u64)
+                            }
+                        })
+                        .collect();
+                    all_results.extend(futures::future::join_all(futures).await);
+                }
+
+                // Run unsafe tools sequentially.
+                for tc in &unsafe_calls {
+                    let start = std::time::Instant::now();
+                    let result =
+                        Self::execute_tool_static(&self.tools, &tc.name, tc.arguments.clone())
+                            .await;
+                    let duration_ms = start.elapsed().as_millis() as u64;
+                    all_results.push((tc.id.clone(), tc.name.clone(), result, duration_ms));
+                }
             }
 
             // --- Process results: observe, persist/truncate, budget ---
@@ -942,6 +1223,7 @@ impl Agent {
                                 original = original_len,
                                 "tool result persisted to disk"
                             );
+                            replacement_state.mark_persisted(&r.id, &persisted_msg);
                             r.output = persisted_msg;
                             continue;
                         }
@@ -953,6 +1235,7 @@ impl Agent {
 
                 // Fallback: truncate with head+tail preview.
                 r.output = Self::truncate_result(&r.output, self.config.max_tool_result_chars);
+                replacement_state.mark_truncated(&r.id);
                 debug!(
                     agent = %self.config.name,
                     tool = %r.name,
@@ -967,18 +1250,26 @@ impl Agent {
 
             // --- Track recently-read files for post-compact restoration ---
             for r in &processed {
-                if !r.is_error && Self::is_file_read_tool(&r.name) {
-                    if let Some(path) = Self::extract_file_path_from_result(&r.output) {
-                        // Dedup by path (keep most recent).
-                        recent_files.retain(|f| f.path != path);
-                        recent_files.push(RecentFile {
-                            path,
-                            content: r.output.clone(),
-                        });
-                        // Keep only the most recent N files.
-                        if recent_files.len() > POST_COMPACT_MAX_FILES * 2 {
-                            recent_files.drain(..recent_files.len() - POST_COMPACT_MAX_FILES);
-                        }
+                if !r.is_error
+                    && Self::is_file_read_tool(&r.name)
+                    && let Some(path) = Self::extract_file_path_from_result(&r.output)
+                {
+                    // Dedup by path (keep most recent).
+                    recent_files.retain(|f| f.path != path);
+                    let mtime_secs = std::fs::metadata(&path)
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    recent_files.push(RecentFile {
+                        path,
+                        content: r.output.clone(),
+                        mtime_secs,
+                    });
+                    // Keep only the most recent N files.
+                    if recent_files.len() > POST_COMPACT_MAX_FILES * 2 {
+                        recent_files.drain(..recent_files.len() - POST_COMPACT_MAX_FILES);
                     }
                 }
             }
@@ -1035,10 +1326,50 @@ impl Agent {
                 }
             }
 
+            // --- Session memory extraction (fire-and-forget background task) ---
+            Self::maybe_extract_session_memory(
+                &self.memory,
+                &messages,
+                &tracker,
+                &self.config.name,
+                &self.config.entity_id,
+            );
+
+            // --- Detect file changes since last read (mid-turn enrichment) ---
+            let file_change_msgs = Self::detect_file_changes(&recent_files).await;
+            if !file_change_msgs.is_empty() {
+                debug!(
+                    agent = %self.config.name,
+                    changes = file_change_msgs.len(),
+                    "injecting file change notifications"
+                );
+                messages.extend(file_change_msgs);
+            }
+
             // --- Collect enrichments from observers ---
             let attachments = self.observer.collect_attachments(iterations).await;
             if !attachments.is_empty() {
                 Self::inject_enrichments(&mut messages, attachments, &self.config);
+            }
+
+            // --- Drain background agent notifications ---
+            if let Some(ref rx) = self.notification_rx {
+                let mut rx_guard = rx.lock().await;
+                let mut notif_count = 0u32;
+                while let Ok(notif) = rx_guard.try_recv() {
+                    messages.push(Message {
+                        role: Role::User,
+                        content: MessageContent::text(&notif.content),
+                    });
+                    notif_count += 1;
+                }
+                if notif_count > 0 {
+                    debug!(
+                        agent = %self.config.name,
+                        count = notif_count,
+                        "injected background agent notifications"
+                    );
+                }
             }
 
             transition = LoopTransition::ToolUse;
@@ -1435,6 +1766,170 @@ impl Agent {
         messages
     }
 
+    /// Fire-and-forget session memory extraction. Runs in background after
+    /// tool-use turns when enough context has accumulated. Stores a running
+    /// session summary in memory for cheaper compaction.
+    fn maybe_extract_session_memory(
+        memory: &Option<Arc<dyn Memory>>,
+        messages: &[Message],
+        tracker: &ContextTracker,
+        agent_name: &str,
+        config_entity_id: &Option<String>,
+    ) {
+        let Some(mem) = memory.clone() else { return };
+        if tracker.total_prompt_tokens < SESSION_MEMORY_MIN_TOKENS {
+            return;
+        }
+
+        let transcript = Self::build_compaction_transcript(
+            &messages[messages.len().saturating_sub(20)..],
+        );
+        if transcript.len() < 200 {
+            return;
+        }
+
+        let name = agent_name.to_string();
+        let entity_id = config_entity_id.clone();
+
+        tokio::spawn(async move {
+            let summary = format!(
+                "Session working notes (auto-extracted):\n{}",
+                &transcript[..transcript.len().min(8000)]
+            );
+            match mem
+                .store(
+                    SESSION_MEMORY_KEY,
+                    &summary,
+                    MemoryCategory::Context,
+                    MemoryScope::Domain,
+                    entity_id.as_deref(),
+                )
+                .await
+            {
+                Ok(_) => debug!(agent = %name, len = summary.len(), "session memory extracted"),
+                Err(e) => debug!(agent = %name, "session memory extraction failed: {e}"),
+            }
+        });
+    }
+
+    /// Execute tools using the StreamingToolExecutor — starts executing tools
+    /// as they stream in from the provider. Falls back to standard execution
+    /// if the provider doesn't support streaming.
+    async fn execute_tools_streaming(
+        tools: &[Arc<dyn Tool>],
+        tool_calls: &[crate::traits::ToolCall],
+    ) -> Vec<ProcessedToolResult> {
+        use crate::streaming_executor::StreamingToolExecutor;
+
+        let mut executor = StreamingToolExecutor::new(tools.to_vec());
+
+        // Feed all tool calls — the executor starts concurrent-safe ones immediately.
+        for tc in tool_calls {
+            executor
+                .add_tool(tc.id.clone(), tc.name.clone(), tc.arguments.clone())
+                .await;
+        }
+
+        // Await all results.
+        let completed = executor.finish_all().await;
+
+        completed
+            .into_iter()
+            .map(|c| ProcessedToolResult {
+                id: c.id,
+                name: c.name,
+                output: c.result.output,
+                is_error: c.result.is_error,
+            })
+            .collect()
+    }
+
+    /// Detect files that changed externally since we last read them.
+    /// Returns system messages with change notifications for injection between turns.
+    async fn detect_file_changes(recent_files: &[RecentFile]) -> Vec<Message> {
+        let mut changes = Vec::new();
+
+        for file in recent_files {
+            if file.mtime_secs == 0 {
+                continue; // No mtime recorded — skip.
+            }
+
+            let current_mtime = match tokio::fs::metadata(&file.path).await {
+                Ok(meta) => meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+                Err(_) => continue, // File deleted or inaccessible — skip silently.
+            };
+
+            if current_mtime > file.mtime_secs {
+                // File was modified externally.
+                let notice = format!(
+                    "<system-reminder>\nFile modified externally: {}\n\
+                     The file has changed since you last read it. \
+                     Re-read it before making edits to avoid overwriting external changes.\n\
+                     </system-reminder>",
+                    file.path
+                );
+                changes.push(Message {
+                    role: Role::User,
+                    content: MessageContent::text(notice),
+                });
+            }
+        }
+
+        changes
+    }
+
+    /// Build post-compact skill restoration messages from invoked skills.
+    /// Skills are sorted by invocation recency (most recent first) and truncated
+    /// to per-skill and aggregate token budgets.
+    fn build_skill_restoration(invoked_skills: &[InvokedSkill]) -> Vec<Message> {
+        if invoked_skills.is_empty() {
+            return Vec::new();
+        }
+
+        let mut messages = Vec::new();
+        let mut total_tokens = 0usize;
+
+        // Sort by recency (most recent first).
+        let mut sorted: Vec<&InvokedSkill> = invoked_skills.iter().collect();
+        sorted.sort_by(|a, b| b.invoked_at.cmp(&a.invoked_at));
+
+        for skill in sorted {
+            let skill_tokens = skill.content.len() / CHARS_PER_TOKEN;
+            let capped = skill_tokens.min(POST_COMPACT_MAX_TOKENS_PER_SKILL);
+
+            if total_tokens + capped > POST_COMPACT_SKILLS_BUDGET {
+                break;
+            }
+
+            let content = if skill_tokens > POST_COMPACT_MAX_TOKENS_PER_SKILL {
+                let max_chars = POST_COMPACT_MAX_TOKENS_PER_SKILL * CHARS_PER_TOKEN;
+                format!(
+                    "# Skill (restored after compaction): {}\n{}... [truncated]",
+                    skill.name,
+                    &skill.content[..skill.content.len().min(max_chars)]
+                )
+            } else {
+                format!(
+                    "# Skill (restored after compaction): {}\n{}",
+                    skill.name, skill.content
+                )
+            };
+
+            messages.push(Message {
+                role: Role::System,
+                content: MessageContent::text(content),
+            });
+            total_tokens += capped;
+        }
+
+        messages
+    }
+
     // -----------------------------------------------------------------------
     // Conversation repair
     // -----------------------------------------------------------------------
@@ -1533,10 +2028,10 @@ impl Agent {
 
             // Remove empty tool messages.
             messages.retain(|m| {
-                if m.role == Role::Tool {
-                    if let MessageContent::Parts(parts) = &m.content {
-                        return !parts.is_empty();
-                    }
+                if m.role == Role::Tool
+                    && let MessageContent::Parts(parts) = &m.content
+                {
+                    return !parts.is_empty();
                 }
                 true
             });
@@ -1568,15 +2063,112 @@ impl Agent {
         (total_chars / CHARS_PER_TOKEN) as u32
     }
 
-    /// Stage 1: Digest old tool results in-place.
-    /// Replaces ToolResult content in messages older than `preserve_tail` with
-    /// a short digest — dramatically reduces size without losing the conversation flow.
-    fn digest_old_tool_results(messages: &mut [Message], preserve_tail: usize) {
+    /// Snip compaction: remove entire old API rounds (assistant + tool messages)
+    /// from the compactable window. No API call — purely token estimation.
+    /// Returns estimated tokens freed.
+    fn snip_compact(
+        messages: &mut Vec<Message>,
+        preserve_head: usize,
+        preserve_tail: usize,
+    ) -> u32 {
+        if messages.len() <= preserve_head + preserve_tail {
+            return 0;
+        }
+        let window_start = preserve_head;
+        let window_end = messages.len().saturating_sub(preserve_tail);
+        if window_start >= window_end {
+            return 0;
+        }
+
+        // Find "API rounds" — sequences of (Assistant, Tool) messages.
+        // Remove the oldest rounds first (from window_start forward).
+        let mut remove_count = 0;
+        let mut tokens_freed: u32 = 0;
+        let mut i = window_start;
+
+        // Remove at most half the window to avoid over-snipping.
+        let max_remove = (window_end - window_start) / 2;
+
+        while i < window_end && remove_count < max_remove {
+            // A round starts with an Assistant message.
+            if messages[i].role != Role::Assistant {
+                i += 1;
+                continue;
+            }
+
+            // Count the round: Assistant + following Tool messages.
+            let round_start = i;
+            let mut round_end = i + 1;
+            while round_end < window_end && messages[round_end].role == Role::Tool {
+                round_end += 1;
+            }
+
+            // Estimate tokens in this round.
+            let round_tokens = Self::estimate_tokens_from_messages(&messages[round_start..round_end]);
+            tokens_freed += round_tokens;
+            remove_count += round_end - round_start;
+            let _next = round_end; // consumed by break
+
+            // Stop after removing one full round — snip is conservative.
+            break;
+        }
+
+        if remove_count > 0 {
+            // Remove the snipped messages.
+            messages.drain(window_start..window_start + remove_count);
+        }
+
+        tokens_freed
+    }
+
+    /// Microcompact: clear old tool results by tool name, keeping the N most recent.
+    /// More targeted than the old digest — only clears results from compactable tools
+    /// (read, shell, grep, glob, web_search, web_fetch, edit, write).
+    fn microcompact(
+        messages: &mut [Message],
+        preserve_tail: usize,
+        keep_recent: usize,
+    ) {
         if messages.len() <= preserve_tail {
             return;
         }
         let cutoff = messages.len() - preserve_tail;
 
+        // Collect all compactable tool_use IDs and their associated tool_result IDs.
+        // We need to match tool_use names to tool_result IDs.
+        let mut compactable_ids: Vec<String> = Vec::new();
+
+        // Pass 1: find tool_use blocks with compactable tool names.
+        for msg in messages[..cutoff].iter() {
+            if let MessageContent::Parts(parts) = &msg.content {
+                for part in parts {
+                    if let ContentPart::ToolUse { id, name, .. } = part {
+                        let lower = name.to_lowercase();
+                        if COMPACTABLE_TOOLS.iter().any(|t| lower.contains(t)) {
+                            compactable_ids.push(id.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        if compactable_ids.len() <= keep_recent {
+            return; // Nothing to clear.
+        }
+
+        // Keep the most recent N, clear the rest.
+        let clear_set: std::collections::HashSet<&str> = compactable_ids
+            [..compactable_ids.len() - keep_recent]
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
+
+        if clear_set.is_empty() {
+            return;
+        }
+
+        // Pass 2: clear tool_result content for the IDs to clear.
+        let mut cleared = 0usize;
         for msg in messages[..cutoff].iter_mut() {
             if msg.role != Role::Tool {
                 continue;
@@ -1584,31 +2176,39 @@ impl Agent {
             if let MessageContent::Parts(ref mut parts) = msg.content {
                 for part in parts.iter_mut() {
                     if let ContentPart::ToolResult {
+                        tool_use_id,
                         content,
-                        is_error,
                         ..
                     } = part
-                        && content.len() > 300
+                        && clear_set.contains(tool_use_id.as_str())
+                        && *content != MICROCOMPACT_CLEARED
                     {
-                        let prefix = if *is_error { "ERROR: " } else { "" };
-                        let preview = &content[..content
-                            .char_indices()
-                            .take_while(|(i, _)| *i < 200)
-                            .last()
-                            .map(|(i, c)| i + c.len_utf8())
-                            .unwrap_or(200)
-                            .min(content.len())];
-                        *content = format!("{prefix}{preview}... [digested]");
+                        *content = MICROCOMPACT_CLEARED.to_string();
+                        cleared += 1;
                     }
                 }
             }
+        }
+
+        if cleared > 0 {
+            debug!(
+                cleared,
+                total = compactable_ids.len(),
+                kept = keep_recent,
+                "microcompact: cleared old tool results"
+            );
         }
     }
 
     /// Stages 2+3: Compact conversation by summarizing middle messages.
     /// After compaction, restores: (1) active context (files/tools in use),
     /// (2) preserved skills, (3) recently-read file contents, (4) enrichments.
-    async fn compact_messages(&self, messages: &mut Vec<Message>, recent_files: &[RecentFile]) {
+    async fn compact_messages(
+        &self,
+        messages: &mut Vec<Message>,
+        recent_files: &[RecentFile],
+        invoked_skills: &[InvokedSkill],
+    ) {
         let head = self.config.compact_preserve_head.min(messages.len());
         let tail = self
             .config
@@ -1685,6 +2285,18 @@ impl Agent {
                 "restoring file contents after compaction"
             );
             compacted.extend(file_msgs);
+        }
+
+        // Post-compact skill restoration: re-inject invoked skill content
+        // so the model retains working instructions across compactions.
+        let skill_msgs = Self::build_skill_restoration(invoked_skills);
+        if !skill_msgs.is_empty() {
+            debug!(
+                agent = %self.config.name,
+                skills = skill_msgs.len(),
+                "restoring skill content after compaction"
+            );
+            compacted.extend(skill_msgs);
         }
 
         compacted.extend_from_slice(&messages[messages.len() - tail..]);
@@ -1952,7 +2564,11 @@ impl Agent {
                      Be precise. Include filenames, function signatures, error messages, and \
                      code snippets where they affect the next action. Vague summaries cause \
                      the agent to redo work or make wrong assumptions.\n\n\
-                     ## Execution Transcript\n\n{transcript}"
+                     {custom_instructions}\
+                     ## Execution Transcript\n\n{transcript}",
+                    custom_instructions = self.config.compact_instructions.as_ref()
+                        .map(|ci| format!("## Additional Instructions\n\n{ci}\n\n"))
+                        .unwrap_or_default()
                 )),
             }],
             tools: vec![],
@@ -2494,6 +3110,32 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_token_budget_shorthand() {
+        assert_eq!(AgentConfig::parse_token_budget("+500k"), Some(500_000));
+        assert_eq!(AgentConfig::parse_token_budget("+2m"), Some(2_000_000));
+        assert_eq!(AgentConfig::parse_token_budget("fix the bug +500k"), Some(500_000));
+        assert_eq!(AgentConfig::parse_token_budget("+1.5m"), Some(1_500_000));
+    }
+
+    #[test]
+    fn test_parse_token_budget_verbose() {
+        assert_eq!(
+            AgentConfig::parse_token_budget("use 500k tokens"),
+            Some(500_000)
+        );
+        assert_eq!(
+            AgentConfig::parse_token_budget("spend 2m tokens on this"),
+            Some(2_000_000)
+        );
+    }
+
+    #[test]
+    fn test_parse_token_budget_none() {
+        assert_eq!(AgentConfig::parse_token_budget("fix the bug"), None);
+        assert_eq!(AgentConfig::parse_token_budget("hello world"), None);
+    }
+
+    #[test]
     fn test_agent_stop_reason_eq() {
         assert_eq!(AgentStopReason::EndTurn, AgentStopReason::EndTurn);
         assert_eq!(
@@ -2520,11 +3162,20 @@ mod tests {
     }
 
     #[test]
-    fn test_digest_old_tool_results() {
+    fn test_microcompact() {
         let mut messages = vec![
             Message {
                 role: Role::System,
                 content: MessageContent::text("system"),
+            },
+            // Old assistant + tool round with compactable tool.
+            Message {
+                role: Role::Assistant,
+                content: MessageContent::Parts(vec![ContentPart::ToolUse {
+                    id: "t1".into(),
+                    name: "read_file".into(),
+                    input: serde_json::json!({"file_path": "/src/main.rs"}),
+                }]),
             },
             Message {
                 role: Role::Tool,
@@ -2532,6 +3183,15 @@ mod tests {
                     tool_use_id: "t1".into(),
                     content: "x".repeat(1000),
                     is_error: false,
+                }]),
+            },
+            // Recent assistant + tool round with compactable tool.
+            Message {
+                role: Role::Assistant,
+                content: MessageContent::Parts(vec![ContentPart::ToolUse {
+                    id: "t2".into(),
+                    name: "grep".into(),
+                    input: serde_json::json!({"pattern": "foo"}),
                 }]),
             },
             Message {
@@ -2544,23 +3204,64 @@ mod tests {
             },
         ];
 
-        // preserve_tail=1 means only the last message is preserved.
-        Agent::digest_old_tool_results(&mut messages, 1);
+        // keep_recent=1 means only the most recent compactable tool is kept.
+        Agent::microcompact(&mut messages, 0, 1);
 
-        // First tool result (index 1) should be digested.
-        if let MessageContent::Parts(parts) = &messages[1].content
-            && let ContentPart::ToolResult { content, .. } = &parts[0]
-        {
-            assert!(content.len() < 300, "should be digested, got {}", content.len());
-            assert!(content.contains("[digested]"));
-        }
-
-        // Second tool result (index 2, in tail) should be untouched.
+        // First tool result (t1) should be cleared.
         if let MessageContent::Parts(parts) = &messages[2].content
             && let ContentPart::ToolResult { content, .. } = &parts[0]
         {
-            assert_eq!(content.len(), 1000, "tail should be preserved");
+            assert_eq!(content, "[Old tool result content cleared]");
         }
+
+        // Second tool result (t2, most recent) should be preserved.
+        if let MessageContent::Parts(parts) = &messages[4].content
+            && let ContentPart::ToolResult { content, .. } = &parts[0]
+        {
+            assert_eq!(content.len(), 1000, "recent result should be preserved");
+        }
+    }
+
+    #[test]
+    fn test_snip_compact() {
+        let mut messages = vec![
+            Message {
+                role: Role::System,
+                content: MessageContent::text("system prompt"),
+            },
+            Message {
+                role: Role::User,
+                content: MessageContent::text("user request"),
+            },
+            // Old round to snip.
+            Message {
+                role: Role::Assistant,
+                content: MessageContent::text("a".repeat(400)),
+            },
+            Message {
+                role: Role::Tool,
+                content: MessageContent::Parts(vec![ContentPart::ToolResult {
+                    tool_use_id: "t1".into(),
+                    content: "b".repeat(400),
+                    is_error: false,
+                }]),
+            },
+            // Recent round to preserve.
+            Message {
+                role: Role::Assistant,
+                content: MessageContent::text("recent work"),
+            },
+        ];
+
+        let freed = Agent::snip_compact(&mut messages, 2, 1);
+        assert!(freed > 0, "should have freed tokens");
+        // Head (2) + tail (1) preserved, middle snipped.
+        assert_eq!(messages.len(), 3, "should have 3 messages after snip (was 5)");
+        // Head preserved.
+        assert_eq!(messages[0].role, Role::System);
+        assert_eq!(messages[1].role, Role::User);
+        // Tail preserved.
+        assert_eq!(messages[2].role, Role::Assistant);
     }
 
     #[test]

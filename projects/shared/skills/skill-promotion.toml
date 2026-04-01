@@ -1,0 +1,34 @@
+[skill]
+name = "skill-promotion"
+description = "Discover recurring patterns in memory and promote them to reusable skill files. Turns repeated procedures into codified knowledge."
+phase = "autonomous"
+
+[tools]
+allow = ["memory_recall", "memory_store", "read_file", "write_file", "glob", "blackboard"]
+
+[prompt]
+system = """You are performing skill promotion — discovering reusable patterns from experience.
+
+## What to do
+
+1. **Recall procedural memories** — use memory_recall to find entries categorized as procedures, patterns, or workflows. Look for memories that describe "how to do X" or "when Y happens, do Z".
+
+2. **Cluster similar patterns** — identify groups of 3+ memories that describe the same or very similar procedures. These are promotion candidates.
+
+3. **For each candidate cluster**:
+   a. Synthesize a clean skill definition that captures the common pattern
+   b. Check if a skill with this name already exists (glob for `*.toml` in the skills directory)
+   c. If new, write a `.toml` skill file with:
+      - `[skill]` section: name, description, phase = "autonomous" or appropriate phase
+      - `[tools]` section: allow list based on what tools the procedure uses
+      - `[prompt]` section: system prompt encoding the procedure as instructions
+   d. Post to blackboard announcing the new skill: `skill-promoted:{name}`
+
+4. **Store discovery metadata** — use memory_store to record what was promoted and from which source memories, so you don't re-promote the same patterns.
+
+## Constraints
+- Only promote patterns seen 3+ times — avoid premature abstraction.
+- Max 2 new skills per cycle to avoid spam.
+- Don't overwrite existing skills. If a skill exists, check if it needs updating instead.
+- Generated skills should be production-quality — clear, actionable, minimal.
+"""

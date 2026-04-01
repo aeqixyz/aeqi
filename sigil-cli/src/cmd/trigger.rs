@@ -1,0 +1,166 @@
+use anyhow::Result;
+use std::path::PathBuf;
+
+use crate::cli::TriggerAction;
+use crate::helpers::load_config;
+
+pub(crate) async fn cmd_trigger(
+    config_path: &Option<PathBuf>,
+    action: TriggerAction,
+) -> Result<()> {
+    let (config, _) = load_config(config_path)?;
+    let registry =
+        sigil_orchestrator::agent_registry::AgentRegistry::open(&config.data_dir())?;
+    let trigger_store = registry.trigger_store();
+
+    match action {
+        TriggerAction::Create {
+            name,
+            agent,
+            schedule,
+            at,
+            event,
+            event_project,
+            event_tool,
+            cooldown,
+            skill,
+            max_budget,
+        } => {
+            // Resolve agent by name.
+            let agents = registry.get_by_name(&agent).await?;
+            let pa = agents
+                .into_iter()
+                .find(|a| a.status == sigil_orchestrator::agent_registry::AgentStatus::Active)
+                .ok_or_else(|| anyhow::anyhow!("no active agent named '{agent}'"))?;
+
+            // Build trigger type.
+            let trigger_type = if let Some(schedule) = schedule {
+                sigil_orchestrator::trigger::TriggerType::Schedule { expr: schedule }
+            } else if let Some(at_str) = at {
+                let at = chrono::DateTime::parse_from_rfc3339(&at_str)
+                    .map_err(|e| anyhow::anyhow!("invalid timestamp: {e}"))?
+                    .with_timezone(&chrono::Utc);
+                sigil_orchestrator::trigger::TriggerType::Once { at }
+            } else if let Some(event_name) = event {
+                let cooldown_secs = cooldown.unwrap_or(300);
+                if cooldown_secs < 60 {
+                    anyhow::bail!("cooldown must be >= 60 seconds");
+                }
+                let pattern = match event_name.as_str() {
+                    "task_completed" => sigil_orchestrator::trigger::EventPattern::TaskCompleted {
+                        project: event_project,
+                    },
+                    "task_failed" => sigil_orchestrator::trigger::EventPattern::TaskFailed {
+                        project: event_project,
+                    },
+                    "tool_call_completed" => {
+                        sigil_orchestrator::trigger::EventPattern::ToolCallCompleted {
+                            tool: event_tool,
+                        }
+                    }
+                    other => anyhow::bail!("unknown event: {other}"),
+                };
+                sigil_orchestrator::trigger::TriggerType::Event {
+                    pattern,
+                    cooldown_secs,
+                }
+            } else {
+                anyhow::bail!("provide --schedule, --at, or --event");
+            };
+
+            let trigger = trigger_store
+                .create(&sigil_orchestrator::trigger::NewTrigger {
+                    agent_id: pa.id.clone(),
+                    name: name.clone(),
+                    trigger_type,
+                    skill: skill.clone(),
+                    max_budget_usd: max_budget,
+                })
+                .await?;
+
+            println!("Trigger created:");
+            println!("  ID:     {}", trigger.id);
+            println!("  Name:   {}", trigger.name);
+            println!("  Agent:  {} ({})", pa.name, pa.id);
+            println!("  Type:   {}", trigger.trigger_type.type_str());
+            println!("  Skill:  {}", trigger.skill);
+            if let Some(b) = trigger.max_budget_usd {
+                println!("  Budget: ${b:.2}/fire");
+            }
+        }
+
+        TriggerAction::List { agent } => {
+            let triggers = if let Some(agent_name) = agent {
+                let agents = registry.get_by_name(&agent_name).await?;
+                let mut all = Vec::new();
+                for a in &agents {
+                    all.extend(trigger_store.list_for_agent(&a.id).await?);
+                }
+                all
+            } else {
+                trigger_store.list_all().await?
+            };
+
+            if triggers.is_empty() {
+                println!("No triggers.");
+                return Ok(());
+            }
+
+            println!(
+                "{:<36} {:<15} {:<10} {:<20} {:<8} {:<6}",
+                "ID", "NAME", "TYPE", "SKILL", "ENABLED", "FIRES"
+            );
+            println!("{}", "-".repeat(95));
+            for t in &triggers {
+                println!(
+                    "{:<36} {:<15} {:<10} {:<20} {:<8} {:<6}",
+                    t.id,
+                    t.name,
+                    t.trigger_type.type_str(),
+                    t.skill,
+                    if t.enabled { "yes" } else { "no" },
+                    t.fire_count,
+                );
+            }
+        }
+
+        TriggerAction::Show { id } => {
+            let trigger = trigger_store
+                .get(&id)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("trigger '{id}' not found"))?;
+
+            println!("Trigger: {} ({})", trigger.name, trigger.id);
+            println!("  Agent:      {}", trigger.agent_id);
+            println!("  Type:       {}", trigger.trigger_type.type_str());
+            println!("  Skill:      {}", trigger.skill);
+            println!("  Enabled:    {}", trigger.enabled);
+            println!("  Fires:      {}", trigger.fire_count);
+            println!("  Cost:       ${:.4}", trigger.total_cost_usd);
+            println!("  Created:    {}", trigger.created_at);
+            if let Some(lf) = trigger.last_fired {
+                println!("  Last fired: {lf}");
+            }
+            if let Some(b) = trigger.max_budget_usd {
+                println!("  Budget:     ${b:.2}/fire");
+            }
+        }
+
+        TriggerAction::Enable { id } => {
+            trigger_store.update_enabled(&id, true).await?;
+            println!("Trigger '{id}' enabled.");
+        }
+
+        TriggerAction::Disable { id } => {
+            trigger_store.update_enabled(&id, false).await?;
+            println!("Trigger '{id}' disabled.");
+        }
+
+        TriggerAction::Delete { id } => {
+            trigger_store.delete(&id).await?;
+            println!("Trigger '{id}' deleted.");
+        }
+    }
+
+    Ok(())
+}

@@ -132,6 +132,49 @@ pub trait Observer: Send + Sync {
     async fn collect_attachments(&self, _iteration: u32) -> Vec<ContextAttachment> {
         Vec::new()
     }
+
+    // --- Extended lifecycle hooks (Phase 5, CC-parity) ---
+    // All have default no-op implementations for backward compatibility.
+
+    /// Called before context compaction. Can provide custom instructions or a display message.
+    async fn pre_compact(&self) -> CompactInstructions {
+        CompactInstructions::default()
+    }
+
+    /// Called after context compaction completes.
+    async fn post_compact(&self) {}
+
+    /// Called when a subagent is spawned.
+    async fn subagent_start(&self, _agent_id: &str, _description: &str) {}
+
+    /// Called when a subagent completes or fails.
+    async fn subagent_stop(&self, _agent_id: &str, _status: &str) {}
+
+    /// Called when a file is modified externally (detected between turns).
+    async fn file_changed(&self, _path: &str) {}
+
+    /// Called when a task is created.
+    async fn task_created(&self, _task_id: &str, _subject: &str) {}
+
+    /// Called when a task is completed.
+    async fn task_completed(&self, _task_id: &str, _outcome: &str) {}
+
+    /// Called when the user submits a prompt. Can return modified prompt.
+    async fn user_prompt_submit(&self, _prompt: &str) -> Option<String> {
+        None
+    }
+
+    /// Called at session end.
+    async fn session_end(&self, _reason: &str) {}
+}
+
+/// Instructions returned by `pre_compact` to customize compaction behavior.
+#[derive(Debug, Clone, Default)]
+pub struct CompactInstructions {
+    /// Custom instructions appended to the compaction prompt.
+    pub custom_instructions: Option<String>,
+    /// Message shown to the user during compaction.
+    pub user_display_message: Option<String>,
 }
 
 /// Default observer that logs to tracing.

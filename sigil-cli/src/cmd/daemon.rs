@@ -5,9 +5,8 @@ use sigil_core::{Identity, SecretStore};
 use sigil_gates::TelegramChannel;
 use sigil_orchestrator::tools::build_orchestration_tools;
 use sigil_orchestrator::{
-    AgentRouter, AuditLog, Blackboard, ConversationStore, Daemon, DispatchBus, EmotionalState,
-    ExpertiseLedger, LifecycleEngine, Project, ProjectRegistry, ScheduleStore, Supervisor,
-    WatchdogEngine,
+    AgentRouter, AuditLog, Blackboard, ConversationStore, Daemon, DispatchBus,
+    ExpertiseLedger, Project, ProjectRegistry, Supervisor,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -17,7 +16,7 @@ use tracing::{info, warn};
 
 use crate::cli::DaemonAction;
 use crate::helpers::{
-    augment_identity_with_org_context, build_project_tools, build_provider,
+    augment_identity_with_org_context, build_project_tools,
     build_provider_for_agent, build_provider_for_project, build_tools, daemon_ipc_request,
     find_agent_dir, find_project_dir, get_api_key, handle_fast_lane, load_config,
     load_config_with_agents, open_memory, pid_file_path,
@@ -52,11 +51,6 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 ProjectRegistry::new(dispatch_bus.clone(), leader_name.clone());
             registry_inner.config_project_names =
                 config.projects.iter().map(|p| p.name.clone()).collect();
-            registry_inner.watchdog_rules_config = config
-                .watchdogs
-                .iter()
-                .filter_map(|v| serde_json::to_value(v).ok())
-                .collect();
             registry_inner.set_cost_ledger(cost_ledger.clone());
 
             // Initialize v3 subsystems (SQLite-backed).
@@ -99,9 +93,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             }
 
             let registry = Arc::new(registry_inner);
-            let lifecycle_provider = build_provider(&config)?;
             let event_broadcaster = Arc::new(sigil_orchestrator::EventBroadcaster::new());
-            let mut heartbeats = Vec::new();
             let background_automation_enabled = config.orchestrator.background_automation_enabled;
             let advisor_agents = config.advisor_agents();
             let mut skipped_projects = Vec::new();
@@ -160,14 +152,6 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     }
                 }
 
-                // Load emotional state for personality tracking.
-                {
-                    let emo_path = EmotionalState::path_for_agent(&project_dir);
-                    let emo = EmotionalState::load(&emo_path, &project_cfg.name);
-                    witness.emotional_state = Some(Arc::new(tokio::sync::Mutex::new(emo)));
-                    witness.emotional_state_path = Some(emo_path);
-                }
-
                 // Wire per-project team if configured.
                 let project_team = config.project_team(&project_cfg.name);
                 witness.set_team(project_team, config.leader());
@@ -200,24 +184,6 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 witness.worker_max_budget_usd = project_cfg.max_budget_usd;
 
                 registry.register_project(rig.clone(), witness).await;
-
-                // Create heartbeat if HEARTBEAT.md exists and heartbeat is enabled.
-                if config.heartbeat.enabled
-                    && let Some(ref hb_content) = rig.project_identity.heartbeat
-                {
-                    let interval = config.heartbeat.default_interval_minutes as u64 * 60;
-                    let heartbeat_cfg = sigil_orchestrator::Heartbeat::new(
-                        rig.name.clone(),
-                        interval,
-                        hb_content.clone(),
-                        provider.clone(),
-                        tools.clone(),
-                        rig.project_identity.clone(),
-                        config.model_for_project(&project_cfg.name),
-                        dispatch_bus.clone(),
-                    );
-                    heartbeats.push(heartbeat_cfg);
-                }
             }
 
             // Build channels map for the leader agent.
@@ -287,14 +253,6 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                             sigil_core::config::ProviderKind::OpenRouter,
                         );
                     }
-                }
-
-                // Load emotional state for advisor personality tracking.
-                {
-                    let emo_path = EmotionalState::path_for_agent(&agent_dir);
-                    let emo = EmotionalState::load(&emo_path, &agent_cfg.name);
-                    agent_scout.emotional_state = Some(Arc::new(tokio::sync::Mutex::new(emo)));
-                    agent_scout.emotional_state_path = Some(emo_path);
                 }
 
                 registry.register_project(agent_project, agent_scout).await;
@@ -547,67 +505,23 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 }
             }
 
-            // Load emotional state for leader agent personality tracking.
-            {
-                let emo_path = EmotionalState::path_for_agent(&fa_agent_dir);
-                let emo = EmotionalState::load(&emo_path, &leader_name);
-                fa_witness.emotional_state = Some(Arc::new(tokio::sync::Mutex::new(emo)));
-                fa_witness.emotional_state_path = Some(emo_path);
-            }
-
             fa_witness.worker_max_budget_usd = leader_cfg.max_budget_usd;
 
             registry.register_project(fa_rig, fa_witness).await;
 
             let project_count = registry.project_count().await;
             println!("Sigil daemon starting...");
-            println!(
-                "Registered {} projects + agents, {} heartbeats",
-                project_count,
-                heartbeats.len()
-            );
+            println!("Registered {} projects + agents", project_count);
 
-            // Load cron store.
-            let cron_path = config.data_dir().join("fate.json");
-            let cron_store = if background_automation_enabled {
-                Some(ScheduleStore::open(&cron_path)?)
-            } else {
-                None
-            };
             let socket_path = config.data_dir().join("rm.sock");
-
-            match &cron_store {
-                Some(store) => println!("Cron: {} jobs loaded", store.jobs.len()),
-                None => println!("Cron: disabled (background automation off)"),
-            }
             println!("PID file: {}", pid_path.display());
             println!("IPC socket: {}", socket_path.display());
-
-            // Build lifecycle engine if enabled.
-            let lifecycle_engine = if background_automation_enabled && config.lifecycle.enabled {
-                Some(build_lifecycle_engine(
-                    &config,
-                    &lifecycle_provider,
-                    &registry,
-                    &dispatch_bus,
-                    &leader_name,
-                )?)
-            } else {
-                None
-            };
 
             println!("Press Ctrl+C to stop.\n");
 
             let mut daemon = Daemon::new(registry, dispatch_bus);
             daemon.event_broadcaster = event_broadcaster;
             daemon.chat_engine = chat_engine;
-            match sigil_orchestrator::NoteStore::new(&data_dir.join("notes.db")) {
-                Ok(ns) => {
-                    daemon.note_store = Some(Arc::new(ns));
-                    info!("note store initialized");
-                }
-                Err(e) => warn!(error = %e, "failed to initialize note store"),
-            }
             daemon.set_readiness_context(
                 config.projects.len(),
                 advisor_agents.len(),
@@ -617,40 +531,26 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             daemon.set_background_automation_enabled(background_automation_enabled);
             daemon.set_pid_file(pid_path);
             daemon.set_socket_path(socket_path.clone());
-            if let Some(cron_store) = cron_store {
-                daemon.set_cron_store(cron_store);
-            }
-            if let Some(engine) = lifecycle_engine {
-                daemon.set_lifecycle(engine);
-            }
-            for hb in heartbeats {
-                daemon.add_heartbeat(hb);
-            }
+            // Initialize trigger store + agent registry for persistent agent triggers.
+            match sigil_orchestrator::agent_registry::AgentRegistry::open(&config.data_dir()) {
+                Ok(agent_reg) => {
+                    let trigger_store = Arc::new(agent_reg.trigger_store());
+                    let trigger_count = trigger_store.count_enabled().await.unwrap_or(0);
+                    println!("Triggers: {trigger_count} enabled");
+                    let agent_reg = Arc::new(agent_reg);
+                    daemon.set_trigger_store(trigger_store.clone());
+                    daemon.set_agent_registry(agent_reg.clone());
 
-            // Initialize watchdog engine from config.
-            if background_automation_enabled && !config.watchdogs.is_empty() {
-                let mut rules = Vec::new();
-                for val in &config.watchdogs {
-                    match val
-                        .clone()
-                        .try_into::<sigil_orchestrator::watchdog::WatchdogRule>()
-                    {
-                        Ok(rule) => rules.push(rule),
-                        Err(e) => warn!(error = %e, "failed to parse watchdog rule"),
-                    }
+                    // Wire agent_registry + trigger_store into all supervisors.
+                    daemon
+                        .registry
+                        .wire_agent_system(agent_reg, trigger_store)
+                        .await;
                 }
-                if !rules.is_empty() {
-                    info!(count = rules.len(), "watchdog rules loaded");
-                    daemon.set_watchdog(WatchdogEngine::new(rules));
+                Err(e) => {
+                    warn!(error = %e, "failed to open agent registry for triggers");
                 }
             }
-
-            // Wire Telegram proactive delivery (morning brief, completion notifications).
-            daemon.pending_telegram_messages = pending_telegram_messages;
-            if let Some(ref tg_config) = config.channels.telegram {
-                daemon.telegram_allowed_chats = tg_config.allowed_chats.clone();
-            }
-
             daemon.run().await?;
         }
 
@@ -749,143 +649,6 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
         }
     }
     Ok(())
-}
-
-fn build_lifecycle_engine(
-    config: &sigil_core::SigilConfig,
-    provider: &Arc<dyn sigil_core::traits::Provider>,
-    registry: &Arc<ProjectRegistry>,
-    dispatch_bus: &Arc<DispatchBus>,
-    leader_name: &str,
-) -> Result<LifecycleEngine> {
-    use sigil_orchestrator::lifecycle::{LifecycleProcess, ProcessKind, ScanProject};
-
-    let lifecycle_model = config.lifecycle.model.clone().unwrap_or_else(|| {
-        config
-            .providers
-            .openrouter
-            .as_ref()
-            .map(|or| or.default_model.clone())
-            .unwrap_or_else(|| "minimax/MiniMax-M1".to_string())
-    });
-    let mut engine = LifecycleEngine::new();
-    engine.cost_ledger = Some(registry.cost_ledger.clone());
-    let mut lifecycle_process_count = 0u32;
-
-    for agent_cfg in &config.agents {
-        let agent_dir = match find_agent_dir(&agent_cfg.name) {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
-
-        // Derive bond level from emotional state.
-        let emo_path = EmotionalState::path_for_agent(&agent_dir);
-        let emo = EmotionalState::load(&emo_path, &agent_cfg.name);
-        let bond =
-            sigil_orchestrator::lifecycle::interaction_count_to_bond_level(emo.interaction_count);
-        engine.set_bond_level(&agent_cfg.name, bond);
-        engine
-            .agent_dirs
-            .insert(agent_cfg.name.clone(), agent_dir.clone());
-
-        // Process 1: MemoryConsolidation (bond 0, always active).
-        let mem_interval = config.lifecycle.memory_reflection_interval_hours as u64 * 3600;
-        let memory: Option<Arc<dyn sigil_core::traits::Memory>> =
-            open_memory(config, Some(&agent_cfg.name))
-                .ok()
-                .map(|m| Arc::new(m) as _);
-        engine.add_process(LifecycleProcess::new(
-            agent_cfg.name.clone(),
-            agent_dir.clone(),
-            provider.clone(),
-            lifecycle_model.clone(),
-            ProcessKind::MemoryConsolidation { memory },
-            mem_interval,
-        ));
-        lifecycle_process_count += 1;
-
-        // Process 2: Evolution (bond 3).
-        let evo_interval = config.lifecycle.evolution_interval_hours as u64 * 3600;
-        engine.add_process(LifecycleProcess::new(
-            agent_cfg.name.clone(),
-            agent_dir.clone(),
-            provider.clone(),
-            lifecycle_model.clone(),
-            ProcessKind::Evolution,
-            evo_interval,
-        ));
-        lifecycle_process_count += 1;
-
-        // Process 3: ProactiveScan (bond 5) — per-project.
-        let scan_interval = config.lifecycle.proactive_scan_interval_hours as u64 * 3600;
-        let mut scan_projects = Vec::new();
-        for project_cfg in &config.projects {
-            let project_team = config.project_team(&project_cfg.name);
-            if project_team.effective_agents().contains(&agent_cfg.name)
-                && let Ok(project_dir) = find_project_dir(&project_cfg.name)
-            {
-                scan_projects.push(ScanProject {
-                    name: project_cfg.name.clone(),
-                    prefix: project_cfg.prefix.clone(),
-                    project_dir,
-                    repo_path: Some(config.resolve_repo(&project_cfg.repo)),
-                });
-            }
-        }
-        engine.add_process(LifecycleProcess::new(
-            agent_cfg.name.clone(),
-            agent_dir.clone(),
-            provider.clone(),
-            lifecycle_model.clone(),
-            ProcessKind::ProactiveScan {
-                projects: scan_projects,
-                project_knowledge: HashMap::new(),
-                registry: registry.clone(),
-                dispatch_bus: dispatch_bus.clone(),
-                system_leader: leader_name.to_string(),
-                cross_project: false,
-            },
-            scan_interval,
-        ));
-        lifecycle_process_count += 1;
-
-        // Process 4: Cross-project ideation (bond 8) — merged CreativeIdeation.
-        let idea_interval = config.lifecycle.creative_ideation_interval_hours as u64 * 3600;
-        let mut project_knowledge = HashMap::new();
-        for project_cfg in &config.projects {
-            if let Ok(project_dir) = find_project_dir(&project_cfg.name) {
-                let knowledge =
-                    std::fs::read_to_string(project_dir.join("KNOWLEDGE.md")).unwrap_or_default();
-                if !knowledge.trim().is_empty() {
-                    project_knowledge.insert(project_cfg.name.clone(), knowledge);
-                }
-            }
-        }
-        engine.add_process(LifecycleProcess::new(
-            agent_cfg.name.clone(),
-            agent_dir.clone(),
-            provider.clone(),
-            lifecycle_model.clone(),
-            ProcessKind::ProactiveScan {
-                projects: Vec::new(),
-                project_knowledge,
-                registry: registry.clone(),
-                dispatch_bus: dispatch_bus.clone(),
-                system_leader: leader_name.to_string(),
-                cross_project: true,
-            },
-            idea_interval,
-        ));
-        lifecycle_process_count += 1;
-    }
-
-    println!(
-        "Lifecycle: {} agents, {} processes (model: {})",
-        config.agents.len(),
-        lifecycle_process_count,
-        lifecycle_model
-    );
-    Ok(engine)
 }
 
 #[allow(clippy::too_many_arguments)]

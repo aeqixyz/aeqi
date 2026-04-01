@@ -1,6 +1,5 @@
 use anyhow::{Result, bail};
 use sigil_core::SecretStore;
-use sigil_orchestrator::ScheduleStore;
 use sigil_tools::Skill;
 use std::path::PathBuf;
 
@@ -259,13 +258,14 @@ pub(crate) async fn cmd_doctor(
                 mem_path.display()
             );
 
-            // Check cron store.
-            let cron_path = config.data_dir().join("fate.json");
-            if cron_path.exists() {
-                let store = ScheduleStore::open(&cron_path)?;
-                println!("[OK] Cron: {} jobs", store.jobs.len());
-            } else {
-                println!("[INFO] Cron: no jobs configured");
+            // Check triggers.
+            match sigil_orchestrator::agent_registry::AgentRegistry::open(&config.data_dir()) {
+                Ok(reg) => {
+                    let ts = reg.trigger_store();
+                    let count = ts.count_enabled().await.unwrap_or(0);
+                    println!("[OK] Triggers: {count} enabled");
+                }
+                Err(_) => println!("[INFO] Triggers: no agent registry"),
             }
 
             // Check data dir

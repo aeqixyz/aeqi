@@ -90,6 +90,36 @@ pub enum ExecutionEvent {
         chat_id: i64,
         event: ChatStreamEvent,
     },
+    // --- Extended event types for richer trigger patterns ---
+    /// A memory entry was stored.
+    MemoryStored {
+        key: String,
+        scope: String,
+        project: Option<String>,
+    },
+    /// A blackboard entry was posted.
+    BlackboardPosted {
+        key: String,
+        project: String,
+        agent: String,
+    },
+    /// Project cost exceeded a threshold.
+    BudgetExceeded {
+        project: String,
+        current_usd: f64,
+        threshold_usd: f64,
+    },
+    /// A persistent agent has been idle.
+    AgentIdle {
+        agent_id: String,
+        idle_secs: u64,
+    },
+    /// A dispatch was received.
+    DispatchReceived {
+        from_agent: String,
+        to_agent: String,
+        kind: String,
+    },
 }
 
 // ---------------------------------------------------------------------------

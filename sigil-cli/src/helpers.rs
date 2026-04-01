@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use sigil_core::traits::{Provider, Tool};
-use sigil_core::{AgentRole, ExecutionMode, Identity, ProviderKind, SecretStore, SigilConfig};
+use sigil_core::{AgentRole, Identity, ProviderKind, SecretStore, SigilConfig};
 use sigil_memory::SqliteMemory;
 use sigil_orchestrator::ProjectRegistry;
 use sigil_providers::{AnthropicProvider, OllamaProvider, OpenRouterEmbedder, OpenRouterProvider};
@@ -172,22 +172,6 @@ pub(crate) fn build_provider_for_runtime(
             Ok(Arc::new(OllamaProvider::new(url, model)))
         }
     }
-}
-
-pub(crate) fn build_provider(config: &SigilConfig) -> Result<Arc<dyn Provider>> {
-    let runtime = config
-        .sigil
-        .default_runtime
-        .as_deref()
-        .and_then(|name| config.runtime_preset_named(name))
-        .unwrap_or_else(|| sigil_core::RuntimePresetConfig {
-            provider: config
-                .default_provider_kind()
-                .unwrap_or(ProviderKind::OpenRouter),
-            execution_mode: Some(ExecutionMode::Agent),
-            model: None,
-        });
-    build_provider_for_runtime(config, runtime.provider, runtime.model.as_deref())
 }
 
 pub(crate) fn one_shot_agent_name(config: &SigilConfig, project_name: Option<&str>) -> String {

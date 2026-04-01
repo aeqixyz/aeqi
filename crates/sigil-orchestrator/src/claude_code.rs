@@ -37,6 +37,22 @@ impl ClaudeCodeExecutor {
         self
     }
 
+    /// Execute with the worker's enriched identity prepended to the task prompt.
+    /// Fixes the bug where ClaudeCode execution mode silently dropped the entire
+    /// identity system (persona, memory, blackboard, resume brief).
+    pub async fn execute_with_identity(
+        &self,
+        system_prompt: &str,
+        task_prompt: &str,
+    ) -> Result<ClaudeCodeResult> {
+        let full_prompt = if system_prompt.is_empty() {
+            task_prompt.to_string()
+        } else {
+            format!("{system_prompt}\n\n---\n\n{task_prompt}")
+        };
+        self.execute(&full_prompt).await
+    }
+
     pub async fn execute(&self, prompt: &str) -> Result<ClaudeCodeResult> {
         let claude_bin = find_claude_binary()?;
 

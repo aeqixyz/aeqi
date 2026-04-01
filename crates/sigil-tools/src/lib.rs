@@ -1,3 +1,4 @@
+pub mod continue_agent;
 pub mod delegate;
 pub mod edit;
 pub mod file;
@@ -12,6 +13,7 @@ pub mod tasks;
 pub mod web_fetch;
 pub mod web_search;
 
+pub use continue_agent::ContinueAgentTool;
 pub use delegate::DelegateTool;
 pub use edit::FileEditTool;
 pub use file::{FileReadTool, FileWriteTool, ListDirTool};
