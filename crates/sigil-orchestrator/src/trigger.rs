@@ -617,6 +617,19 @@ impl TriggerStore {
         Ok(deleted as u32)
     }
 
+    /// Advance the trigger's last_fired BEFORE execution (at-most-once semantics).
+    /// If the agent crashes mid-execution, the trigger won't re-fire on restart.
+    /// Inspired by Hermes Agent's advance-before-execute cron pattern.
+    pub async fn advance_before_execute(&self, id: &str) -> Result<()> {
+        let db = self.db.lock().await;
+        db.execute(
+            "UPDATE triggers SET last_fired = ?1 WHERE id = ?2",
+            params![Utc::now().to_rfc3339(), id],
+        )?;
+        debug!(id = %id, "trigger advanced before execution (at-most-once)");
+        Ok(())
+    }
+
     /// Record a trigger fire: increment count, update last_fired, add cost.
     pub async fn record_fire(&self, id: &str, cost_usd: f64) -> Result<()> {
         let db = self.db.lock().await;

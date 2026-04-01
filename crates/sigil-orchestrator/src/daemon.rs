@@ -273,6 +273,14 @@ impl Daemon {
             return;
         };
 
+        // Advance-before-execute: update last_fired BEFORE creating the task.
+        // If the agent crashes mid-execution, the trigger won't re-fire on restart.
+        if let Some(ref ts) = self.trigger_store {
+            if let Err(e) = ts.advance_before_execute(&trigger.id).await {
+                warn!(trigger = %trigger.name, error = %e, "failed to advance trigger");
+            }
+        }
+
         let subject = format!("[trigger:{}] {}", trigger.name, trigger.skill);
         let description = format!(
             "Trigger '{}' fired. Run skill '{}' for agent {}.",
