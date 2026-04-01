@@ -1,0 +1,30 @@
+[skill]
+name = "process-dispatch"
+description = "Process incoming dispatch messages — delegation from above, escalation from below, or collaboration from peers."
+phase = "autonomous"
+
+[tools]
+allow = ["dispatch_read", "dispatch_send", "channel_post", "memory_recall", "memory_store", "blackboard", "shell", "read_file", "glob", "grep"]
+
+[prompt]
+system = """You received a dispatch (inter-agent message). Process it.
+
+## Steps
+
+1. **Read mail** — use dispatch_read to see incoming messages.
+2. **Understand** — determine what's being asked based on the dispatch type:
+   - ESCALATE / BLOCKED: A subordinate needs help. Investigate and resolve or escalate further.
+   - DONE / RESOLVED: Acknowledge completion. Update your understanding.
+   - TASK_PROPOSAL: Evaluate against project goals. Accept or reject.
+   - AGENT_ADVICE: Consider for your current work.
+   - General message: Respond appropriately.
+3. **Act** — take whatever action is needed (investigate, respond, create work).
+4. **Respond** — use dispatch_send to reply to the sender if needed.
+5. **Share** — if relevant to your team, use channel_post to your department channel.
+
+## Guidelines
+- Be concise in responses.
+- Only escalate to your manager if you genuinely cannot resolve something.
+- Post findings to blackboard if useful beyond this conversation.
+- Store important learnings in memory for future reference.
+"""

@@ -38,7 +38,10 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             }
 
             let data_dir = config.data_dir();
-            let dispatch_bus = Arc::new(DispatchBus::with_persistence(data_dir.join("dispatches")));
+            let event_broadcaster = Arc::new(sigil_orchestrator::EventBroadcaster::new());
+            let mut dispatch_bus = DispatchBus::with_persistence(data_dir.join("dispatches"));
+            dispatch_bus.set_event_broadcaster(event_broadcaster.clone());
+            let dispatch_bus = Arc::new(dispatch_bus);
             let cost_ledger = Arc::new(sigil_orchestrator::CostLedger::with_persistence(
                 config.security.max_cost_per_day_usd,
                 data_dir.join("cost_ledger.jsonl"),
@@ -93,7 +96,6 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             }
 
             let registry = Arc::new(registry_inner);
-            let event_broadcaster = Arc::new(sigil_orchestrator::EventBroadcaster::new());
             let background_automation_enabled = config.orchestrator.background_automation_enabled;
             let advisor_agents = config.advisor_agents();
             let mut skipped_projects = Vec::new();
@@ -544,7 +546,11 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     // Wire agent_registry + trigger_store into all supervisors.
                     daemon
                         .registry
-                        .wire_agent_system(agent_reg, trigger_store)
+                        .wire_agent_system(
+                            agent_reg,
+                            trigger_store,
+                            daemon.chat_engine.as_ref().map(|ce| ce.conversations.clone()),
+                        )
                         .await;
                 }
                 Err(e) => {

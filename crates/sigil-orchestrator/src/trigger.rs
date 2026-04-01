@@ -111,6 +111,14 @@ pub enum EventPattern {
         #[serde(skip_serializing_if = "Option::is_none")]
         kind: Option<String>,
     },
+    /// Fire when a message is posted to a conversation channel.
+    #[serde(rename = "channel_message")]
+    ChannelMessage {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        channel_name: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        from_agent: Option<String>,
+    },
 }
 
 /// Input for creating a new trigger.
@@ -424,6 +432,25 @@ impl EventPattern {
                     .as_ref()
                     .map_or(true, |k| kind == k);
                 from_match && kind_match
+            }
+            (
+                EventPattern::ChannelMessage {
+                    channel_name: pattern_channel,
+                    from_agent: pattern_from,
+                },
+                ExecutionEvent::ChannelMessage {
+                    channel_name,
+                    from_agent,
+                    ..
+                },
+            ) => {
+                let channel_match = pattern_channel
+                    .as_ref()
+                    .map_or(true, |c| channel_name == c);
+                let from_match = pattern_from
+                    .as_ref()
+                    .map_or(true, |f| from_agent == f);
+                channel_match && from_match
             }
             _ => false,
         }

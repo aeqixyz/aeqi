@@ -100,17 +100,21 @@ impl ProjectRegistry {
             .insert(name, Arc::new(Mutex::new(supervisor)));
     }
 
-    /// Wire agent registry and trigger store into all registered supervisors.
+    /// Wire agent registry, trigger store, and conversation store into all supervisors.
     pub async fn wire_agent_system(
         &self,
         agent_registry: Arc<crate::agent_registry::AgentRegistry>,
         trigger_store: Arc<crate::trigger::TriggerStore>,
+        conversation_store: Option<Arc<crate::ConversationStore>>,
     ) {
         let sups = self.supervisors.write().await;
         for (_name, sup) in sups.iter() {
             let mut s = sup.lock().await;
             s.agent_registry = Some(agent_registry.clone());
             s.trigger_store = Some(trigger_store.clone());
+            if let Some(ref cs) = conversation_store {
+                s.conversation_store = Some(cs.clone());
+            }
         }
     }
 

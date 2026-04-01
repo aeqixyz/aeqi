@@ -129,6 +129,8 @@ pub struct Supervisor {
     pub agent_registry: Option<Arc<crate::agent_registry::AgentRegistry>>,
     /// Trigger store — when set, agents with manage_triggers capability get the tool.
     pub trigger_store: Option<Arc<crate::trigger::TriggerStore>>,
+    /// Conversation store — for channel_post tool and org context.
+    pub conversation_store: Option<Arc<crate::ConversationStore>>,
 }
 
 impl Supervisor {
@@ -260,6 +262,7 @@ impl Supervisor {
             execution_mode: sigil_core::ExecutionMode::default(),
             agent_registry: None,
             trigger_store: None,
+            conversation_store: None,
         }
     }
 
@@ -461,6 +464,74 @@ impl Supervisor {
                         "injected manage_triggers tool"
                     );
                 }
+            }
+        }
+
+        // Inject communication tools for all persistent agents (dispatch + channel).
+        if persistent_agent_id.is_some() {
+            if let crate::agent_worker::WorkerExecution::Agent {
+                ref mut tools, ..
+            } = worker.execution
+            {
+                // dispatch_read + dispatch_send for agent-to-agent messaging.
+                tools.push(Arc::new(crate::tools::MailReadTool::new(
+                    self.dispatch_bus.clone(),
+                )));
+                tools.push(Arc::new(crate::tools::MailSendTool::new(
+                    self.dispatch_bus.clone(),
+                )));
+
+                // channel_post for department/project conversation channels.
+                if let (Some(convs), Some(broadcaster)) =
+                    (&self.conversation_store, &self.event_broadcaster)
+                {
+                    tools.push(Arc::new(crate::tools::ChannelPostTool::new(
+                        convs.clone(),
+                        broadcaster.clone(),
+                        agent_name.clone(),
+                    )));
+                }
+            }
+        }
+
+        // Inject org context into identity (manager, peers, reports, channels).
+        if let (Some(registry), Some(agent_id)) =
+            (&self.agent_registry, &persistent_agent_id)
+        {
+            let mut org_lines = Vec::new();
+
+            if let Ok(Some(parent)) = registry.parent(agent_id).await {
+                org_lines.push(format!(
+                    "Manager: {}{}",
+                    parent.name,
+                    parent.display_name.as_ref().map(|d| format!(" ({d})")).unwrap_or_default()
+                ));
+            }
+
+            if let Ok(siblings) = registry.siblings(agent_id).await {
+                let names: Vec<&str> = siblings.iter()
+                    .filter(|s| s.status == crate::agent_registry::AgentStatus::Active)
+                    .map(|s| s.name.as_str())
+                    .collect();
+                if !names.is_empty() {
+                    org_lines.push(format!("Peers: {}", names.join(", ")));
+                }
+            }
+
+            if let Ok(children) = registry.children(agent_id).await {
+                let names: Vec<&str> = children.iter()
+                    .filter(|c| c.status == crate::agent_registry::AgentStatus::Active)
+                    .map(|c| c.name.as_str())
+                    .collect();
+                if !names.is_empty() {
+                    org_lines.push(format!("Reports: {}", names.join(", ")));
+                }
+            }
+
+            if !org_lines.is_empty() {
+                let org_context = format!("## Your Organization\n{}", org_lines.join("\n"));
+                let existing = worker.identity.memory.clone().unwrap_or_default();
+                worker.identity.memory = Some(format!("{existing}\n\n{org_context}"));
             }
         }
 

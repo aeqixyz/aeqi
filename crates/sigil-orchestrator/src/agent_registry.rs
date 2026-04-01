@@ -53,6 +53,8 @@ pub struct PersistentAgent {
     pub project: Option<String>,
     /// Department scope within project. None = project-level.
     pub department: Option<String>,
+    /// Parent agent UUID — defines org tree. None = root (Shadow).
+    pub parent_id: Option<String>,
     /// Preferred model.
     pub model: Option<String>,
     /// Capabilities beyond normal tools.
@@ -77,6 +79,7 @@ pub struct AgentTemplateFrontmatter {
     pub capabilities: Vec<String>,
     pub project: Option<String>,
     pub department: Option<String>,
+    pub parent: Option<String>,
     #[serde(default)]
     pub triggers: Vec<TemplateTrigger>,
 }
@@ -95,6 +98,12 @@ pub struct TemplateTrigger {
     pub event_project: Option<String>,
     /// Event tool filter (optional, for tool_call_completed).
     pub event_tool: Option<String>,
+    /// Event from_agent filter (optional, for dispatch_received/channel_message).
+    pub event_from: Option<String>,
+    /// Event kind filter (optional, for dispatch_received).
+    pub event_kind: Option<String>,
+    /// Event channel filter (optional, for channel_message).
+    pub event_channel: Option<String>,
     /// Cooldown in seconds for event triggers (required for event type).
     pub cooldown_secs: Option<u64>,
     /// Skill to run when triggered.
@@ -264,6 +273,7 @@ impl AgentRegistry {
                  system_prompt TEXT NOT NULL DEFAULT '',
                  project TEXT,
                  department TEXT,
+                 parent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
                  model TEXT,
                  capabilities TEXT NOT NULL DEFAULT '[]',
                  status TEXT NOT NULL DEFAULT 'active',
@@ -275,6 +285,7 @@ impl AgentRegistry {
              CREATE INDEX IF NOT EXISTS idx_agents_project ON agents(project);
              CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
              CREATE INDEX IF NOT EXISTS idx_agents_name ON agents(name);
+             CREATE INDEX IF NOT EXISTS idx_agents_parent ON agents(parent_id);
              CREATE TABLE IF NOT EXISTS triggers (
                  id TEXT PRIMARY KEY,
                  agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -313,6 +324,18 @@ impl AgentRegistry {
         let name = fm.name.unwrap_or_else(|| format!("agent-{}", &uuid::Uuid::new_v4().to_string()[..8]));
         let triggers = fm.triggers.clone();
 
+        // Resolve parent name to UUID if specified.
+        let parent_id = if let Some(ref parent_name) = fm.parent {
+            match self.get_active_by_name(parent_name).await? {
+                Some(pa) => Some(pa.id),
+                None => {
+                    anyhow::bail!("parent agent '{parent_name}' not found in registry");
+                }
+            }
+        } else {
+            None
+        };
+
         let agent = self.spawn(
             &name,
             fm.display_name.as_deref(),
@@ -320,6 +343,7 @@ impl AgentRegistry {
             &system_prompt,
             project_override.or(fm.project.as_deref()),
             department_override.or(fm.department.as_deref()),
+            parent_id.as_deref(),
             fm.model.as_deref(),
             &fm.capabilities,
         ).await?;
@@ -359,6 +383,7 @@ impl AgentRegistry {
         system_prompt: &str,
         project: Option<&str>,
         department: Option<&str>,
+        parent_id: Option<&str>,
         model: Option<&str>,
         capabilities: &[String],
     ) -> Result<PersistentAgent> {
@@ -374,6 +399,7 @@ impl AgentRegistry {
             system_prompt: system_prompt.to_string(),
             project: project.map(|s| s.to_string()),
             department: department.map(|s| s.to_string()),
+            parent_id: parent_id.map(|s| s.to_string()),
             model: model.map(|s| s.to_string()),
             capabilities: capabilities.to_vec(),
             status: AgentStatus::Active,
@@ -385,8 +411,8 @@ impl AgentRegistry {
 
         let db = self.db.lock().await;
         db.execute(
-            "INSERT INTO agents (id, name, display_name, template, system_prompt, project, department, model, capabilities, status, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO agents (id, name, display_name, template, system_prompt, project, department, parent_id, model, capabilities, status, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 agent.id,
                 agent.name,
@@ -395,6 +421,7 @@ impl AgentRegistry {
                 agent.system_prompt,
                 agent.project,
                 agent.department,
+                agent.parent_id,
                 agent.model,
                 caps_json,
                 agent.status.to_string(),
@@ -511,6 +538,118 @@ impl AgentRegistry {
         crate::trigger::TriggerStore::new(self.db.clone())
     }
 
+    // -----------------------------------------------------------------------
+    // Org tree queries
+    // -----------------------------------------------------------------------
+
+    /// Get the parent (manager) of an agent.
+    pub async fn parent(&self, agent_id: &str) -> Result<Option<PersistentAgent>> {
+        let db = self.db.lock().await;
+        let parent_id: Option<String> = db
+            .query_row(
+                "SELECT parent_id FROM agents WHERE id = ?1",
+                params![agent_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+
+        match parent_id {
+            Some(pid) => {
+                let agent = db
+                    .query_row(
+                        "SELECT * FROM agents WHERE id = ?1",
+                        params![pid],
+                        |row| Ok(row_to_agent(row)),
+                    )
+                    .optional()?;
+                Ok(agent)
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Get direct children (reports) of an agent.
+    pub async fn children(&self, agent_id: &str) -> Result<Vec<PersistentAgent>> {
+        let db = self.db.lock().await;
+        let mut stmt = db.prepare(
+            "SELECT * FROM agents WHERE parent_id = ?1 AND status = 'active' ORDER BY name ASC",
+        )?;
+        let agents = stmt
+            .query_map(params![agent_id], |row| Ok(row_to_agent(row)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(agents)
+    }
+
+    /// Get siblings (agents sharing the same parent, excluding self).
+    pub async fn siblings(&self, agent_id: &str) -> Result<Vec<PersistentAgent>> {
+        let db = self.db.lock().await;
+        let parent_id: Option<String> = db
+            .query_row(
+                "SELECT parent_id FROM agents WHERE id = ?1",
+                params![agent_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+
+        match parent_id {
+            Some(pid) => {
+                let mut stmt = db.prepare(
+                    "SELECT * FROM agents WHERE parent_id = ?1 AND id != ?2 AND status = 'active' ORDER BY name ASC",
+                )?;
+                let agents = stmt
+                    .query_map(params![pid, agent_id], |row| Ok(row_to_agent(row)))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(agents)
+            }
+            None => Ok(Vec::new()),
+        }
+    }
+
+    /// Get the department name for an agent.
+    /// If the agent has children, its own name is the department.
+    /// Otherwise, its parent's name is the department.
+    pub async fn department_name(&self, agent_id: &str) -> Result<Option<String>> {
+        let db = self.db.lock().await;
+        let child_count: i64 = db.query_row(
+            "SELECT COUNT(*) FROM agents WHERE parent_id = ?1 AND status = 'active'",
+            params![agent_id],
+            |row| row.get(0),
+        )?;
+
+        if child_count > 0 {
+            // This agent is a department leader
+            let name: String = db.query_row(
+                "SELECT name FROM agents WHERE id = ?1",
+                params![agent_id],
+                |row| row.get(0),
+            )?;
+            return Ok(Some(name));
+        }
+
+        // Check parent
+        let parent_name: Option<String> = db
+            .query_row(
+                "SELECT a2.name FROM agents a1 JOIN agents a2 ON a1.parent_id = a2.id WHERE a1.id = ?1",
+                params![agent_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(parent_name)
+    }
+
+    /// Set the parent of an agent.
+    pub async fn set_parent(&self, agent_id: &str, parent_id: Option<&str>) -> Result<()> {
+        let db = self.db.lock().await;
+        db.execute(
+            "UPDATE agents SET parent_id = ?1 WHERE id = ?2",
+            params![parent_id, agent_id],
+        )?;
+        info!(agent_id = %agent_id, parent_id = ?parent_id, "agent parent updated");
+        Ok(())
+    }
+
     /// Get the default agent for a project (first active agent scoped to that project,
     /// or the first root-scoped active agent).
     pub async fn default_for_project(&self, project: Option<&str>) -> Result<Option<PersistentAgent>> {
@@ -571,6 +710,14 @@ fn template_trigger_to_type(t: &TemplateTrigger) -> Result<crate::trigger::Trigg
             "tool_call_completed" => crate::trigger::EventPattern::ToolCallCompleted {
                 tool: t.event_tool.clone(),
             },
+            "dispatch_received" => crate::trigger::EventPattern::DispatchReceived {
+                from_agent: t.event_from.clone(),
+                kind: t.event_kind.clone(),
+            },
+            "channel_message" => crate::trigger::EventPattern::ChannelMessage {
+                channel_name: t.event_channel.clone(),
+                from_agent: t.event_from.clone(),
+            },
             other => anyhow::bail!("unknown event pattern: {other}"),
         };
         return Ok(crate::trigger::TriggerType::Event {
@@ -603,6 +750,7 @@ fn row_to_agent(row: &rusqlite::Row) -> PersistentAgent {
         system_prompt: row.get("system_prompt").unwrap_or_default(),
         project: row.get("project").ok(),
         department: row.get("department").ok(),
+        parent_id: row.get("parent_id").ok(),
         model: row.get("model").ok(),
         capabilities,
         status,
@@ -639,7 +787,7 @@ mod tests {
     async fn spawn_and_get() {
         let reg = test_registry().await;
         let agent = reg
-            .spawn("shadow", Some("Shadow"), "shadow", "You are Shadow.", None, None, Some("claude-sonnet-4.6"), &["spawn_agents".into()])
+            .spawn("shadow", Some("Shadow"), "shadow", "You are Shadow.", None, None, None, Some("claude-sonnet-4.6"), &["spawn_agents".into()])
             .await
             .unwrap();
 
@@ -659,7 +807,7 @@ mod tests {
     async fn spawn_project_scoped() {
         let reg = test_registry().await;
         let agent = reg
-            .spawn("sigil-lead", None, "shadow", "Lead for sigil.", Some("sigil"), None, None, &[])
+            .spawn("sigil-lead", None, "shadow", "Lead for sigil.", Some("sigil"), None, None, None, &[])
             .await
             .unwrap();
 
@@ -677,7 +825,7 @@ mod tests {
     async fn record_session_updates_stats() {
         let reg = test_registry().await;
         let agent = reg
-            .spawn("test-agent", None, "researcher", "Test agent.", None, None, None, &[])
+            .spawn("test-agent", None, "researcher", "Test agent.", None, None, None, None, &[])
             .await
             .unwrap();
 
@@ -693,7 +841,7 @@ mod tests {
     #[tokio::test]
     async fn status_lifecycle() {
         let reg = test_registry().await;
-        reg.spawn("lifecycle", None, "shadow", "Lifecycle test.", None, None, None, &[])
+        reg.spawn("lifecycle", None, "shadow", "Lifecycle test.", None, None, None, None, &[])
             .await
             .unwrap();
 
@@ -717,10 +865,10 @@ mod tests {
     #[tokio::test]
     async fn default_for_project() {
         let reg = test_registry().await;
-        reg.spawn("root-shadow", None, "shadow", "Root agent.", None, None, None, &[])
+        reg.spawn("root-shadow", None, "shadow", "Root agent.", None, None, None, None, &[])
             .await
             .unwrap();
-        reg.spawn("sigil-lead", None, "shadow", "Sigil lead.", Some("sigil"), None, None, &[])
+        reg.spawn("sigil-lead", None, "shadow", "Sigil lead.", Some("sigil"), None, None, None, &[])
             .await
             .unwrap();
 
@@ -741,11 +889,11 @@ mod tests {
     async fn duplicate_names_allowed() {
         let reg = test_registry().await;
         let agent1 = reg
-            .spawn("shadow", None, "shadow", "First shadow.", None, None, None, &[])
+            .spawn("shadow", None, "shadow", "First shadow.", None, None, None, None, &[])
             .await
             .unwrap();
         let agent2 = reg
-            .spawn("shadow", None, "shadow", "Second shadow.", None, None, None, &[])
+            .spawn("shadow", None, "shadow", "Second shadow.", None, None, None, None, &[])
             .await
             .unwrap();
         // Same name, different UUIDs.
@@ -815,5 +963,104 @@ You are a monitoring agent.
         let watch = triggers.iter().find(|t| t.name == "failure-watch").unwrap();
         assert_eq!(watch.skill, "failure-triage");
         assert!(matches!(watch.trigger_type, crate::trigger::TriggerType::Event { cooldown_secs: 300, .. }));
+    }
+
+    #[tokio::test]
+    async fn org_tree_parent_children_siblings() {
+        let reg = test_registry().await;
+
+        // Create hierarchy: shadow → lead → (engineer, reviewer)
+        let shadow = reg
+            .spawn("shadow", None, "shadow", "Root.", None, None, None, None, &[])
+            .await
+            .unwrap();
+        let lead = reg
+            .spawn("lead", None, "lead", "Lead.", Some("sigil"), None, Some(&shadow.id), None, &[])
+            .await
+            .unwrap();
+        let eng = reg
+            .spawn("engineer", None, "eng", "Eng.", Some("sigil"), None, Some(&lead.id), None, &[])
+            .await
+            .unwrap();
+        let rev = reg
+            .spawn("reviewer", None, "rev", "Rev.", Some("sigil"), None, Some(&lead.id), None, &[])
+            .await
+            .unwrap();
+
+        // Parent queries
+        assert!(reg.parent(&shadow.id).await.unwrap().is_none()); // root has no parent
+        assert_eq!(reg.parent(&lead.id).await.unwrap().unwrap().id, shadow.id);
+        assert_eq!(reg.parent(&eng.id).await.unwrap().unwrap().id, lead.id);
+
+        // Children queries
+        let shadow_kids = reg.children(&shadow.id).await.unwrap();
+        assert_eq!(shadow_kids.len(), 1);
+        assert_eq!(shadow_kids[0].id, lead.id);
+
+        let lead_kids = reg.children(&lead.id).await.unwrap();
+        assert_eq!(lead_kids.len(), 2);
+        let kid_names: Vec<&str> = lead_kids.iter().map(|a| a.name.as_str()).collect();
+        assert!(kid_names.contains(&"engineer"));
+        assert!(kid_names.contains(&"reviewer"));
+
+        assert!(reg.children(&eng.id).await.unwrap().is_empty());
+
+        // Siblings queries
+        let eng_siblings = reg.siblings(&eng.id).await.unwrap();
+        assert_eq!(eng_siblings.len(), 1);
+        assert_eq!(eng_siblings[0].id, rev.id);
+
+        assert!(reg.siblings(&shadow.id).await.unwrap().is_empty()); // root has no siblings
+
+        // Department name
+        assert_eq!(reg.department_name(&lead.id).await.unwrap(), Some("lead".to_string())); // leader of dept
+        assert_eq!(reg.department_name(&eng.id).await.unwrap(), Some("lead".to_string())); // member, dept is parent's name
+        assert!(reg.department_name(&shadow.id).await.unwrap().is_some()); // shadow has children → dept "shadow"
+    }
+
+    #[tokio::test]
+    async fn set_parent() {
+        let reg = test_registry().await;
+        let a = reg
+            .spawn("orphan", None, "t", "Orphan.", None, None, None, None, &[])
+            .await
+            .unwrap();
+        let b = reg
+            .spawn("parent", None, "t", "Parent.", None, None, None, None, &[])
+            .await
+            .unwrap();
+
+        assert!(reg.parent(&a.id).await.unwrap().is_none());
+
+        reg.set_parent(&a.id, Some(&b.id)).await.unwrap();
+        assert_eq!(reg.parent(&a.id).await.unwrap().unwrap().id, b.id);
+
+        reg.set_parent(&a.id, None).await.unwrap();
+        assert!(reg.parent(&a.id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn spawn_from_template_with_parent() {
+        let reg = test_registry().await;
+
+        // Create shadow first
+        reg.spawn("shadow", None, "shadow", "Root.", None, None, None, None, &[])
+            .await
+            .unwrap();
+
+        let template = r#"---
+name: engineer
+parent: shadow
+project: sigil
+---
+
+You are an engineer.
+"#;
+        let agent = reg.spawn_from_template(template, None, None).await.unwrap();
+        assert_eq!(agent.name, "engineer");
+        assert!(agent.parent_id.is_some());
+
+        let parent = reg.parent(&agent.id).await.unwrap().unwrap();
+        assert_eq!(parent.name, "shadow");
     }
 }

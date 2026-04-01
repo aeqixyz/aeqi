@@ -120,6 +120,13 @@ pub enum ExecutionEvent {
         to_agent: String,
         kind: String,
     },
+    /// A message was posted to a conversation channel.
+    ChannelMessage {
+        channel_name: String,
+        chat_id: i64,
+        from_agent: String,
+        content_preview: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
