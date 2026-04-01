@@ -33,3 +33,6 @@ toml = { workspace = true }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
 tungstenite = { workspace = true }
+pulldown-cmark = { workspace = true }
+syntect = { workspace = true }
+similar = { workspace = true }

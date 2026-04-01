@@ -2,6 +2,7 @@ mod cli;
 mod cmd;
 mod helpers;
 mod service;
+mod tui;
 
 use anyhow::Result;
 use clap::Parser;
@@ -142,7 +143,7 @@ async fn main() -> Result<()> {
         Some(Commands::Web { action }) => cmd::web::cmd_web(&cli.config, action).await,
         Some(Commands::Graph { action }) => cmd::graph::cmd_graph(&cli.config, action).await,
         Some(Commands::Chat { agent, project }) => {
-            cmd::chat_tui::cmd_chat_tui(&cli.config, agent.as_deref(), project.as_deref()).await
+            tui::run(&cli.config, agent.as_deref(), project.as_deref()).await
         }
         Some(Commands::Mcp) => cmd::mcp::cmd_mcp(&cli.config).map(|_| ()),
     }
