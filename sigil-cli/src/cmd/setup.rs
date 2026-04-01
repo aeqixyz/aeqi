@@ -287,8 +287,6 @@ max_workers = 1\n\
 # name = \"sigil\"\n\
 # prefix = \"sg\"\n\
 # repo = \"/absolute/path/to/repo\"\n\
-# team.org = \"core\"\n\
-# team.unit = \"control-plane\"\n\
 # team.leader = \"leader\"\n\
 # runtime = \"{runtime}\"\n",
         render_provider_block(provider, default_model),

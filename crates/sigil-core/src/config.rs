@@ -357,12 +357,6 @@ impl Default for TeamConfig {
 /// Per-project team assignment — which agents own this project.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectTeamConfig {
-    /// Optional organization to resolve unit membership from.
-    #[serde(default)]
-    pub org: Option<String>,
-    /// Optional unit inside the organization.
-    #[serde(default)]
-    pub unit: Option<String>,
     /// The team leader for this project.
     pub leader: String,
     /// Team members (includes leader). If empty, defaults to just the leader.
@@ -1180,8 +1174,6 @@ impl SigilConfig {
         }
         // Fall back to system team.
         ProjectTeamConfig {
-            org: None,
-            unit: None,
             leader: self.team.leader.clone(),
             agents: if self.team.agents.is_empty() {
                 vec![self.team.leader.clone()]

@@ -1544,12 +1544,12 @@ impl Tool for ChannelPostTool {
         };
 
         // Ensure channel exists in conversation store.
-        self.conversation_store
+        let _ = self.conversation_store
             .ensure_channel(chat_id, "agent", &channel_name)
             .await;
 
         // Record the message.
-        self.conversation_store
+        let _ = self.conversation_store
             .record_with_source(chat_id, &self.agent_name, message, Some("agent"))
             .await;
 

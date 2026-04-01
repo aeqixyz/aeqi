@@ -1981,8 +1981,6 @@ mod tests {
             worker_timeout_secs: 60,
             max_cost_per_day_usd: None,
             team: Some(ProjectTeamConfig {
-                org: None,
-                unit: None,
                 leader: "leader".to_string(),
                 agents: vec!["researcher".to_string(), "reviewer".to_string()],
             }),
@@ -2003,8 +2001,6 @@ mod tests {
         supervisor.execution_mode = sigil_core::ExecutionMode::Agent;
         supervisor.set_team(
             ProjectTeamConfig {
-                org: None,
-                unit: None,
                 leader: "leader".to_string(),
                 agents: vec!["researcher".to_string(), "reviewer".to_string()],
             },

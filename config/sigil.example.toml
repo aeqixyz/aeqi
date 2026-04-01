@@ -44,41 +44,6 @@ router_model = "xiaomi/mimo-v2-pro"
 router_cooldown_secs = 60
 max_background_cost_usd = 0.50
 
-# Optional organization kernel. This is intentionally generic:
-# roles, units, relationships, and rituals can model a company,
-# open source project, incident team, research lab, or any other org shape.
-# [[organizations]]
-# name = "core"
-# kind = "workspace"
-# default = true
-# mission = "Keep the project healthy and moving."
-#
-# [[organizations.units]]
-# name = "control-plane"
-# kind = "team"
-# mission = "Coordinate execution and quality."
-# lead = "leader"
-# members = ["researcher", "reviewer"]
-#
-# [[organizations.roles]]
-# agent = "leader"
-# title = "Orchestrator"
-# unit = "control-plane"
-# mandate = "Route work and maintain system coherence."
-# permissions = ["delegate", "approve", "escalate"]
-#
-# [[organizations.relationships]]
-# from = "leader"
-# to = "reviewer"
-# kind = "delegates_to"
-#
-# [[organizations.rituals]]
-# name = "Daily Ops Review"
-# owner = "leader"
-# cadence = "daily"
-# participants = ["reviewer"]
-# purpose = "Review readiness, blocked work, and follow-ups."
-
 # Agents are discovered from agents/{name}/agent.toml files on disk.
 # See agents/README.md for the directory structure.
 
@@ -134,8 +99,6 @@ model = "xiaomi/mimo-v2-pro"
 max_workers = 2
 execution_mode = "agent"
 worker_timeout_secs = 1800
-# team.org = "core"
-# team.unit = "control-plane"
 # team.leader = "leader"
 # team.agents = ["leader"]
 

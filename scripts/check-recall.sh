@@ -15,9 +15,15 @@ source "$SCRIPT_DIR/detect-project.sh"
 
 GATE="$SIGIL_SESSION_DIR/recall.gate"
 
-# --- Extract file path from tool input (jq) ---
+# --- Read hook payload from stdin ---
+PAYLOAD=$(timeout 2 cat 2>/dev/null) || true
+
+# --- Extract file path from stdin payload or env var ---
 FILE_PATH=""
-if [ -n "${CLAUDE_TOOL_INPUT:-}" ]; then
+if [ -n "$PAYLOAD" ]; then
+    FILE_PATH=$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.file_path // empty' 2>/dev/null) || true
+fi
+if [ -z "$FILE_PATH" ] && [ -n "${CLAUDE_TOOL_INPUT:-}" ]; then
     FILE_PATH=$(printf '%s' "$CLAUDE_TOOL_INPUT" | jq -r '.file_path // empty' 2>/dev/null) || true
 fi
 
@@ -55,7 +61,6 @@ fi
 if [ ! -f "$GATE" ]; then
     PROJ="${TARGET_PROJECT:-sigil}"
     HINT="sigil_recall(project='$PROJ', query='context for current work')"
-    # Enrich deny message with available context hints
     EXTRA=""
     GRAPH_DB="${SIGIL_DATA_DIR:-$HOME/.sigil}/codegraph/${PROJ}.db"
     if [ -f "$GRAPH_DB" ]; then

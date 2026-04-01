@@ -53,48 +53,7 @@ pub(crate) async fn cmd_team(
         );
     }
 
-    if !config.organizations.is_empty() {
-        println!("\nOrganizations:");
-        for org in &config.organizations {
-            let default_marker = if org.default { " [default]" } else { "" };
-            let kind = org.kind.as_deref().unwrap_or("org");
-            println!("  {}{} kind={}", org.name, default_marker, kind);
-            for unit in &org.units {
-                let lead = unit.lead.as_deref().unwrap_or("unassigned");
-                let members = if unit.members.is_empty() {
-                    "-".to_string()
-                } else {
-                    unit.members.join(", ")
-                };
-                println!("    unit={} lead={} members=[{}]", unit.name, lead, members);
-            }
-            for role in &org.roles {
-                let unit = role.unit.as_deref().unwrap_or("-");
-                println!("    role={} agent={} unit={}", role.title, role.agent, unit);
-            }
-            for relationship in &org.relationships {
-                println!(
-                    "    rel={} {} {}",
-                    relationship.from, relationship.kind, relationship.to
-                );
-            }
-            for ritual in &org.rituals {
-                let cadence = ritual.cadence.as_deref().unwrap_or("unscheduled");
-                let participants = if ritual.participants.is_empty() {
-                    "-".to_string()
-                } else {
-                    ritual.participants.join(", ")
-                };
-                println!(
-                    "    ritual={} owner={} cadence={} participants=[{}]",
-                    ritual.name, ritual.owner, cadence, participants
-                );
-            }
-        }
-    }
-
     let mut issues = config.validate_teams();
-    issues.extend(config.validate_organizations());
     issues.sort();
     issues.dedup();
     if !issues.is_empty() {
