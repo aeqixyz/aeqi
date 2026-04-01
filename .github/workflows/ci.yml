@@ -24,6 +24,9 @@ jobs:
           cache-dependency-path: apps/ui/package-lock.json
       - uses: Swatinem/rust-cache@v2
 
+      - name: Install ripgrep
+        run: sudo apt-get install -y ripgrep
+
       - name: UI install
         run: npm --prefix apps/ui ci
 
