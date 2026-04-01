@@ -1,0 +1,269 @@
+[sigil]
+name = "emperor-system"
+data_dir = "~/.sigil"
+
+[web]
+enabled = true
+bind = "0.0.0.0:8400"
+ui_dist_dir = "/home/claudedev/sigil/apps/ui/dist"
+cors_origins = ["https://entity.business", "http://localhost:5173"]
+auth_secret = "${SIGIL_WEB_SECRET}"
+
+[providers.openrouter]
+api_key = "${OPENROUTER_API_KEY}"
+default_model = "stepfun/step-3.5-flash:free"
+embedding_model = "openai/text-embedding-3-small"
+
+[security]
+autonomy = "supervised"
+workspace_only = true
+max_cost_per_day_usd = 10.0
+
+[memory]
+backend = "sqlite"
+embedding_dimensions = 1536
+vector_weight = 0.6
+keyword_weight = 0.4
+temporal_decay_halflife_days = 30
+mmr_lambda = 0.7
+chunk_size_tokens = 400
+chunk_overlap_tokens = 80
+
+[heartbeat]
+enabled = false
+default_interval_minutes = 30
+
+# Agent lifecycle engine — autonomous reflection, evolution, proactive scanning
+[lifecycle]
+enabled = false
+model = "xiaomi/mimo-v2-pro"
+
+# Global repo pool — all agents can access all repos
+[repos]
+sigil = "/home/claudedev/sigil"
+sigil-ui = "/home/claudedev/sigil/apps/ui"
+algostaking = "/home/claudedev/algostaking-backend"
+algostaking-app = "/home/claudedev/algostaking-app"
+algostaking-frontend = "/home/claudedev/algostaking-frontend"
+riftdecks = "/home/claudedev/riftdecks"
+entity-legal = "/home/claudedev/sigil/projects/entity-legal/web"
+aeqi-core = "/home/claudedev/aeqi-core"
+aeqi-app = "/home/claudedev/aeqi-app"
+aeqi-graph = "/home/claudedev/aeqi-graph"
+unifutures = "/home/claudedev/unifutures"
+
+# System team — Rei at the helm
+[team]
+leader = "rei"
+agents = ["rei"]
+router_model = "xiaomi/mimo-v2-pro"
+router_cooldown_secs = 60
+max_background_cost_usd = 0.0
+
+# Agents discovered from agents/{name}/agent.toml files on disk.
+# Active: rei, engineer, trader, designer, researcher, reviewer
+
+[channels.telegram]
+token_secret = "TELEGRAM_BOT_TOKEN"
+allowed_chats = [-5229229023]
+debounce_window_ms = 3000
+
+# Orchestration tuning — v3 feature activation
+[orchestrator]
+background_automation_enabled = false
+expertise_routing = true
+adaptive_retry = false
+failure_analysis_model = "xiaomi/mimo-v2-pro"
+preflight_enabled = false
+preflight_model = "xiaomi/mimo-v2-pro"
+preflight_max_cost_usd = 0.02
+decomposition_model = "xiaomi/mimo-v2-pro"
+auto_redecompose = false
+infer_deps_threshold = 0.6
+blackboard_transient_ttl_hours = 48
+blackboard_durable_ttl_days = 14
+
+# Watchdog rules — event-driven automation
+[[watchdogs]]
+name = "sigil-self-failure"
+cooldown_secs = 7200
+enabled = false
+[watchdogs.condition]
+event = "task_failed"
+project_filter = "sigil"
+count_threshold = 2
+window_secs = 3600
+[watchdogs.action.escalate]
+message = "2+ task failures in sigil project — the orchestrator needs attention"
+
+# Algostaking cron jobs: service-heartbeat (5m), pnl-tracker (10m),
+# accuracy-watchdog (15m), health-monitor (30m), training-progress (1h),
+# improvement-cycle (2h), morning-report (8:57am), daily-pnl (midnight),
+# weekend-deep-review (Sat 10:17am)
+
+# Algostaking reactive watchdogs
+[[watchdogs]]
+name = "algostaking-task-failure"
+cooldown_secs = 1800
+enabled = false
+[watchdogs.condition]
+event = "task_failed"
+project_filter = "algostaking"
+count_threshold = 2
+window_secs = 3600
+[watchdogs.action.escalate]
+message = "2+ algostaking task failures in 1 hour — check services and ML pipeline"
+
+[[watchdogs]]
+name = "algostaking-worker-timeout"
+cooldown_secs = 3600
+enabled = false
+[watchdogs.condition]
+event = "worker_timeout"
+project_filter = "algostaking"
+count_threshold = 1
+window_secs = 1800
+[watchdogs.action.escalate]
+message = "Algostaking worker timed out — possible stuck inference or training loop"
+
+[[watchdogs]]
+name = "budget-warning"
+cooldown_secs = 14400
+enabled = false
+[watchdogs.condition]
+event = "budget_threshold_reached"
+count_threshold = 1
+window_secs = 86400
+budget_threshold = 0.8
+[watchdogs.action.escalate]
+message = "Budget usage exceeded 80%"
+
+[[watchdogs]]
+name = "general-timeout-alert"
+cooldown_secs = 3600
+enabled = false
+[watchdogs.condition]
+event = "worker_timeout"
+count_threshold = 3
+window_secs = 1800
+[watchdogs.action.escalate]
+message = "3+ worker timeouts across projects in 30 minutes"
+
+# Projects — each is a product you're building
+# Sigil manages itself — dogfooding is how we make it great
+[[projects]]
+name = "sigil"
+prefix = "sg"
+repo = "/home/claudedev/sigil"
+model = "xiaomi/mimo-v2-pro"
+max_workers = 2
+worktree_root = "/home/claudedev/worktrees"
+execution_mode = "agent"
+max_turns = 25
+worker_timeout_secs = 3600
+team.leader = "engineer"
+team.agents = ["engineer", "reviewer"]
+
+[[projects.departments]]
+name = "engineering"
+lead = "engineer"
+agents = ["engineer", "reviewer"]
+description = "Core framework, CLI, daemon, web API"
+
+[[projects.departments]]
+name = "product"
+lead = "designer"
+agents = ["designer"]
+description = "Web dashboard, UX, landing page"
+
+# HFT trading engine — the money machine
+[[projects]]
+name = "algostaking"
+prefix = "as"
+repo = "/home/claudedev/algostaking-backend"
+model = "xiaomi/mimo-v2-pro"
+max_workers = 3
+worktree_root = "/home/claudedev/worktrees"
+execution_mode = "agent"
+max_turns = 50
+worker_timeout_secs = 1800
+team.leader = "trader"
+team.agents = ["trader", "engineer"]
+
+[[projects.departments]]
+name = "trading"
+lead = "trader"
+agents = ["trader"]
+description = "Strategy, signals, PMS/OMS/EMS, portfolio management"
+
+[[projects.departments]]
+name = "engineering"
+lead = "engineer"
+agents = ["engineer"]
+description = "Infrastructure, data pipeline, services, deployment"
+
+[[projects.departments]]
+name = "research"
+lead = "researcher"
+agents = ["researcher"]
+description = "Model evaluation, feature research, backtesting"
+
+# aeqi platform
+[[projects]]
+name = "aeqi"
+prefix = "aq"
+repo = "/home/claudedev/aeqi-core"
+model = "xiaomi/mimo-v2-pro"
+max_workers = 2
+execution_mode = "agent"
+worker_timeout_secs = 1800
+team.leader = "engineer"
+team.agents = ["engineer", "designer"]
+
+# E-commerce
+[[projects]]
+name = "riftdecks-shop"
+prefix = "rd"
+repo = "/home/claudedev/riftdecks"
+model = "xiaomi/mimo-v2-pro"
+max_workers = 2
+execution_mode = "agent"
+worker_timeout_secs = 1800
+team.leader = "designer"
+team.agents = ["designer"]
+
+# Legal platform
+[[projects]]
+name = "entity-legal"
+prefix = "el"
+repo = "/home/claudedev/sigil/projects/entity-legal/web"
+model = "xiaomi/mimo-v2-pro"
+max_workers = 2
+execution_mode = "agent"
+worker_timeout_secs = 1800
+team.leader = "designer"
+team.agents = ["designer"]
+
+# Sigil web dashboard
+[[projects]]
+name = "sigil-ui"
+prefix = "su"
+repo = "/home/claudedev/sigil-ui"
+model = "xiaomi/mimo-v2-pro"
+max_workers = 1
+execution_mode = "agent"
+worker_timeout_secs = 1800
+team.leader = "designer"
+team.agents = ["designer"]
+
+# Futures exchange
+[[projects]]
+name = "unifutures"
+prefix = "uf"
+repo = "/home/claudedev/unifutures"
+model = "xiaomi/mimo-v2-pro"
+max_workers = 1
+execution_mode = "agent"
+worker_timeout_secs = 1800
+team.leader = "engineer"
+team.agents = ["engineer"]

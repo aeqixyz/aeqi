@@ -1,7 +1,7 @@
 ---
 name: shadow
 display_name: "Shadow"
-model: anthropic/claude-sonnet-4.6
+model: stepfun/step-3.5-flash:free
 capabilities: [spawn_agents, spawn_projects, manage_triggers]
 color: "#FFD700"
 avatar: "⚕"
