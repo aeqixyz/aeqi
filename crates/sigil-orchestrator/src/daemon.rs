@@ -2542,20 +2542,20 @@ impl Daemon {
                 }
 
                 // ── Persistent Agent Registry ──
-
-                "agents_registry" => match &agent_registry {
-                    Some(reg) => {
-                        let project = request.get("project").and_then(|v| v.as_str());
-                        let status_filter = request.get("status").and_then(|v| v.as_str());
-                        let status = status_filter.and_then(|s| match s {
-                            "active" => Some(crate::agent_registry::AgentStatus::Active),
-                            "paused" => Some(crate::agent_registry::AgentStatus::Paused),
-                            "retired" => Some(crate::agent_registry::AgentStatus::Retired),
-                            _ => None,
-                        });
-                        match reg.list(project, status).await {
-                            Ok(agents) => {
-                                let items: Vec<serde_json::Value> = agents.iter().map(|a| {
+                "agents_registry" => {
+                    match &agent_registry {
+                        Some(reg) => {
+                            let project = request.get("project").and_then(|v| v.as_str());
+                            let status_filter = request.get("status").and_then(|v| v.as_str());
+                            let status = status_filter.and_then(|s| match s {
+                                "active" => Some(crate::agent_registry::AgentStatus::Active),
+                                "paused" => Some(crate::agent_registry::AgentStatus::Paused),
+                                "retired" => Some(crate::agent_registry::AgentStatus::Retired),
+                                _ => None,
+                            });
+                            match reg.list(project, status).await {
+                                Ok(agents) => {
+                                    let items: Vec<serde_json::Value> = agents.iter().map(|a| {
                                     serde_json::json!({
                                         "id": a.id,
                                         "name": a.name,
@@ -2576,17 +2576,21 @@ impl Daemon {
                                         "faces": a.faces,
                                     })
                                 }).collect();
-                                serde_json::json!({"ok": true, "agents": items})
+                                    serde_json::json!({"ok": true, "agents": items})
+                                }
+                                Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
                             }
-                            Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
                         }
+                        None => serde_json::json!({"ok": true, "agents": []}),
                     }
-                    None => serde_json::json!({"ok": true, "agents": []}),
-                },
+                }
 
                 "agent_spawn" => match &agent_registry {
                     Some(reg) => {
-                        let template = request.get("template").and_then(|v| v.as_str()).unwrap_or("");
+                        let template = request
+                            .get("template")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
                         if template.is_empty() {
                             serde_json::json!({"ok": false, "error": "template is required"})
                         } else {
@@ -2604,8 +2608,12 @@ impl Daemon {
                             match template_content {
                                 Some(content) => {
                                     let project = request.get("project").and_then(|v| v.as_str());
-                                    let department = request.get("department").and_then(|v| v.as_str());
-                                    match reg.spawn_from_template(&content, project, department).await {
+                                    let department =
+                                        request.get("department").and_then(|v| v.as_str());
+                                    match reg
+                                        .spawn_from_template(&content, project, department)
+                                        .await
+                                    {
                                         Ok(agent) => serde_json::json!({
                                             "ok": true,
                                             "agent": {
@@ -2615,20 +2623,27 @@ impl Daemon {
                                                 "status": agent.status,
                                             }
                                         }),
-                                        Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                                        Err(e) => {
+                                            serde_json::json!({"ok": false, "error": e.to_string()})
+                                        }
                                     }
                                 }
-                                None => serde_json::json!({"ok": false, "error": format!("template not found: {template}")}),
+                                None => {
+                                    serde_json::json!({"ok": false, "error": format!("template not found: {template}")})
+                                }
                             }
                         }
                     }
-                    None => serde_json::json!({"ok": false, "error": "agent registry not available"}),
+                    None => {
+                        serde_json::json!({"ok": false, "error": "agent registry not available"})
+                    }
                 },
 
                 "agent_set_status" => match &agent_registry {
                     Some(reg) => {
                         let name = request.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                        let status_str = request.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                        let status_str =
+                            request.get("status").and_then(|v| v.as_str()).unwrap_or("");
                         if name.is_empty() || status_str.is_empty() {
                             serde_json::json!({"ok": false, "error": "name and status required"})
                         } else {
@@ -2641,13 +2656,19 @@ impl Daemon {
                             match status {
                                 Some(s) => match reg.set_status(name, s).await {
                                     Ok(_) => serde_json::json!({"ok": true}),
-                                    Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                                    Err(e) => {
+                                        serde_json::json!({"ok": false, "error": e.to_string()})
+                                    }
                                 },
-                                None => serde_json::json!({"ok": false, "error": format!("invalid status: {status_str}")}),
+                                None => {
+                                    serde_json::json!({"ok": false, "error": format!("invalid status: {status_str}")})
+                                }
                             }
                         }
                     }
-                    None => serde_json::json!({"ok": false, "error": "agent registry not available"}),
+                    None => {
+                        serde_json::json!({"ok": false, "error": "agent registry not available"})
+                    }
                 },
 
                 _ => serde_json::json!({"ok": false, "error": format!("unknown command: {cmd}")}),

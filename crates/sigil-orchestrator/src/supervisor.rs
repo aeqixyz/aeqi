@@ -1352,36 +1352,33 @@ impl Supervisor {
                         }
 
                         // Save full session transcript to ConversationStore.
-                        // Agent loop writes SessionState to session_file on disk.
-                        // Read it back and record each message for FTS-searchable history.
-                        if let Some(ref cs) = conversation_store {
-                            if let Some(ref repo) = verification_repo {
-                                let session_path = repo
-                                    .join(".sigil")
-                                    .join("sessions")
-                                    .join(format!("{}.json", task_id_clone));
-                                if let Ok(content) = tokio::fs::read_to_string(&session_path).await {
-                                    if let Ok(state) = serde_json::from_str::<sigil_core::SessionState>(&content) {
-                                        let chat_id = crate::conversation_store::named_channel_chat_id(
-                                            &format!("transcript:{}", agent_name_for_records),
-                                        );
-                                        let _ = cs.ensure_channel(
-                                            chat_id, "transcript", &agent_name_for_records,
-                                        ).await;
-                                        for msg in &state.messages {
-                                            let role = match msg.role {
-                                                sigil_core::traits::Role::User => "user",
-                                                sigil_core::traits::Role::Assistant => "assistant",
-                                                sigil_core::traits::Role::System => "system",
-                                                sigil_core::traits::Role::Tool => "tool",
-                                            };
-                                            let text = msg.content.to_transcript_text();
-                                            if !text.is_empty() {
-                                                let _ = cs.record_with_source(
-                                                    chat_id, role, &text, Some("agent"),
-                                                ).await;
-                                            }
-                                        }
+                        if let (Some(cs), Some(repo)) = (&conversation_store, &verification_repo) {
+                            let session_path = repo
+                                .join(".sigil")
+                                .join("sessions")
+                                .join(format!("{}.json", task_id_clone));
+                            if let Ok(content) = tokio::fs::read_to_string(&session_path).await
+                                && let Ok(state) =
+                                    serde_json::from_str::<sigil_core::SessionState>(&content)
+                            {
+                                let chat_id = crate::conversation_store::named_channel_chat_id(
+                                    &format!("transcript:{}", agent_name_for_records),
+                                );
+                                let _ = cs
+                                    .ensure_channel(chat_id, "transcript", &agent_name_for_records)
+                                    .await;
+                                for msg in &state.messages {
+                                    let role = match msg.role {
+                                        sigil_core::traits::Role::User => "user",
+                                        sigil_core::traits::Role::Assistant => "assistant",
+                                        sigil_core::traits::Role::System => "system",
+                                        sigil_core::traits::Role::Tool => "tool",
+                                    };
+                                    let text = msg.content.to_transcript_text();
+                                    if !text.is_empty() {
+                                        let _ = cs
+                                            .record_with_source(chat_id, role, &text, Some("agent"))
+                                            .await;
                                     }
                                 }
                             }

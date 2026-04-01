@@ -505,11 +505,7 @@ pub async fn run(
     } else {
         // Direct mode: run agent loop in-process.
         eprintln!("  \x1b[90m(direct mode — no daemon)\x1b[0m");
-        let direct_result = spawn_direct_agent(
-            &config,
-            agent_record.as_ref(),
-            event_tx.clone(),
-        );
+        let direct_result = spawn_direct_agent(&config, agent_record.as_ref(), event_tx.clone());
         match direct_result {
             Ok((input_tx, _join)) => {
                 _direct_input_tx = Some(input_tx.clone());
@@ -519,8 +515,11 @@ pub async fn run(
                     while let Ok(cmd) = cmd_rx.recv() {
                         match cmd {
                             WsCommand::Send(json) => {
-                                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json) {
-                                    if let Some(msg) = parsed.get("message").and_then(|v| v.as_str()) {
+                                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json)
+                                {
+                                    if let Some(msg) =
+                                        parsed.get("message").and_then(|v| v.as_str())
+                                    {
                                         let _ = input_tx_for_bridge.send(msg.to_string());
                                     }
                                 }

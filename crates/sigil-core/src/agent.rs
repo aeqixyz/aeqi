@@ -1090,47 +1090,47 @@ impl Agent {
                             }
                         }
                         // Accept the stop — or wait for next message in perpetual mode.
-                        if self.config.session_type == SessionType::Perpetual {
-                            if let Some(ref rx) = self.input_rx {
-                                // Add assistant response to history.
-                                if let Some(ref text) = response.content {
-                                    messages.push(Message {
-                                        role: Role::Assistant,
-                                        content: MessageContent::text(text),
-                                    });
-                                }
-
-                                self.emit(crate::chat_stream::ChatStreamEvent::Complete {
-                                    stop_reason: "awaiting_input".to_string(),
-                                    total_prompt_tokens: tracker.total_prompt_tokens,
-                                    total_completion_tokens: tracker.total_completion_tokens,
-                                    iterations,
-                                    cost_usd: 0.0,
+                        if self.config.session_type == SessionType::Perpetual
+                            && let Some(ref rx) = self.input_rx
+                        {
+                            // Add assistant response to history.
+                            if let Some(ref text) = response.content {
+                                messages.push(Message {
+                                    role: Role::Assistant,
+                                    content: MessageContent::text(text),
                                 });
+                            }
 
-                                // Wait for next user message.
-                                debug!(agent = %self.config.name, "perpetual: waiting for input");
-                                let mut rx_guard = rx.lock().await;
-                                match rx_guard.recv().await {
-                                    Some(next_msg) => {
-                                        messages.push(Message {
-                                            role: Role::User,
-                                            content: MessageContent::text(&next_msg),
-                                        });
-                                        output_recovery_count = 0;
-                                        consecutive_low_output = 0;
-                                        transition = LoopTransition::Initial;
-                                        debug!(
-                                            agent = %self.config.name,
-                                            "perpetual: received input, continuing"
-                                        );
-                                        continue;
-                                    }
-                                    None => {
-                                        // Channel closed — exit gracefully.
-                                        debug!(agent = %self.config.name, "perpetual: input channel closed");
-                                        break;
-                                    }
+                            self.emit(crate::chat_stream::ChatStreamEvent::Complete {
+                                stop_reason: "awaiting_input".to_string(),
+                                total_prompt_tokens: tracker.total_prompt_tokens,
+                                total_completion_tokens: tracker.total_completion_tokens,
+                                iterations,
+                                cost_usd: 0.0,
+                            });
+
+                            // Wait for next user message.
+                            debug!(agent = %self.config.name, "perpetual: waiting for input");
+                            let mut rx_guard = rx.lock().await;
+                            match rx_guard.recv().await {
+                                Some(next_msg) => {
+                                    messages.push(Message {
+                                        role: Role::User,
+                                        content: MessageContent::text(&next_msg),
+                                    });
+                                    output_recovery_count = 0;
+                                    consecutive_low_output = 0;
+                                    transition = LoopTransition::Initial;
+                                    debug!(
+                                        agent = %self.config.name,
+                                        "perpetual: received input, continuing"
+                                    );
+                                    continue;
+                                }
+                                None => {
+                                    // Channel closed — exit gracefully.
+                                    debug!(agent = %self.config.name, "perpetual: input channel closed");
+                                    break;
                                 }
                             }
                         }

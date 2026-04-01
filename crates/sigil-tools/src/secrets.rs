@@ -12,8 +12,8 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use sigil_core::traits::{Tool, ToolResult, ToolSpec};
 use sigil_core::SecretStore;
+use sigil_core::traits::{Tool, ToolResult, ToolSpec};
 use std::path::PathBuf;
 use tracing::debug;
 
@@ -38,7 +38,11 @@ impl Tool for SecretsTool {
 
         let store = match SecretStore::open(&self.store_path) {
             Ok(s) => s,
-            Err(e) => return Ok(ToolResult::error(format!("Failed to open secret store: {e}"))),
+            Err(e) => {
+                return Ok(ToolResult::error(format!(
+                    "Failed to open secret store: {e}"
+                )));
+            }
         };
 
         match action {
@@ -70,10 +74,7 @@ impl Tool for SecretsTool {
                     .ok_or_else(|| anyhow::anyhow!("missing 'value'"))?;
 
                 // Validate name: alphanumeric + underscores only.
-                if !name
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_')
-                {
+                if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
                     return Ok(ToolResult::error(
                         "Secret name must be alphanumeric with underscores only (e.g., OPENROUTER_API_KEY).",
                     ));
@@ -133,9 +134,7 @@ impl Tool for SecretsTool {
                         debug!(name, "secret deleted");
                         Ok(ToolResult::success(format!("Secret '{name}' deleted.")))
                     }
-                    Err(e) => Ok(ToolResult::error(format!(
-                        "Failed to delete '{name}': {e}"
-                    ))),
+                    Err(e) => Ok(ToolResult::error(format!("Failed to delete '{name}': {e}"))),
                 }
             }
 
@@ -181,10 +180,7 @@ impl Tool for SecretsTool {
     }
 
     fn is_destructive(&self, input: &serde_json::Value) -> bool {
-        let action = input
-            .get("action")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("");
         action == "delete"
     }
 }

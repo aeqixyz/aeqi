@@ -43,10 +43,7 @@ impl CraftNextTool {
 #[async_trait]
 impl Tool for CraftNextTool {
     async fn execute(&self, args: serde_json::Value) -> Result<ToolResult> {
-        let context = args
-            .get("context")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let context = args.get("context").and_then(|v| v.as_str()).unwrap_or("");
         let goal = args
             .get("goal")
             .and_then(|v| v.as_str())
@@ -176,12 +173,8 @@ mod tests {
     #[test]
     fn test_spec() {
         use sigil_core::traits::LogObserver;
-        let spec = CraftNextTool::new(
-            Arc::new(MockProvider),
-            "test-model".into(),
-            "shadow".into(),
-        )
-        .spec();
+        let spec =
+            CraftNextTool::new(Arc::new(MockProvider), "test-model".into(), "shadow".into()).spec();
         assert_eq!(spec.name, "craft_next");
         assert!(spec.description.contains("next action"));
     }
@@ -214,11 +207,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_craft_next_generates_prompt() {
-        let tool = CraftNextTool::new(
-            Arc::new(MockProvider),
-            "test-model".into(),
-            "shadow".into(),
-        );
+        let tool = CraftNextTool::new(Arc::new(MockProvider), "test-model".into(), "shadow".into());
         let result = tool
             .execute(serde_json::json!({
                 "completed": "Fixed the null check",

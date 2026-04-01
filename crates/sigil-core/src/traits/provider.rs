@@ -51,7 +51,9 @@ impl MessageContent {
                             let preview: String = input_str.chars().take(500).collect();
                             texts.push(format!("[tool:{name}] {preview}"));
                         }
-                        ContentPart::ToolResult { content, is_error, .. } => {
+                        ContentPart::ToolResult {
+                            content, is_error, ..
+                        } => {
                             let prefix = if *is_error { "[error]" } else { "[result]" };
                             let preview: String = content.chars().take(500).collect();
                             texts.push(format!("{prefix} {preview}"));

@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# PreToolUse hook for Edit/Write: require sigil_recall before first edit.
+#
+# Enforcement strategy: recall is required ONCE per project per session.
+# After that, edits flow freely. The gate re-closes on:
+#   - Session end (finalize clears it)
+#   - Project switch (edit targets different project than recalled)
+#   - Context compaction (compact event clears it via session-primer.sh)
+#
+# Gate file contains the project name that was recalled for.
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/hook-log.sh"
+source "$SCRIPT_DIR/detect-project.sh"
+
+GATE="$SIGIL_SESSION_DIR/recall.gate"
+
+# --- Read hook payload from stdin ---
+PAYLOAD=$(timeout 2 cat 2>/dev/null) || true
+
+# --- Extract file path from stdin payload or env var ---
+FILE_PATH=""
+if [ -n "$PAYLOAD" ]; then
+    FILE_PATH=$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.file_path // empty' 2>/dev/null) || true
+fi
+if [ -z "$FILE_PATH" ] && [ -n "${CLAUDE_TOOL_INPUT:-}" ]; then
+    FILE_PATH=$(printf '%s' "$CLAUDE_TOOL_INPUT" | jq -r '.file_path // empty' 2>/dev/null) || true
+fi
+
+# --- Auto-allow files outside project repos ---
+if [ -n "$FILE_PATH" ] && ! is_project_path "$FILE_PATH"; then
+    log_hook "check-recall" "allow" "non-project: $FILE_PATH"
+    echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"Non-project file — recall not required."}}'
+    exit 0
+fi
+
+# --- Graceful degradation ---
+SIGIL_BIN="/home/claudedev/sigil/target/release/sigil"
+[ -x "$SIGIL_BIN" ] || SIGIL_BIN="/home/claudedev/sigil/target/debug/sigil"
+if [ ! -x "$SIGIL_BIN" ]; then
+    log_hook "check-recall" "allow" "binary-missing"
+    echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"sigil_recall skipped: sigil binary not found"}}'
+    exit 0
+fi
+
+SOCK="${SIGIL_DATA_DIR:-$HOME/.sigil}/rm.sock"
+if [ ! -S "$SOCK" ]; then
+    log_hook "check-recall" "allow" "daemon-down"
+    echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"sigil_recall skipped: daemon not running"}}'
+    exit 0
+fi
+
+# --- Detect target project ---
+TARGET_PROJECT=""
+if [ -n "$FILE_PATH" ]; then
+    TARGET_PROJECT=$(detect_project "$FILE_PATH")
+fi
+[ -z "$TARGET_PROJECT" ] && TARGET_PROJECT=$(detect_project)
+
+# --- Gate must exist (recall was called this session) ---
+if [ ! -f "$GATE" ]; then
+    PROJ="${TARGET_PROJECT:-sigil}"
+    HINT="sigil_recall(project='$PROJ', query='context for current work')"
+    EXTRA=""
+    GRAPH_DB="${SIGIL_DATA_DIR:-$HOME/.sigil}/codegraph/${PROJ}.db"
+    if [ -f "$GRAPH_DB" ]; then
+        GRAPH_NODES=$(sqlite3 "$GRAPH_DB" "SELECT COUNT(*) FROM code_nodes" 2>/dev/null) || true
+        [ -n "$GRAPH_NODES" ] && EXTRA=" Graph: ${GRAPH_NODES} symbols."
+    fi
+    SKILLS_FILE="$SIGIL_SESSION_DIR/skills.loaded"
+    if [ -f "$SKILLS_FILE" ] && [ -s "$SKILLS_FILE" ]; then
+        LOST=$(tr '\n' ', ' < "$SKILLS_FILE" | sed 's/, $//')
+        EXTRA="${EXTRA} Reload skills: ${LOST}."
+    fi
+    log_hook "check-recall" "deny" "no-gate: ${FILE_PATH:-unknown}"
+    echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Recall gate: call $HINT first (one-time per session, then all edits are free).${EXTRA}\"}}"
+    exit 0
+fi
+
+# --- Project must match (context must be relevant) ---
+GATE_PROJECT=$(cat "$GATE" 2>/dev/null)
+if [ -n "$TARGET_PROJECT" ] && [ -n "$GATE_PROJECT" ] && [ "$TARGET_PROJECT" != "$GATE_PROJECT" ]; then
+    HINT="sigil_recall(project='$TARGET_PROJECT', query='context for current work')"
+    log_hook "check-recall" "deny" "project-switch: $GATE_PROJECT->$TARGET_PROJECT"
+    echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Project switch: recalled '$GATE_PROJECT' but editing '$TARGET_PROJECT'. Call $HINT to load context.\"}}"
+    exit 0
+fi
+
+# --- Gate open, project matches ---
+log_hook "check-recall" "allow" "${FILE_PATH:-unknown}"
+echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}'

@@ -1642,12 +1642,13 @@ impl Tool for TranscriptSearchTool {
             .get("query")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("'query' is required"))?;
-        let limit = args
-            .get("limit")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(10) as usize;
+        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
 
-        match self.conversation_store.search_transcripts(query, limit).await {
+        match self
+            .conversation_store
+            .search_transcripts(query, limit)
+            .await
+        {
             Ok(messages) => {
                 if messages.is_empty() {
                     return Ok(ToolResult {
@@ -1659,7 +1660,12 @@ impl Tool for TranscriptSearchTool {
                     .iter()
                     .map(|m| {
                         let preview: String = m.content.chars().take(200).collect();
-                        format!("[{}] {}: {}", m.timestamp.format("%Y-%m-%d %H:%M"), m.role, preview)
+                        format!(
+                            "[{}] {}: {}",
+                            m.timestamp.format("%Y-%m-%d %H:%M"),
+                            m.role,
+                            preview
+                        )
                     })
                     .collect();
                 Ok(ToolResult {
