@@ -6,6 +6,7 @@
 //! per-model cost estimation ([`estimate_cost`]), and a retry wrapper ([`ReliableProvider`]).
 
 pub mod anthropic;
+pub mod credential_pool;
 pub mod embedder;
 pub mod fallback;
 pub mod ollama;
@@ -19,4 +20,5 @@ pub use fallback::{FallbackChain, ProviderConfig};
 pub use ollama::OllamaProvider;
 pub use openrouter::OpenRouterProvider;
 pub use pricing::{context_window_for_model, estimate_cost};
+pub use credential_pool::{CredentialPool, RotationStrategy};
 pub use reliable::ReliableProvider;
