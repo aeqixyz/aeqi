@@ -45,37 +45,6 @@ pub enum DispatchKind {
         answer: String,
     },
 
-    TaskProposal {
-        project: String,
-        prefix: String,
-        subject: String,
-        description: String,
-        confidence: f32,
-        reasoning: String,
-    },
-
-    AgentAdvice {
-        agent: String,
-        topic: String,
-        advice: String,
-        cost_usd: f64,
-    },
-
-    CouncilTopic {
-        topic_id: String,
-        message: String,
-        agents: Vec<String>,
-    },
-    CouncilResponse {
-        topic_id: String,
-        agent: String,
-        response: String,
-    },
-    CouncilSynthesis {
-        topic_id: String,
-        synthesis: String,
-    },
-
     HumanEscalation {
         project: String,
         task_id: String,
@@ -83,13 +52,6 @@ pub enum DispatchKind {
         summary: String,
     },
 
-    DependencySuggestion {
-        project: String,
-        from_task: String,
-        to_task: String,
-        reason: String,
-        confidence: f64,
-    },
 }
 
 impl DispatchKind {
@@ -114,13 +76,7 @@ impl DispatchKind {
             Self::WorkerCrashed { .. } => "WORKER_CRASHED",
             Self::Escalation { .. } => "ESCALATE",
             Self::Resolution { .. } => "RESOLVED",
-            Self::TaskProposal { .. } => "TASK_PROPOSAL",
-            Self::AgentAdvice { .. } => "AGENT_ADVICE",
-            Self::CouncilTopic { .. } => "COUNCIL_TOPIC",
-            Self::CouncilResponse { .. } => "COUNCIL_RESPONSE",
-            Self::CouncilSynthesis { .. } => "COUNCIL_SYNTHESIS",
             Self::HumanEscalation { .. } => "HUMAN_ESCALATION",
-            Self::DependencySuggestion { .. } => "DEPENDENCY_SUGGESTION",
         }
     }
 
@@ -158,40 +114,6 @@ impl DispatchKind {
             Self::Resolution { task_id, answer } => {
                 format!("Resolution for task {task_id}: {answer}")
             }
-            Self::TaskProposal {
-                project,
-                prefix,
-                subject,
-                confidence,
-                reasoning,
-                ..
-            } => format!(
-                "Gap proposal for {project} ({prefix}): \"{subject}\" (confidence: {:.0}%) — {reasoning}",
-                confidence * 100.0
-            ),
-            Self::AgentAdvice {
-                agent,
-                topic,
-                advice,
-                cost_usd,
-            } => format!("[{agent}] on \"{topic}\" (${cost_usd:.3}): {advice}"),
-            Self::CouncilTopic {
-                topic_id,
-                message,
-                agents,
-            } => format!(
-                "Council {topic_id}: \"{message}\" — summoning: {}",
-                agents.join(", ")
-            ),
-            Self::CouncilResponse {
-                topic_id,
-                agent,
-                response,
-            } => format!("Council {topic_id} [{agent}]: {response}"),
-            Self::CouncilSynthesis {
-                topic_id,
-                synthesis,
-            } => format!("Council {topic_id} synthesis: {synthesis}"),
             Self::HumanEscalation {
                 project,
                 task_id,
@@ -200,16 +122,6 @@ impl DispatchKind {
             } => format!(
                 "BLOCKED: {project}/{task_id} — {subject}\n\n{summary}\n\n\
                      This task has exhausted all automated resolution attempts and requires human input.",
-            ),
-            Self::DependencySuggestion {
-                project,
-                from_task,
-                to_task,
-                reason,
-                confidence,
-            } => format!(
-                "Suggested dependency in {project}: {from_task} → {to_task} (confidence: {:.0}%)\nReason: {reason}",
-                confidence * 100.0
             ),
         }
     }
@@ -1260,13 +1172,10 @@ mod tests {
         bus.send(Dispatch {
             from: "a".into(),
             to: "leader".into(),
-            kind: DispatchKind::TaskProposal {
+            kind: DispatchKind::PatrolReport {
                 project: "demo".into(),
-                prefix: "dm".into(),
-                subject: "idea".into(),
-                description: "new idea".into(),
-                confidence: 0.9,
-                reasoning: "gap detected".into(),
+                active: 2,
+                pending: 3,
             },
             timestamp: Utc::now(),
             read: false,

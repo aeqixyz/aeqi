@@ -1642,12 +1642,6 @@ fn is_relevant_dispatch(dispatch: &Dispatch, project: &str, task_id: &str) -> bo
             task_id: id,
             ..
         } => dispatch_project == project && id == task_id,
-        DispatchKind::DependencySuggestion {
-            project: dispatch_project,
-            from_task,
-            to_task,
-            ..
-        } => dispatch_project == project && (from_task == task_id || to_task == task_id),
         _ => false,
     }
 }
