@@ -192,6 +192,12 @@ a:hover {
   border-radius: 14px;
 }
 
+.rail-home {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
 .rail-icon.active::before {
   content: "";
   position: absolute;
@@ -208,15 +214,15 @@ a:hover {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  border: 1px dashed rgba(255,255,255,0.1);
+  border: 1px dashed rgba(255,255,255,0.08);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255,255,255,0.15);
+  color: rgba(255,255,255,0.12);
   cursor: pointer;
-  margin-top: auto;
+  margin-top: 4px;
   background: transparent;
-  font-size: 18px;
+  font-size: 16px;
 }
 
 .rail-add:hover {
@@ -312,6 +318,7 @@ a:hover {
   justify-content: center;
   padding: 12px 0;
   flex-shrink: 0;
+  margin-top: auto;
 }
 
 .rail-status-dot {

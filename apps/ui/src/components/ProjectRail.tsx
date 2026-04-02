@@ -36,11 +36,11 @@ export default function ProjectRail() {
     <div className="rail">
       {/* AEQI mark */}
       <div
-        className={`rail-icon${!channel ? " active" : ""}`}
+        className={`rail-icon rail-home${!channel ? " active" : ""}`}
         onClick={() => { setChannel(null); navigate("/"); }}
         title="AEQI"
       >
-        A
+        Æ
       </div>
 
       <div className="rail-separator" />
@@ -76,10 +76,10 @@ export default function ProjectRail() {
         })}
       </div>
 
-      {/* Add project button */}
+      {/* Add project — always last in the project list */}
       <div className="rail-add" title="New project">+</div>
 
-      {/* Bottom status */}
+      {/* Bottom status — pushed to end */}
       <div className="rail-bottom">
         <div className={`rail-status-dot ${daemonOk ? "rail-status-ok" : "rail-status-err"}`} />
       </div>
