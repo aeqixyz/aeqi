@@ -210,10 +210,8 @@ export default function AgentNav() {
 
       {/* Bottom — pinned */}
       <div className="agent-nav-bottom">
+        <div className="agent-nav-sep" />
         <div className="agent-nav-add" onClick={() => navigate("/agents")}>+</div>
-        <div className="agent-nav-footer" onClick={() => navigate("/settings")}>
-          Settings
-        </div>
       </div>
     </nav>
   );

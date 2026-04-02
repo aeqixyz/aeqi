@@ -71,6 +71,7 @@ export default function ProjectRail() {
 
       {/* Add project — bottom */}
       <div className="rail-bottom">
+        <div className="rail-separator" />
         <div className="rail-add" title="New project" onClick={() => {}}>+</div>
       </div>
     </div>
