@@ -30,20 +30,22 @@ export default function AgentNav() {
     ? agents.filter((a) => a.project === channel || !a.project)
     : agents.filter((a) => !a.project);
 
+  // Top row: project name (holistic view) or "AEQI" when no project selected
+  const scopeName = channel || "AEQI";
+
   return (
     <nav className="agent-nav">
-      {/* Default agent — aligns vertically with Æ home icon */}
+      {/* Company/project — holistic unfiltered view */}
       <div
         className={`agent-row${!selectedAgent ? " active" : ""}`}
         onClick={() => { setSelectedAgent(null); navigate("/"); }}
       >
-        AEQI Agent
+        {scopeName}
       </div>
 
-      {/* Separator — always visible, matches rail separator */}
       <div className="agent-nav-sep" />
 
-      {/* Other agents */}
+      {/* Agents — each is a filtered lens */}
       {filtered.map((agent) => (
         <div
           key={agent.id}
@@ -54,7 +56,6 @@ export default function AgentNav() {
         </div>
       ))}
 
-      {/* Add — right after the last agent */}
       <div className="agent-nav-add" onClick={() => navigate("/agents")}>+</div>
     </nav>
   );
