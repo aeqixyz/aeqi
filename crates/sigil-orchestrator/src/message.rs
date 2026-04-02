@@ -154,7 +154,9 @@ impl DispatchKind {
                 skill,
                 reply_to,
             } => {
-                let mut text = format!("Delegation request (response_mode: {response_mode}, create_task: {create_task})");
+                let mut text = format!(
+                    "Delegation request (response_mode: {response_mode}, create_task: {create_task})"
+                );
                 if let Some(s) = skill {
                     text.push_str(&format!(", skill: {s}"));
                 }

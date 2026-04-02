@@ -887,17 +887,15 @@ impl AgentRegistry {
         let db = self.db.lock().await;
         match project {
             Some(p) => {
-                let mut stmt = db.prepare(
-                    "SELECT * FROM departments WHERE project = ?1 ORDER BY name ASC",
-                )?;
+                let mut stmt =
+                    db.prepare("SELECT * FROM departments WHERE project = ?1 ORDER BY name ASC")?;
                 let depts = stmt
                     .query_map(params![p], |row| Ok(row_to_department(row)))?
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(depts)
             }
             None => {
-                let mut stmt =
-                    db.prepare("SELECT * FROM departments ORDER BY name ASC")?;
+                let mut stmt = db.prepare("SELECT * FROM departments ORDER BY name ASC")?;
                 let depts = stmt
                     .query_map([], |row| Ok(row_to_department(row)))?
                     .collect::<Result<Vec<_>, _>>()?;
@@ -927,9 +925,8 @@ impl AgentRegistry {
     /// Get all agents assigned to a department.
     pub async fn department_members(&self, dept_id: &str) -> Result<Vec<PersistentAgent>> {
         let db = self.db.lock().await;
-        let mut stmt = db.prepare(
-            "SELECT * FROM agents WHERE department_id = ?1 ORDER BY name ASC",
-        )?;
+        let mut stmt =
+            db.prepare("SELECT * FROM agents WHERE department_id = ?1 ORDER BY name ASC")?;
         let agents = stmt
             .query_map(params![dept_id], |row| Ok(row_to_agent(row)))?
             .collect::<Result<Vec<_>, _>>()?;
@@ -956,11 +953,7 @@ impl AgentRegistry {
     }
 
     /// Assign an agent to a department (or remove from department with None).
-    pub async fn set_agent_department(
-        &self,
-        agent_id: &str,
-        dept_id: Option<&str>,
-    ) -> Result<()> {
+    pub async fn set_agent_department(&self, agent_id: &str, dept_id: Option<&str>) -> Result<()> {
         let db = self.db.lock().await;
         let updated = db.execute(
             "UPDATE agents SET department_id = ?1 WHERE id = ?2",
@@ -1641,15 +1634,45 @@ You are an engineer.
             .unwrap();
 
         let a1 = reg
-            .spawn("eng1", None, "t", "Eng1.", Some("sigil"), None, None, None, &[])
+            .spawn(
+                "eng1",
+                None,
+                "t",
+                "Eng1.",
+                Some("sigil"),
+                None,
+                None,
+                None,
+                &[],
+            )
             .await
             .unwrap();
         let a2 = reg
-            .spawn("eng2", None, "t", "Eng2.", Some("sigil"), None, None, None, &[])
+            .spawn(
+                "eng2",
+                None,
+                "t",
+                "Eng2.",
+                Some("sigil"),
+                None,
+                None,
+                None,
+                &[],
+            )
             .await
             .unwrap();
         let a3 = reg
-            .spawn("designer", None, "t", "Des.", Some("sigil"), None, None, None, &[])
+            .spawn(
+                "designer",
+                None,
+                "t",
+                "Des.",
+                Some("sigil"),
+                None,
+                None,
+                None,
+                &[],
+            )
             .await
             .unwrap();
 

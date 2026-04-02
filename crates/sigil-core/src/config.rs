@@ -1009,11 +1009,8 @@ impl SigilConfig {
 
     /// Get the team leader agent config (point-of-contact).
     pub fn leader_agent(&self) -> Option<&PeerAgentConfig> {
-        self.agent(&self.team.leader).or_else(|| {
-            self.agents
-                .iter()
-                .find(|a| a.role == "orchestrator")
-        })
+        self.agent(&self.team.leader)
+            .or_else(|| self.agents.iter().find(|a| a.role == "orchestrator"))
     }
 
     /// Get all agents with a specific role string.

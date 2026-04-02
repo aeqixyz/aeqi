@@ -1498,8 +1498,7 @@ mod tests {
     use async_trait::async_trait;
     use chrono::Utc;
     use sigil_core::config::{
-        DepartmentConfig, ExecutionMode, PeerAgentConfig, ProjectConfig,
-        ProjectTeamConfig,
+        DepartmentConfig, ExecutionMode, PeerAgentConfig, ProjectConfig, ProjectTeamConfig,
     };
     use sigil_core::traits::{
         ChatRequest, ChatResponse as ProviderChatResponse, Provider, StopReason, Usage,

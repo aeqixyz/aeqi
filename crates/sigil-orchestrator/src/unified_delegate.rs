@@ -146,10 +146,7 @@ impl Tool for UnifiedDelegateTool {
             .get("create_task")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        let skill = args
-            .get("skill")
-            .and_then(|v| v.as_str())
-            .map(String::from);
+        let skill = args.get("skill").and_then(|v| v.as_str()).map(String::from);
 
         match to {
             // Pattern 1: Subagent — ephemeral in-process agent
@@ -160,7 +157,7 @@ impl Tool for UnifiedDelegateTool {
                 Ok(ToolResult::success(
                     "Subagent spawning via unified delegate is not yet wired. \
                      Use the existing 'delegate' tool (with to='subagent' omitted) for subagent spawning. \
-                     This will be connected in a follow-up phase."
+                     This will be connected in a follow-up phase.",
                 ))
             }
 

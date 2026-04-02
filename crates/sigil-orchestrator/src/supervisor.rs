@@ -137,7 +137,6 @@ impl Supervisor {
     /// always agent-bound (one supervisor per project), so we simply return the
     /// project name as the agent identity.
 
-
     pub fn new(
         project: &Project,
         provider: Arc<dyn Provider>,

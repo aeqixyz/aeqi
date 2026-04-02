@@ -1593,13 +1593,14 @@ impl Tool for ChannelPostTool {
 
         // Phase 9: Emit DepartmentMessage event for department broadcasts.
         if let Some((department_id, department_name)) = dept_info {
-            self.event_broadcaster
-                .publish(crate::execution_events::ExecutionEvent::DepartmentMessage {
+            self.event_broadcaster.publish(
+                crate::execution_events::ExecutionEvent::DepartmentMessage {
                     department_id,
                     department_name,
                     from_agent: self.agent_name.clone(),
                     content: message.to_string(),
-                });
+                },
+            );
         }
 
         Ok(ToolResult {

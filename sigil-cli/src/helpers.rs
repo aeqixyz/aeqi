@@ -456,7 +456,6 @@ pub(crate) fn resolve_agents_dir(config_path: &Path) -> PathBuf {
     PathBuf::from("agents")
 }
 
-
 pub(crate) fn pid_file_path(config: &SigilConfig) -> PathBuf {
     config.data_dir().join("rm.pid")
 }
