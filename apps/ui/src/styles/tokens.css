@@ -646,7 +646,7 @@ a:hover {
 .content-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 10px 10px 10px 0;
+  padding: 10px;
 }
 
 /* ── Legacy layout compat (kept for pages that still reference these) ── */
