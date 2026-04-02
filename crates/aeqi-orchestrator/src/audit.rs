@@ -30,7 +30,6 @@ pub enum DecisionType {
     FailureAnalyzed,
     BlackboardPost,
     WatchdogFired,
-    MissionDecomposed,
     DependencyInferred,
 }
 

@@ -12,7 +12,6 @@ pub(crate) mod hooks;
 pub(crate) mod init;
 pub(crate) mod mcp;
 pub(crate) mod memory;
-pub(crate) mod mission;
 pub(crate) mod monitor;
 pub(crate) mod operation;
 pub(crate) mod pipeline;

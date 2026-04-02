@@ -598,12 +598,9 @@ pub struct OrchestratorConfig {
     /// Max cost for pre-flight assessment (Phase 5).
     #[serde(default = "default_preflight_max_cost_usd")]
     pub preflight_max_cost_usd: f64,
-    /// Model for mission decomposition (Phase 6).
+    /// Reserved — formerly used for mission decomposition.
     #[serde(default)]
     pub decomposition_model: String,
-    /// Enable auto-redecomposition on stalled missions (Phase 6).
-    #[serde(default)]
-    pub auto_redecompose: bool,
     /// Confidence threshold for inferred dependencies; 0.0 = disabled (Phase 7).
     #[serde(default)]
     pub infer_deps_threshold: f64,
@@ -630,7 +627,6 @@ impl Default for OrchestratorConfig {
             preflight_model: String::new(),
             preflight_max_cost_usd: default_preflight_max_cost_usd(),
             decomposition_model: String::new(),
-            auto_redecompose: false,
             infer_deps_threshold: 0.0,
         }
     }
@@ -751,9 +747,6 @@ pub struct ProjectConfig {
     /// Per-project orchestrator overrides. If None, falls back to global [orchestrator].
     #[serde(default)]
     pub orchestrator: Option<OrchestratorConfig>,
-    /// Missions defined in project.toml via `[[missions]]`.
-    #[serde(default)]
-    pub missions: Vec<MissionDef>,
     /// Departments within this project (org chart hierarchy).
     #[serde(default)]
     pub departments: Vec<DepartmentConfig>,
@@ -789,22 +782,6 @@ pub struct DepartmentConfig {
     pub description: Option<String>,
 }
 
-/// A mission definition from project.toml `[[missions]]`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MissionDef {
-    pub name: String,
-    #[serde(default)]
-    pub description: String,
-    /// Cron schedule expression (e.g., "*/30 * * * *").
-    #[serde(default)]
-    pub schedule: Option<String>,
-    /// Skill name to apply when executing this mission's tasks.
-    #[serde(default)]
-    pub skill: Option<String>,
-    /// Arguments / prompt text passed to the worker.
-    #[serde(default)]
-    pub args: Option<String>,
-}
 
 fn default_max_workers() -> u32 {
     2

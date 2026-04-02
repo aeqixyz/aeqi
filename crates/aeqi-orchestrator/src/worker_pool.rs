@@ -12,7 +12,6 @@ use crate::audit::{AuditEvent, AuditLog, DecisionType};
 use crate::blackboard::Blackboard;
 use crate::checkpoint::AgentCheckpoint;
 use crate::cost_ledger::{CostEntry, CostLedger};
-use crate::decomposition::DecompositionResult;
 use crate::escalation::{EscalationPolicy, EscalationTracker};
 use crate::execution_events::EventBroadcaster;
 use crate::executor::TaskOutcome;
@@ -105,12 +104,8 @@ pub struct WorkerPool {
     pub failure_analysis_model: String,
     /// Paused by watchdog — skip task assignment.
     pub paused: bool,
-    /// Enable auto-redecomposition of stalled missions.
-    pub auto_redecompose: bool,
     /// Directories to search for skill TOML files (project skills + shared skills).
     pub skills_dirs: Vec<std::path::PathBuf>,
-    /// Model for mission decomposition / redecomposition.
-    pub decomposition_model: String,
     /// Threshold for inferring dependencies between tasks (0.0 = disabled).
     pub infer_deps_threshold: f64,
     /// Event broadcaster for real-time execution events (Priority 2).
@@ -174,8 +169,6 @@ impl WorkerPool {
             adaptive_retry: false,
             failure_analysis_model: String::new(),
             paused: false,
-            auto_redecompose: false,
-            decomposition_model: String::new(),
             infer_deps_threshold: 0.0,
             skills_dirs: Vec::new(),
             event_broadcaster: None,
@@ -1501,127 +1494,6 @@ impl WorkerPool {
             });
         }
 
-        // 3.5. Detect stalled missions and spawn redecomposition as a background task.
-        // Runs outside the worker_pool lock to avoid blocking IPC and next patrol.
-        if self.auto_redecompose && !self.decomposition_model.is_empty() {
-            let store = self.tasks.lock().await;
-            let active_missions = store.active_missions(None);
-            let mut stalled: Option<(String, String, String)> = None;
-            for mission in &active_missions {
-                let tasks = store.mission_tasks(&mission.id);
-                if tasks.is_empty() {
-                    continue;
-                }
-                let all_stalled = tasks
-                    .iter()
-                    .all(|t| t.status == TaskStatus::Blocked || t.status == TaskStatus::Cancelled);
-                if all_stalled {
-                    stalled = Some((
-                        mission.id.clone(),
-                        mission.name.clone(),
-                        mission.description.clone(),
-                    ));
-                    break;
-                }
-            }
-            drop(store);
-
-            if let Some((mission_id, mission_name, mission_desc)) = stalled {
-                info!(
-                    project = %self.project_name,
-                    mission = %mission_id,
-                    "stalled mission detected — spawning background redecomposition"
-                );
-                let tasks = self.tasks.clone();
-                let provider = self
-                    .reflect_provider
-                    .clone()
-                    .unwrap_or_else(|| self.provider.clone());
-                let model = self.decomposition_model.clone();
-                let infer_threshold = self.infer_deps_threshold;
-                let audit_log = self.audit_log.clone();
-                let project_name = self.project_name.clone();
-
-                tokio::spawn(async move {
-                    let prompt =
-                        DecompositionResult::decomposition_prompt(&mission_name, &mission_desc);
-                    let request = ChatRequest {
-                        model,
-                        messages: vec![Message {
-                            role: Role::User,
-                            content: MessageContent::text(&prompt),
-                        }],
-                        tools: vec![],
-                        max_tokens: 2048,
-                        temperature: 0.0,
-                    };
-                    if let Ok(response) = provider.chat(&request).await
-                        && let Some(ref text) = response.content
-                    {
-                        let mut result = DecompositionResult::parse(text);
-                        let mut store = tasks.lock().await;
-                        let prefix = mission_id.split('-').next().unwrap_or("xx");
-                        match result.materialize(&mut store, prefix, &mission_id, None) {
-                            Ok(task_ids) => {
-                                info!(
-                                    project = %project_name,
-                                    mission = %mission_id,
-                                    new_tasks = task_ids.len(),
-                                    "redecomposed stalled mission"
-                                );
-                                if infer_threshold > 0.0
-                                    && let Ok(n) =
-                                        store.apply_inferred_dependencies(infer_threshold)
-                                    && n > 0
-                                {
-                                    info!(
-                                        project = %project_name,
-                                        mission = %mission_id,
-                                        inferred = n,
-                                        "inferred task dependencies"
-                                    );
-                                    if let Some(ref audit) = audit_log {
-                                        let _ = audit.record(
-                                            &AuditEvent::new(
-                                                &project_name,
-                                                DecisionType::DependencyInferred,
-                                                format!(
-                                                    "Inferred {n} dependencies in mission {mission_id}"
-                                                ),
-                                            )
-                                            .with_task(&mission_id),
-                                        );
-                                    }
-                                }
-                                if let Some(ref audit) = audit_log {
-                                    let _ = audit.record(
-                                        &AuditEvent::new(
-                                            &project_name,
-                                            DecisionType::MissionDecomposed,
-                                            format!(
-                                                "Redecomposed stalled mission {} into {} tasks",
-                                                mission_id,
-                                                task_ids.len()
-                                            ),
-                                        )
-                                        .with_task(&mission_id),
-                                    );
-                                }
-                            }
-                            Err(e) => {
-                                warn!(
-                                    project = %project_name,
-                                    mission = %mission_id,
-                                    error = %e,
-                                    "redecomposition materialization failed"
-                                );
-                            }
-                        }
-                    }
-                });
-            }
-        }
-
         // 4. Report to Leader Agent (only on state change).
         let active = self.running_tasks.len();
         let pending = {
@@ -2052,7 +1924,7 @@ impl WorkerPool {
         );
     }
 
-    /// Phase 4 of patrol: stalled missions + leader reporting + metrics.
+    /// Phase 4 of patrol: leader reporting + metrics.
     pub async fn patrol_report(&mut self) -> Result<()> {
         let active = self.active_worker_count();
         let pending = {

@@ -22,7 +22,6 @@ pub mod conversation_store;
 pub mod cost_ledger;
 pub mod council;
 pub mod daemon;
-pub mod decomposition;
 pub mod escalation;
 pub mod execution_events;
 pub mod executor;

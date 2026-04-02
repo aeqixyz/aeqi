@@ -8,7 +8,6 @@ pub struct TaskQuery<'a> {
     status: Option<TaskStatus>,
     assignee: Option<String>,
     label: Option<String>,
-    mission_id: Option<String>,
     min_priority: Option<Priority>,
     include_closed: bool,
 }
@@ -21,7 +20,6 @@ impl<'a> TaskQuery<'a> {
             status: None,
             assignee: None,
             label: None,
-            mission_id: None,
             min_priority: None,
             include_closed: false,
         }
@@ -44,11 +42,6 @@ impl<'a> TaskQuery<'a> {
 
     pub fn label(mut self, label: &str) -> Self {
         self.label = Some(label.to_string());
-        self
-    }
-
-    pub fn mission(mut self, mission_id: &str) -> Self {
-        self.mission_id = Some(mission_id.to_string());
         self
     }
 
@@ -89,11 +82,6 @@ impl<'a> TaskQuery<'a> {
                 }
                 if let Some(ref label) = self.label
                     && !b.labels.contains(label)
-                {
-                    return false;
-                }
-                if let Some(ref mid) = self.mission_id
-                    && b.mission_id.as_deref() != Some(mid.as_str())
                 {
                     return false;
                 }

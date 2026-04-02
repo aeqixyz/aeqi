@@ -251,7 +251,6 @@ failure_analysis_model = \"{default_model}\"\n\
 preflight_enabled = true\n\
 preflight_model = \"{default_model}\"\n\
 preflight_max_cost_usd = 0.02\n\
-auto_redecompose = true\n\
 decomposition_model = \"{default_model}\"\n\
 infer_deps_threshold = 0.85\n\
 dispatch_ttl_secs = 3600\n\

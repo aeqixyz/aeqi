@@ -79,7 +79,6 @@ async fn main() -> Result<()> {
             project,
             description,
             priority,
-            mission,
         }) => {
             cmd::tasks::cmd_assign(
                 &cli.config,
@@ -87,7 +86,6 @@ async fn main() -> Result<()> {
                 &project,
                 &description,
                 priority.as_deref(),
-                mission.as_deref(),
             )
             .await
         }
@@ -116,7 +114,6 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Trigger { action }) => cmd::trigger::cmd_trigger(&cli.config, action).await,
         Some(Commands::Skill { action }) => cmd::skill::cmd_skill(&cli.config, action).await,
-        Some(Commands::Mission { action }) => cmd::mission::cmd_mission(&cli.config, action).await,
         Some(Commands::Operation { action }) => {
             cmd::operation::cmd_operation(&cli.config, action).await
         }

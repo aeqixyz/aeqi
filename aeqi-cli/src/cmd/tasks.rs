@@ -10,10 +10,8 @@ pub(crate) async fn cmd_assign(
     project_name: &str,
     description: &str,
     priority: Option<&str>,
-    mission_id: Option<&str>,
 ) -> Result<()> {
     let (config, _) = load_config(config_path)?;
-    // Allow assigning to any configured project or agent.
     let prefix = if let Some(pcfg) = config.project(project_name) {
         pcfg.prefix.clone()
     } else if let Some(acfg) = config.agent(project_name) {
@@ -25,8 +23,7 @@ pub(crate) async fn cmd_assign(
     let mut store = open_tasks_for_project(project_name)?;
     let mut task = store.create_unbound(&prefix, subject)?;
 
-    if !description.is_empty() || priority.is_some() || mission_id.is_some() {
-        let mid = mission_id.map(|s| s.to_string());
+    if !description.is_empty() || priority.is_some() {
         task = store.update(&task.id.0, |b| {
             if !description.is_empty() {
                 b.description = description.to_string();
@@ -39,21 +36,10 @@ pub(crate) async fn cmd_assign(
                     _ => aeqi_tasks::Priority::Normal,
                 };
             }
-            if let Some(ref m) = mid {
-                b.mission_id = Some(m.clone());
-            }
         })?;
     }
 
-    let mission_str = if let Some(m) = mission_id {
-        format!(" mission={m}")
-    } else {
-        String::new()
-    };
-    println!(
-        "Created {} [{}] {}{}",
-        task.id, task.priority, task.subject, mission_str
-    );
+    println!("Created {} [{}] {}", task.id, task.priority, task.subject);
     Ok(())
 }
 
@@ -162,13 +148,6 @@ pub(crate) async fn cmd_close(config_path: &Option<PathBuf>, id: &str, reason: &
     let mut store = open_tasks_for_project(&project_name)?;
     let task = store.close(id, reason)?;
     println!("Closed {} — {}", task.id, task.subject);
-
-    // Check if this task's mission should auto-close.
-    if let Some(ref mid) = task.mission_id
-        && store.check_mission_completion(mid)?
-    {
-        println!("Mission {} auto-closed (all tasks done)", mid);
-    }
     Ok(())
 }
 
@@ -207,13 +186,6 @@ pub(crate) async fn cmd_done(
     let mut store = open_tasks_for_project(&project_name)?;
     let task = store.close(task_id, reason)?;
     println!("Done {} — {}", task.id, task.subject);
-
-    // Check if this task's mission should auto-close.
-    if let Some(ref mid) = task.mission_id
-        && store.check_mission_completion(mid)?
-    {
-        println!("Mission {} auto-closed (all tasks done)", mid);
-    }
 
     // Also update any operations tracking this task.
     let ops_path = config.data_dir().join("operations.json");

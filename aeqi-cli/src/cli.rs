@@ -68,9 +68,6 @@ pub enum Commands {
         description: String,
         #[arg(short, long)]
         priority: Option<String>,
-        /// Assign to a mission by ID.
-        #[arg(short, long)]
-        mission: Option<String>,
     },
     /// Show unblocked (ready) work.
     Ready {
@@ -138,12 +135,6 @@ pub enum Commands {
     },
 
     // --- Missions ---
-    /// Manage missions (task groups).
-    Mission {
-        #[command(subcommand)]
-        action: MissionAction,
-    },
-
     // --- Cross-project ---
     /// Track work across projects.
     Operation {
@@ -499,32 +490,6 @@ pub enum OperationAction {
     List,
     /// Show operation status.
     Status { id: String },
-}
-
-#[derive(Subcommand)]
-pub enum MissionAction {
-    /// Create a new mission.
-    Create {
-        name: String,
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: String,
-        #[arg(short, long, default_value = "")]
-        description: String,
-        /// Auto-decompose into sub-tasks (requires LLM).
-        #[arg(long)]
-        decompose: bool,
-    },
-    /// List missions.
-    List {
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: Option<String>,
-        #[arg(long)]
-        all: bool,
-    },
-    /// Show mission details and its tasks.
-    Status { id: String },
-    /// Close a mission.
-    Close { id: String },
 }
 
 #[derive(Subcommand)]

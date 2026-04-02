@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::debug;
 
-use crate::mission::Mission;
 use crate::task::{Task, TaskId, TaskOutcomeKind, TaskOutcomeRecord, TaskStatus};
 
 /// Valid transitions for the task state machine.
@@ -33,12 +32,8 @@ pub struct TaskBoard {
     dir: PathBuf,
     /// In-memory index: all tasks keyed by ID.
     tasks: HashMap<String, Task>,
-    /// In-memory index: all missions keyed by ID.
-    missions: HashMap<String, Mission>,
     /// Next sequence number per prefix.
     sequences: HashMap<String, u32>,
-    /// Next mission sequence per prefix.
-    mission_sequences: HashMap<String, u32>,
 }
 
 impl TaskBoard {
@@ -50,13 +45,10 @@ impl TaskBoard {
         let mut store = Self {
             dir: dir.to_path_buf(),
             tasks: HashMap::new(),
-            missions: HashMap::new(),
             sequences: HashMap::new(),
-            mission_sequences: HashMap::new(),
         };
 
         store.load_all()?;
-        store.load_missions()?;
         Ok(store)
     }
 
@@ -504,10 +496,7 @@ impl TaskBoard {
     pub fn reload(&mut self) -> Result<()> {
         self.tasks.clear();
         self.sequences.clear();
-        self.missions.clear();
-        self.mission_sequences.clear();
         self.load_all()?;
-        self.load_missions()?;
         self.compact_all()
     }
 
@@ -521,173 +510,7 @@ impl TaskBoard {
         for prefix in prefixes {
             self.rewrite_prefix(&prefix)?;
         }
-        if !self.missions.is_empty() {
-            self.rewrite_missions()?;
-        }
         Ok(())
-    }
-
-    // ── Mission operations ──────────────────────────────────────────
-
-    /// Load missions from the missions.jsonl file.
-    fn load_missions(&mut self) -> Result<()> {
-        let path = self.dir.join("_missions.jsonl");
-        if !path.exists() {
-            return Ok(());
-        }
-        let content = std::fs::read_to_string(&path)
-            .with_context(|| format!("failed to read {}", path.display()))?;
-
-        for line in content.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            match serde_json::from_str::<Mission>(line) {
-                Ok(mission) => {
-                    // Track max sequence for this prefix.
-                    if let Some(seq_str) = mission.id.split("-m").nth(1)
-                        && let Ok(seq) = seq_str.parse::<u32>()
-                    {
-                        let entry = self
-                            .mission_sequences
-                            .entry(mission.project_prefix.clone())
-                            .or_insert(0);
-                        *entry = (*entry).max(seq);
-                    }
-                    self.missions.insert(mission.id.clone(), mission);
-                }
-                Err(e) => {
-                    debug!(error = %e, "skipping malformed mission line");
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Persist a mission (append to _missions.jsonl).
-    fn persist_mission(&self, mission: &Mission) -> Result<()> {
-        let path = self.dir.join("_missions.jsonl");
-        let line = serde_json::to_string(mission)? + "\n";
-
-        use std::io::Write;
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .with_context(|| format!("failed to open {}", path.display()))?;
-        file.write_all(line.as_bytes())?;
-        Ok(())
-    }
-
-    /// Rewrite the missions file (after updates).
-    fn rewrite_missions(&self) -> Result<()> {
-        let path = self.dir.join("_missions.jsonl");
-        let mut missions: Vec<&Mission> = self.missions.values().collect();
-        missions.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-
-        let mut content = String::new();
-        for m in missions {
-            content.push_str(&serde_json::to_string(m)?);
-            content.push('\n');
-        }
-        std::fs::write(&path, &content)
-            .with_context(|| format!("failed to write {}", path.display()))?;
-        Ok(())
-    }
-
-    /// Create a new mission.
-    pub fn create_mission(&mut self, prefix: &str, name: &str) -> Result<Mission> {
-        let seq = self
-            .mission_sequences
-            .entry(prefix.to_string())
-            .or_insert(0);
-        *seq += 1;
-        let id = Mission::make_id(prefix, *seq);
-
-        let mission = Mission::new(&id, name, prefix);
-        self.persist_mission(&mission)?;
-        self.missions.insert(mission.id.clone(), mission.clone());
-        Ok(mission)
-    }
-
-    /// Get a mission by ID.
-    pub fn get_mission(&self, id: &str) -> Option<&Mission> {
-        self.missions.get(id)
-    }
-
-    /// Update a mission.
-    pub fn update_mission(&mut self, id: &str, f: impl FnOnce(&mut Mission)) -> Result<Mission> {
-        let mission = self
-            .missions
-            .get_mut(id)
-            .ok_or_else(|| anyhow::anyhow!("mission not found: {id}"))?;
-
-        f(mission);
-        mission.updated_at = Some(chrono::Utc::now());
-
-        let mission = mission.clone();
-        self.persist_mission(&mission)?;
-        Ok(mission)
-    }
-
-    /// Close a mission (mark as done).
-    pub fn close_mission(&mut self, id: &str) -> Result<Mission> {
-        self.update_mission(id, |m| {
-            m.status = TaskStatus::Done;
-            m.closed_at = Some(chrono::Utc::now());
-        })
-    }
-
-    /// List all missions, optionally filtered by prefix.
-    pub fn missions(&self, prefix: Option<&str>) -> Vec<&Mission> {
-        let mut result: Vec<&Mission> = self
-            .missions
-            .values()
-            .filter(|m| prefix.is_none() || m.project_prefix == prefix.unwrap())
-            .collect();
-        result.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-        result
-    }
-
-    /// List active (non-closed) missions.
-    pub fn active_missions(&self, prefix: Option<&str>) -> Vec<&Mission> {
-        self.missions(prefix)
-            .into_iter()
-            .filter(|m| !m.is_closed())
-            .collect()
-    }
-
-    /// Get all tasks belonging to a mission.
-    pub fn mission_tasks(&self, mission_id: &str) -> Vec<&Task> {
-        self.tasks
-            .values()
-            .filter(|t| t.mission_id.as_deref() == Some(mission_id))
-            .collect()
-    }
-
-    /// Check if a mission should auto-close (all its tasks are done).
-    /// Returns true if the mission was closed.
-    pub fn check_mission_completion(&mut self, mission_id: &str) -> Result<bool> {
-        let tasks: Vec<_> = self
-            .tasks
-            .values()
-            .filter(|t| t.mission_id.as_deref() == Some(mission_id))
-            .collect();
-
-        if tasks.is_empty() {
-            return Ok(false);
-        }
-
-        let all_done = tasks.iter().all(|t| t.is_closed());
-        if all_done
-            && let Some(m) = self.missions.get(mission_id)
-            && !m.is_closed()
-        {
-            self.close_mission(mission_id)?;
-            return Ok(true);
-        }
-        Ok(false)
     }
 
     // ── Dependency Inference ─────────────────────────────────────
@@ -730,11 +553,6 @@ impl TaskBoard {
 
     pub fn is_empty(&self) -> bool {
         self.tasks.is_empty()
-    }
-
-    /// Total mission count.
-    pub fn mission_count(&self) -> usize {
-        self.missions.len()
     }
 }
 
@@ -950,104 +768,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_mission_create_and_get() {
-        let (mut store, _dir) = temp_store();
-        let m = store.create_mission("as", "Auth Overhaul").unwrap();
-        assert_eq!(m.id, "as-m001");
-        assert_eq!(m.name, "Auth Overhaul");
-        assert_eq!(m.project_prefix, "as");
-
-        let m2 = store.create_mission("as", "Performance Sprint").unwrap();
-        assert_eq!(m2.id, "as-m002");
-
-        assert!(store.get_mission("as-m001").is_some());
-        assert!(store.get_mission("as-m002").is_some());
-        assert!(store.get_mission("as-m003").is_none());
-    }
-
-    #[test]
-    fn test_mission_task_association() {
-        let (mut store, _dir) = temp_store();
-        let m = store.create_mission("as", "Auth Overhaul").unwrap();
-
-        let t1 = store.create_unbound("as", "Add JWT validation").unwrap();
-        store
-            .update(&t1.id.0, |t| {
-                t.mission_id = Some(m.id.clone());
-            })
-            .unwrap();
-
-        let t2 = store.create_unbound("as", "Add refresh tokens").unwrap();
-        store
-            .update(&t2.id.0, |t| {
-                t.mission_id = Some(m.id.clone());
-            })
-            .unwrap();
-
-        // Unrelated task, no mission.
-        store.create_unbound("as", "Fix typo").unwrap();
-
-        let mission_tasks = store.mission_tasks(&m.id);
-        assert_eq!(mission_tasks.len(), 2);
-    }
-
-    #[test]
-    fn test_mission_auto_completion() {
-        let (mut store, _dir) = temp_store();
-        let m = store.create_mission("as", "Deploy Pipeline").unwrap();
-
-        let t1 = store.create_unbound("as", "Build").unwrap();
-        store
-            .update(&t1.id.0, |t| {
-                t.mission_id = Some(m.id.clone());
-            })
-            .unwrap();
-
-        let t2 = store.create_unbound("as", "Test").unwrap();
-        store
-            .update(&t2.id.0, |t| {
-                t.mission_id = Some(m.id.clone());
-            })
-            .unwrap();
-
-        // Close first task — mission should NOT auto-close.
-        store.close(&t1.id.0, "built").unwrap();
-        assert!(!store.check_mission_completion(&m.id).unwrap());
-        assert!(!store.get_mission(&m.id).unwrap().is_closed());
-
-        // Close second task — mission SHOULD auto-close.
-        store.close(&t2.id.0, "tested").unwrap();
-        assert!(store.check_mission_completion(&m.id).unwrap());
-        assert!(store.get_mission(&m.id).unwrap().is_closed());
-    }
-
-    #[test]
-    fn test_mission_persistence() {
-        let dir = TempDir::new().unwrap();
-
-        {
-            let mut store = TaskBoard::open(dir.path()).unwrap();
-            store.create_mission("as", "Sprint 1").unwrap();
-            store.create_mission("rd", "Launch Prep").unwrap();
-        }
-
-        let store = TaskBoard::open(dir.path()).unwrap();
-        assert_eq!(store.mission_count(), 2);
-        assert!(store.get_mission("as-m001").is_some());
-        assert!(store.get_mission("rd-m001").is_some());
-    }
-
-    #[test]
-    fn test_mission_listing_by_prefix() {
-        let (mut store, _dir) = temp_store();
-        store.create_mission("as", "Sprint 1").unwrap();
-        store.create_mission("as", "Sprint 2").unwrap();
-        store.create_mission("rd", "Launch").unwrap();
-
-        assert_eq!(store.missions(None).len(), 3);
-        assert_eq!(store.missions(Some("as")).len(), 2);
-        assert_eq!(store.missions(Some("rd")).len(), 1);
-        assert_eq!(store.missions(Some("xx")).len(), 0);
-    }
 }

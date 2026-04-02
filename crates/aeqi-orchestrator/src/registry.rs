@@ -4,13 +4,10 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, info, warn};
 
-use aeqi_core::traits::{ChatRequest, Message, MessageContent, Provider, Role};
-
-use crate::audit::{AuditEvent, AuditLog, DecisionType};
+use crate::audit::AuditLog;
 use crate::blackboard::Blackboard;
 use crate::conversation_store::ConversationStore;
 use crate::cost_ledger::CostLedger;
-use crate::decomposition::DecompositionResult;
 use crate::expertise::ExpertiseLedger;
 use crate::message::DispatchBus;
 use crate::metrics::AEQIMetrics;
@@ -242,117 +239,6 @@ impl ProjectRegistry {
         Ok(task)
     }
 
-    /// Create a mission and optionally decompose it into a task DAG using an LLM.
-    pub async fn create_mission_with_decomposition(
-        &self,
-        project_name: &str,
-        mission_name: &str,
-        description: &str,
-        decomposition_model: &str,
-        provider: &Arc<dyn Provider>,
-        infer_deps_threshold: f64,
-    ) -> Result<aeqi_tasks::Mission> {
-        let projects = self.projects.read().await;
-        let project = projects
-            .get(project_name)
-            .ok_or_else(|| anyhow::anyhow!("project not found: {project_name}"))?;
-
-        let mut store = project.tasks.lock().await;
-        let mut mission = store.create_mission(&project.prefix, mission_name)?;
-
-        if !description.is_empty() {
-            mission = store.update_mission(&mission.id, |m| {
-                m.description = description.to_string();
-            })?;
-        }
-
-        // Decompose if model is provided and description is non-empty.
-        if !decomposition_model.is_empty() && !description.is_empty() {
-            let prompt = DecompositionResult::decomposition_prompt(mission_name, description);
-            let request = ChatRequest {
-                model: decomposition_model.to_string(),
-                messages: vec![Message {
-                    role: Role::User,
-                    content: MessageContent::text(&prompt),
-                }],
-                tools: vec![],
-                max_tokens: 2048,
-                temperature: 0.0,
-            };
-            match provider.chat(&request).await {
-                Ok(response) if response.content.is_some() => {
-                    let mut result =
-                        DecompositionResult::parse(response.content.as_deref().unwrap());
-                    let task_ids =
-                        result.materialize(&mut store, &project.prefix, &mission.id, None)?;
-                    info!(
-                        project = %project_name,
-                        mission = %mission.id,
-                        tasks = task_ids.len(),
-                        critical_path = result.critical_path.len(),
-                        "mission decomposed into task DAG"
-                    );
-
-                    // Infer dependencies between newly created tasks.
-                    if infer_deps_threshold > 0.0
-                        && let Ok(n) = store.apply_inferred_dependencies(infer_deps_threshold)
-                        && n > 0
-                    {
-                        info!(
-                            project = %project_name,
-                            mission = %mission.id,
-                            inferred = n,
-                            "inferred task dependencies"
-                        );
-                        if let Some(ref audit) = self.audit_log {
-                            let _ = audit.record(
-                                &AuditEvent::new(
-                                    project_name,
-                                    DecisionType::DependencyInferred,
-                                    format!("Inferred {n} dependencies in mission {}", mission.id),
-                                )
-                                .with_task(&mission.id),
-                            );
-                        }
-                    }
-
-                    if let Some(ref audit) = self.audit_log {
-                        let _ = audit.record(
-                            &AuditEvent::new(
-                                project_name,
-                                DecisionType::MissionDecomposed,
-                                format!(
-                                    "Mission {} decomposed into {} tasks",
-                                    mission.id,
-                                    task_ids.len()
-                                ),
-                            )
-                            .with_task(&mission.id),
-                        );
-                    }
-                }
-                Ok(_) => {
-                    warn!(
-                        project = %project_name,
-                        mission = %mission.id,
-                        "decomposition returned empty response"
-                    );
-                }
-                Err(e) => {
-                    warn!(
-                        project = %project_name,
-                        mission = %mission.id,
-                        error = %e,
-                        "decomposition failed"
-                    );
-                }
-            }
-        }
-
-        self.wake.notify_one();
-        Ok(mission)
-    }
-
     pub async fn patrol_all(&self) -> Result<()> {
         let whispers = self.dispatch_bus.read(&self.leader_agent_name).await;
         for w in &whispers {
@@ -441,7 +327,7 @@ impl ProjectRegistry {
         }
         drop(agent_reg);
 
-        // Phase 4: Per-pool reporting + stalled mission detection.
+        // Phase 4: Per-pool reporting + metrics.
         for (name, pool) in &pool_entries {
             let mut p = pool.lock().await;
             if let Err(e) = p.patrol_report().await {
@@ -576,7 +462,7 @@ impl ProjectRegistry {
         self.worker_pools.read().await.get(project).cloned()
     }
 
-    /// Get a project's TaskBoard for direct task/mission access.
+    /// Get a project's TaskBoard for direct task access.
     pub async fn get_task_board(
         &self,
         project_name: &str,
@@ -588,7 +474,7 @@ impl ProjectRegistry {
             .map(|p| p.tasks.clone())
     }
 
-    /// List all projects with summary stats (task counts, mission counts, team info).
+    /// List all projects with summary stats (task counts, team info).
     /// Designed to minimize lock hold times — snapshot project list first, then read each
     /// project's task board independently without holding the registry-level RwLocks.
     pub async fn list_project_summaries(&self) -> Vec<ProjectSummary> {
@@ -617,8 +503,6 @@ impl ProjectRegistry {
                 in_progress_tasks,
                 done_tasks,
                 cancelled_tasks,
-                active_missions,
-                total_missions,
             ) = if let Ok(board) = project.tasks.try_lock() {
                 let all_tasks = board.all();
                 let open = all_tasks.iter().filter(|t| !t.is_closed()).count() as u32;
@@ -639,9 +523,6 @@ impl ProjectRegistry {
                     .iter()
                     .filter(|t| t.status == aeqi_tasks::task::TaskStatus::Cancelled)
                     .count() as u32;
-                let missions = board.missions(Some(&project.prefix));
-                let active_m = missions.iter().filter(|m| !m.is_closed()).count() as u32;
-                let total_m = missions.len() as u32;
                 (
                     open,
                     total,
@@ -649,12 +530,10 @@ impl ProjectRegistry {
                     in_progress,
                     done,
                     cancelled,
-                    active_m,
-                    total_m,
                 )
             } else {
                 // Lock held by patrol — return stale/zero data rather than blocking.
-                (0, 0, 0, 0, 0, 0, 0, 0)
+                (0, 0, 0, 0, 0, 0)
             };
 
             summaries.push(ProjectSummary {
@@ -666,8 +545,6 @@ impl ProjectRegistry {
                 in_progress_tasks,
                 done_tasks,
                 cancelled_tasks,
-                active_missions,
-                total_missions,
                 departments: project
                     .departments
                     .iter()
@@ -714,8 +591,6 @@ pub struct ProjectSummary {
     pub in_progress_tasks: u32,
     pub done_tasks: u32,
     pub cancelled_tasks: u32,
-    pub active_missions: u32,
-    pub total_missions: u32,
     pub departments: Vec<DepartmentSummary>,
 }
 

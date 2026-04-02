@@ -924,13 +924,12 @@ impl ChatEngine {
         if let Some(p) = project_hint {
             if let Some(s) = project_summaries.first() {
                 context.push_str(&format!(
-                    "{}: {} open tasks ({} pending, {} in progress, {} done), {} missions\n",
+                    "{}: {} open tasks ({} pending, {} in progress, {} done)\n",
                     s.name,
                     s.open_tasks,
                     s.pending_tasks,
                     s.in_progress_tasks,
-                    s.done_tasks,
-                    s.active_missions
+                    s.done_tasks
                 ));
                 if !s.departments.is_empty() {
                     context.push_str("Departments:\n");
@@ -949,8 +948,8 @@ impl ChatEngine {
         } else {
             for s in &project_summaries {
                 context.push_str(&format!(
-                    "{}: {} open/{} total tasks, {} missions\n",
-                    s.name, s.open_tasks, s.total_tasks, s.active_missions
+                    "{}: {} open/{} total tasks\n",
+                    s.name, s.open_tasks, s.total_tasks
                 ));
             }
         }
@@ -990,7 +989,6 @@ impl ChatEngine {
                             "name": s.name,
                             "open_tasks": s.open_tasks,
                             "total_tasks": s.total_tasks,
-                            "active_missions": s.active_missions,
                         })
                     })
                     .collect(),
@@ -1506,7 +1504,6 @@ mod tests {
             worker_timeout_secs: 60,
             max_cost_per_day_usd: None,
             orchestrator: None,
-            missions: Vec::new(),
             departments: Vec::new(),
             domain_hints: Vec::new(),
             compact_instructions: None,
@@ -1860,7 +1857,6 @@ mod tests {
             worker_timeout_secs: 60,
             max_cost_per_day_usd: None,
             orchestrator: None,
-            missions: Vec::new(),
             departments: vec![DepartmentConfig {
                 name: "backend".to_string(),
                 lead: Some("reviewer".to_string()),

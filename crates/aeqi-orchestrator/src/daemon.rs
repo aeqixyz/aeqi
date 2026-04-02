@@ -913,8 +913,6 @@ impl Daemon {
                                 s.preflight_max_cost_usd = orch.preflight_max_cost_usd;
                                 s.adaptive_retry = orch.adaptive_retry;
                                 s.failure_analysis_model = orch.failure_analysis_model.clone();
-                                s.auto_redecompose = orch.auto_redecompose;
-                                s.decomposition_model = orch.decomposition_model.clone();
                                 s.infer_deps_threshold = orch.infer_deps_threshold;
 
                                 debug!(
@@ -1268,8 +1266,6 @@ impl Daemon {
                                 "in_progress_tasks": s.in_progress_tasks,
                                 "done_tasks": s.done_tasks,
                                 "cancelled_tasks": s.cancelled_tasks,
-                                "active_missions": s.active_missions,
-                                "total_missions": s.total_missions,
                                 "departments": s.departments.iter().map(|d| serde_json::json!({
                                     "name": d.name,
                                     "lead": d.lead,
@@ -1684,7 +1680,6 @@ impl Daemon {
                                     "status": task.status.to_string(),
                                     "priority": task.priority.to_string(),
                                     "assignee": task.assignee,
-                                    "mission_id": task.mission_id,
                                     "skill": task.skill,
                                     "labels": task.labels,
                                     "retry_count": task.retry_count,
@@ -1700,46 +1695,6 @@ impl Daemon {
                         }
                     }
                     serde_json::json!({"ok": true, "tasks": all_tasks, "partial": partial})
-                }
-
-                "missions" => {
-                    let project_filter = request.get("project").and_then(|v| v.as_str());
-
-                    let project_names: Vec<String> = if let Some(name) = project_filter {
-                        vec![name.to_string()]
-                    } else {
-                        registry.project_names().await
-                    };
-
-                    let mut all_missions = Vec::new();
-                    let mut partial = false;
-                    for name in &project_names {
-                        if let Some(board) = registry.get_task_board(name).await {
-                            let Ok(board) = board.try_lock() else {
-                                partial = true;
-                                continue;
-                            };
-                            let prefix = name.clone(); // prefix lookup from project
-                            for mission in board.missions(None) {
-                                let (done, total) =
-                                    aeqi_tasks::Mission::check_progress(&mission.id, &board.all());
-                                all_missions.push(serde_json::json!({
-                                    "id": mission.id,
-                                    "name": mission.name,
-                                    "description": mission.description,
-                                    "status": mission.status.to_string(),
-                                    "project": prefix,
-                                    "labels": mission.labels,
-                                    "task_count": total,
-                                    "done_count": done,
-                                    "created_at": mission.created_at.to_rfc3339(),
-                                    "updated_at": mission.updated_at.map(|t| t.to_rfc3339()),
-                                    "closed_at": mission.closed_at.map(|t| t.to_rfc3339()),
-                                }));
-                            }
-                        }
-                    }
-                    serde_json::json!({"ok": true, "missions": all_missions, "partial": partial})
                 }
 
                 "create_task" => {

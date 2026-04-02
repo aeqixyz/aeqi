@@ -170,8 +170,6 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 witness.preflight_max_cost_usd = project_orch.preflight_max_cost_usd;
                 witness.adaptive_retry = project_orch.adaptive_retry;
                 witness.failure_analysis_model = project_orch.failure_analysis_model.clone();
-                witness.auto_redecompose = project_orch.auto_redecompose;
-                witness.decomposition_model = project_orch.decomposition_model.clone();
                 witness.infer_deps_threshold = project_orch.infer_deps_threshold;
 
                 // Wire skill discovery directories (project-specific + shared).

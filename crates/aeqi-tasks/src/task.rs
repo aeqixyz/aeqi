@@ -177,9 +177,6 @@ pub struct Task {
     /// Task IDs that this task blocks.
     #[serde(default)]
     pub blocks: Vec<TaskId>,
-    /// Mission this task belongs to (groups related tasks).
-    #[serde(default)]
-    pub mission_id: Option<String>,
     /// Skill to apply when executing this task (loaded from project skills dir).
     #[serde(default)]
     pub skill: Option<String>,
@@ -231,7 +228,6 @@ impl Task {
             agent_id: agent_id.map(|s| s.to_string()),
             depends_on: Vec::new(),
             blocks: Vec::new(),
-            mission_id: None,
             skill: None,
             labels: Vec::new(),
             retry_count: 0,
