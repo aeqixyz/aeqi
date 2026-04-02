@@ -1016,6 +1016,11 @@ impl Supervisor {
                                 timestamp: chrono::Utc::now(),
                                 source: "agent".to_string(),
                                 tokens: 0,
+                                input_tokens: 0,
+                                output_tokens: 0,
+                                cached_tokens: 0,
+                                model: runtime.session.model.clone().unwrap_or_default(),
+                                provider: String::new(),
                             });
                         }
 

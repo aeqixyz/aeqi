@@ -27,6 +27,21 @@ pub struct CostEntry {
     /// Token count (input + output) for tracking usage regardless of cost.
     #[serde(default)]
     pub tokens: u64,
+    /// Input (prompt) tokens for this call.
+    #[serde(default)]
+    pub input_tokens: u64,
+    /// Output (completion) tokens for this call.
+    #[serde(default)]
+    pub output_tokens: u64,
+    /// Cached tokens (cache-read hits) for this call.
+    #[serde(default)]
+    pub cached_tokens: u64,
+    /// Model used for this call.
+    #[serde(default)]
+    pub model: String,
+    /// Provider used for this call.
+    #[serde(default)]
+    pub provider: String,
 }
 
 fn default_source() -> String {
@@ -45,6 +60,11 @@ impl CostEntry {
             timestamp: chrono::Utc::now(),
             source: "agent".to_string(),
             tokens: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            cached_tokens: 0,
+            model: String::new(),
+            provider: String::new(),
         }
     }
 }
