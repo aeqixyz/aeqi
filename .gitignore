@@ -4,12 +4,11 @@
 .DS_Store
 
 # Runtime state
-.sigil/sessions/
-.sigil/checkpoints/
-projects/*/.sigil/
-agents/*/.sigil/
+.aeqi/sessions/
+.aeqi/checkpoints/
+projects/*/.aeqi/
+agents/*/.aeqi/
 **/.tasks/
-**/.quests/
 *.db
 *.db-wal
 *.db-shm
@@ -23,8 +22,8 @@ apps/ui/*.tsbuildinfo
 apps/ui/.env
 apps/ui/.env*.local
 
-# Agent runtime state (ignore), but track agent templates (ship with Sigil)
-agents/*/.sigil/
+# Agent runtime state (ignore), but track agent templates (ship with AEQI)
+agents/*/.aeqi/
 !agents/*/agent.toml
 
 # Project directories (personal — create your own)
@@ -35,5 +34,5 @@ projects/*/
 # Secrets
 .env
 .env.local
-.sigil/sessions/
+.aeqi/sessions/
 .claude/worktrees/

@@ -123,54 +123,54 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 };
                 let default_model = config.model_for_project(&project_cfg.name);
 
-                let rig = Arc::new(Project::from_config(
+                let project = Arc::new(Project::from_config(
                     project_cfg,
                     &project_dir,
                     &default_model,
                 )?);
-                let workdir = rig.repo.clone();
+                let workdir = project.repo.clone();
                 let tasks_dir = project_dir.join(".tasks");
                 let tools = build_project_tools(
                     &workdir,
                     &tasks_dir,
                     &project_cfg.prefix,
-                    Some(&rig.worktree_root),
+                    Some(&project.worktree_root),
                 );
                 let provider = build_provider_for_project(&config, &project_cfg.name)?;
-                let mut witness =
-                    WorkerPool::new(&rig, provider.clone(), tools.clone(), dispatch_bus.clone());
-                witness.event_broadcaster = Some(event_broadcaster.clone());
+                let mut pool =
+                    WorkerPool::new(&project, provider.clone(), tools.clone(), dispatch_bus.clone());
+                pool.event_broadcaster = Some(event_broadcaster.clone());
                 let project_orch = config.orchestrator_for_project(&project_cfg.name);
 
                 // Wire memory + reflection for worker post-execution insight extraction.
                 if let Ok(mem) = open_memory(&config, Some(&project_cfg.name)) {
                     let mem: Arc<dyn Memory> = Arc::new(mem);
-                    witness.memory = Some(mem);
+                    pool.memory = Some(mem);
                     if background_automation_enabled {
-                        witness.reflect_provider = Some(provider.clone());
-                        witness.reflect_model = config.default_model_for_provider(
+                        pool.reflect_provider = Some(provider.clone());
+                        pool.reflect_model = config.default_model_for_provider(
                             aeqi_core::config::ProviderKind::OpenRouter,
                         );
                     }
                 }
 
                 // Wire escalation targets.
-                witness.set_escalation_targets(config.leader(), config.leader());
-                witness.identity = augment_identity_with_org_context(
+                pool.set_escalation_targets(config.leader(), config.leader());
+                pool.identity = augment_identity_with_org_context(
                     &config,
-                    witness.identity.clone(),
-                    Some(&witness.escalation_target),
+                    pool.identity.clone(),
+                    Some(&pool.escalation_target),
                     Some(&project_cfg.name),
                 );
 
                 // Wire v3 orchestrator config fields.
-                witness.expertise_routing = project_orch.expertise_routing;
-                witness.preflight_enabled = project_orch.preflight_enabled;
-                witness.preflight_model = project_orch.preflight_model.clone();
-                witness.preflight_max_cost_usd = project_orch.preflight_max_cost_usd;
-                witness.adaptive_retry = project_orch.adaptive_retry;
-                witness.failure_analysis_model = project_orch.failure_analysis_model.clone();
-                witness.infer_deps_threshold = project_orch.infer_deps_threshold;
+                pool.expertise_routing = project_orch.expertise_routing;
+                pool.preflight_enabled = project_orch.preflight_enabled;
+                pool.preflight_model = project_orch.preflight_model.clone();
+                pool.preflight_max_cost_usd = project_orch.preflight_max_cost_usd;
+                pool.adaptive_retry = project_orch.adaptive_retry;
+                pool.failure_analysis_model = project_orch.failure_analysis_model.clone();
+                pool.infer_deps_threshold = project_orch.infer_deps_threshold;
 
                 // Wire skill discovery directories (project-specific + shared).
                 let project_skills_dir = project_dir.join("skills");
@@ -178,11 +178,11 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     .parent()
                     .map(|p| p.join("shared").join("skills"))
                     .unwrap_or_default();
-                witness.skills_dirs = vec![project_skills_dir, shared_skills_dir];
+                pool.skills_dirs = vec![project_skills_dir, shared_skills_dir];
 
-                witness.worker_max_budget_usd = project_cfg.max_budget_usd;
+                pool.worker_max_budget_usd = project_cfg.max_budget_usd;
 
-                registry.register_project(rig.clone(), witness).await;
+                registry.register_project(project.clone(), pool).await;
             }
 
             // Build channels map for the leader agent.

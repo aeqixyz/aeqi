@@ -598,9 +598,6 @@ pub struct OrchestratorConfig {
     /// Max cost for pre-flight assessment (Phase 5).
     #[serde(default = "default_preflight_max_cost_usd")]
     pub preflight_max_cost_usd: f64,
-    /// Reserved — formerly used for mission decomposition.
-    #[serde(default)]
-    pub decomposition_model: String,
     /// Confidence threshold for inferred dependencies; 0.0 = disabled (Phase 7).
     #[serde(default)]
     pub infer_deps_threshold: f64,
@@ -626,7 +623,6 @@ impl Default for OrchestratorConfig {
             preflight_enabled: false,
             preflight_model: String::new(),
             preflight_max_cost_usd: default_preflight_max_cost_usd(),
-            decomposition_model: String::new(),
             infer_deps_threshold: 0.0,
         }
     }
@@ -708,7 +704,7 @@ fn default_preflight_max_cost_usd() -> f64 {
     0.01
 }
 
-/// How workers execute quests.
+/// How workers execute tasks.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionMode {

@@ -108,7 +108,7 @@ impl VectorStore {
     }
 
     /// Search for the top-k most similar embeddings to the query vector.
-    /// This is a brute-force scan — fine for <100K memories per rig.
+    /// This is a brute-force scan — fine for <100K memories per project.
     pub fn search(&self, query: &[f32], top_k: usize) -> Result<Vec<VectorResult>> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("lock: {e}"))?;
 

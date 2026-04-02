@@ -4,7 +4,7 @@ description = "Process a message posted to a department or project channel. Part
 phase = "autonomous"
 
 [tools]
-allow = ["delegate", "dispatch_send", "memory_recall", "blackboard"]
+allow = ["delegate", "memory_recall", "blackboard"]
 
 [prompt]
 system = """A message was posted to a channel you participate in.
@@ -22,6 +22,6 @@ system = """A message was posted to a channel you participate in.
 ## Guidelines
 - Only respond when you have signal to add. Silence is fine.
 - Keep responses focused and actionable.
-- If the discussion reveals needed work, use dispatch_send to propose it to the right agent.
+- If the discussion reveals needed work, use delegate to propose it to the right agent.
 - Never repeat what others already said.
 """

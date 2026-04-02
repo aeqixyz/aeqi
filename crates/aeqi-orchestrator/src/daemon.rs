@@ -346,7 +346,7 @@ impl Daemon {
         };
 
         for agent in &agents {
-            // Leader mail is already consumed in patrol_all(). Skip to avoid double-processing.
+            // Leader dispatches are already consumed in patrol_all(). Skip to avoid double-processing.
             if agent.name == self.registry.leader_agent_name {
                 continue;
             }
@@ -896,8 +896,8 @@ impl Daemon {
                             }
 
                             // Update worker pool parameters.
-                            if let Some(sup) = self.registry.get_worker_pool(&pcfg.name).await {
-                                let mut s = sup.lock().await;
+                            if let Some(pool) = self.registry.get_worker_pool(&pcfg.name).await {
+                                let mut s = pool.lock().await;
                                 s.max_workers = pcfg.max_workers;
 
                                 // Apply orchestrator config (per-project override or global).
@@ -948,7 +948,7 @@ impl Daemon {
                 warn!(error = %e, "failed to save cost ledger");
             }
 
-            // 8. Surface dispatch retries / dead letters for critical mail.
+            // 8. Surface dispatch retries / dead letters for critical dispatches.
             let retried = self.dispatch_bus.retry_unacked(ACK_RETRY_AGE_SECS).await;
             for dispatch in &retried {
                 warn!(

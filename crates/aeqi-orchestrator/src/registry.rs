@@ -110,9 +110,9 @@ impl ProjectRegistry {
         // Store registry reference for global concurrency enforcement.
         *self.agent_registry.write().await = Some(agent_registry.clone());
 
-        let sups = self.worker_pools.write().await;
-        for (_name, sup) in sups.iter() {
-            let mut s = sup.lock().await;
+        let pools = self.worker_pools.write().await;
+        for (_name, pool) in pools.iter() {
+            let mut s = pool.lock().await;
             s.agent_registry = Some(agent_registry.clone());
             s.trigger_store = Some(trigger_store.clone());
             if let Some(ref cs) = conversation_store {
@@ -240,11 +240,11 @@ impl ProjectRegistry {
     }
 
     pub async fn patrol_all(&self) -> Result<()> {
-        let whispers = self.dispatch_bus.read(&self.leader_agent_name).await;
-        for w in &whispers {
-            info!(from = %w.from, kind = %w.kind.subject_tag(), "dispatch received");
-            if w.requires_ack {
-                self.dispatch_bus.acknowledge(&w.id).await;
+        let dispatches = self.dispatch_bus.read(&self.leader_agent_name).await;
+        for d in &dispatches {
+            info!(from = %d.from, kind = %d.kind.subject_tag(), "dispatch received");
+            if d.requires_ack {
+                self.dispatch_bus.acknowledge(&d.id).await;
             }
         }
 
@@ -443,9 +443,9 @@ impl ProjectRegistry {
     pub async fn worker_progress(&self) -> Vec<serde_json::Value> {
         let pools = self.worker_pools.read().await;
         let mut all = Vec::new();
-        for (name, sup) in pools.iter() {
-            if let Ok(sup) = sup.try_lock() {
-                let mut entries = sup.worker_progress();
+        for (name, pool) in pools.iter() {
+            if let Ok(pool) = pool.try_lock() {
+                let mut entries = pool.worker_progress();
                 for entry in &mut entries {
                     if let Some(obj) = entry.as_object_mut() {
                         obj.insert("project".to_string(), serde_json::json!(name));

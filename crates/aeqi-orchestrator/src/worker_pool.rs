@@ -41,7 +41,7 @@ struct TrackedWorker {
     timeout_secs: u64,
 }
 
-/// WorkerPool: per-rig worker pool. Runs patrol cycles, manages workers,
+/// WorkerPool: per-project worker pool. Runs patrol cycles, manages workers,
 /// detects stuck/orphaned tasks, handles escalation, reports to Leader Agent.
 pub struct WorkerPool {
     pub project_name: String,
@@ -61,7 +61,7 @@ pub struct WorkerPool {
     running_tasks: Vec<TrackedWorker>,
     /// Timeout in seconds for worker execution. Hung workers are aborted after this.
     worker_timeout_secs: u64,
-    /// Last reported state — only send mail on change.
+    /// Last reported state — only send dispatch on change.
     last_report: (usize, usize),
     /// Shared cost ledger for budget enforcement.
     pub cost_ledger: Option<Arc<CostLedger>>,

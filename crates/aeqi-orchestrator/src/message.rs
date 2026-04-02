@@ -328,23 +328,23 @@ impl DispatchBus {
         self.ttl_secs = secs;
     }
 
-    pub async fn send(&self, mail: Dispatch) {
+    pub async fn send(&self, dispatch: Dispatch) {
         // Idempotency check: if a key is set, drop duplicate dispatches.
-        if let Some(ref key) = mail.idempotency_key
+        if let Some(ref key) = dispatch.idempotency_key
             && self.has_idempotency_key(key).await
         {
-            debug!(key = %key, to = %mail.to, "dispatch dropped (idempotency key already exists)");
+            debug!(key = %key, to = %dispatch.to, "dispatch dropped (idempotency key already exists)");
             return;
         }
 
-        // Capture event data before mail is consumed by backend.
-        let event_from = mail.from.clone();
-        let event_to = mail.to.clone();
-        let event_kind = mail.kind.subject_tag().to_string();
+        // Capture event data before dispatch is consumed by backend.
+        let event_from = dispatch.from.clone();
+        let event_to = dispatch.to.clone();
+        let event_kind = dispatch.kind.subject_tag().to_string();
 
         match &self.backend {
             BusBackend::Memory { queues } => {
-                let recipient = mail.to.clone();
+                let recipient = dispatch.to.clone();
                 let mut queues = queues.lock().await;
                 let queue = queues.entry(recipient).or_default();
 
@@ -353,7 +353,7 @@ impl DispatchBus {
                 while queue.len() >= self.max_queue_per_recipient {
                     queue.pop_front();
                 }
-                queue.push_back(mail);
+                queue.push_back(dispatch);
             }
             BusBackend::Sqlite { conn } => {
                 let Ok(conn) = conn.lock() else { return };
@@ -368,7 +368,7 @@ impl DispatchBus {
                 let count: u32 = conn
                     .query_row(
                         "SELECT COUNT(*) FROM dispatches WHERE to_agent = ?1",
-                        rusqlite::params![mail.to],
+                        rusqlite::params![dispatch.to],
                         |row| row.get(0),
                     )
                     .unwrap_or(0);
@@ -380,11 +380,11 @@ impl DispatchBus {
                             SELECT id FROM dispatches WHERE to_agent = ?1
                             ORDER BY timestamp ASC LIMIT ?2
                         )",
-                        rusqlite::params![mail.to, excess],
+                        rusqlite::params![dispatch.to, excess],
                     );
                 }
 
-                let kind_json = match serde_json::to_string(&mail.kind) {
+                let kind_json = match serde_json::to_string(&dispatch.kind) {
                     Ok(j) => j,
                     Err(e) => {
                         warn!(error = %e, "failed to serialize dispatch kind");
@@ -399,17 +399,17 @@ impl DispatchBus {
                         idempotency_key
                      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                     rusqlite::params![
-                        mail.from,
-                        mail.to,
+                        dispatch.from,
+                        dispatch.to,
                         kind_json,
-                        mail.timestamp.to_rfc3339(),
-                        mail.read,
-                        mail.id,
-                        mail.requires_ack,
-                        mail.retry_count,
-                        mail.max_retries,
-                        mail.first_sent_at.to_rfc3339(),
-                        mail.idempotency_key,
+                        dispatch.timestamp.to_rfc3339(),
+                        dispatch.read,
+                        dispatch.id,
+                        dispatch.requires_ack,
+                        dispatch.retry_count,
+                        dispatch.max_retries,
+                        dispatch.first_sent_at.to_rfc3339(),
+                        dispatch.idempotency_key,
                     ],
                 );
             }

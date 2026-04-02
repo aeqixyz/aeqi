@@ -42,7 +42,7 @@ impl Tool for TaskCreateTool {
             .store
             .lock()
             .map_err(|e| anyhow::anyhow!("lock: {e}"))?;
-        let mut task = store.create_unbound(&self.prefix, subject)?;
+        let mut task = store.create_with_agent(&self.prefix, subject, None)?;
 
         if !description.is_empty() || priority != "normal" {
             task = store.update(&task.id.0, |t| {

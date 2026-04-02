@@ -729,8 +729,8 @@ impl ChatEngine {
 
         for (qid, project) in pending {
             let status = {
-                if let Some(rig) = self.registry.get_project(&project).await {
-                    let store = rig.tasks.lock().await;
+                if let Some(project) = self.registry.get_project(&project).await {
+                    let store = project.tasks.lock().await;
                     store
                         .get(&qid)
                         .map(|b| (b.status, Self::task_completion_reason(b)))
@@ -819,8 +819,8 @@ impl ChatEngine {
             pending.get(task_id).map(|task| task.project.clone())?
         };
         let status = {
-            if let Some(rig) = self.registry.get_project(&project).await {
-                let store = rig.tasks.lock().await;
+            if let Some(project) = self.registry.get_project(&project).await {
+                let store = project.tasks.lock().await;
                 store
                     .get(task_id)
                     .map(|b| (b.status, Self::task_completion_reason(b)))
@@ -1299,8 +1299,8 @@ impl ChatEngine {
                         }
                     }
                     let done = {
-                        if let Some(rig) = reg.get_project(&project_name).await {
-                            let store = rig.tasks.lock().await;
+                        if let Some(project) = reg.get_project(&project_name).await {
+                            let store = project.tasks.lock().await;
                             store.get(&task_id).map(|b| {
                                 (
                                     b.status == aeqi_tasks::TaskStatus::Done,

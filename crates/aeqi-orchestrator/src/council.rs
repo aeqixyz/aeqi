@@ -4,11 +4,7 @@
 //! spawns a thread where each agent debates visibly before the leader agent
 //! synthesizes the final recommendation.
 
-use aeqi_core::config::PeerAgentConfig;
-use aeqi_core::identity::Identity;
-use anyhow::{Result, anyhow};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use tokio::sync::Mutex;
 
 /// A council debate session.
@@ -79,29 +75,6 @@ impl Council {
         self.topics.lock().await.get(topic_id).cloned()
     }
 
-    /// Run a multi-round council debate: spawn advisor tasks for each round,
-    /// collect responses, check for convergence, then synthesize.
-    pub async fn run_debate(
-        &self,
-        message: &str,
-        advisor_configs: &[(&PeerAgentConfig, PathBuf)],
-        lead_identity: &Identity,
-        lead_repo: &Path,
-        lead_model: &str,
-        max_rounds: u32,
-    ) -> Result<(Vec<Vec<(String, String)>>, String)> {
-        let _ = (
-            message,
-            advisor_configs,
-            lead_identity,
-            lead_repo,
-            lead_model,
-            max_rounds,
-        );
-        Err(anyhow!(
-            "council debate execution is temporarily disabled while it is rewired to the native AEQI runtime"
-        ))
-    }
 }
 
 impl Default for Council {
