@@ -114,6 +114,10 @@ pub struct Dispatch {
     /// When the dispatch was first sent (for total latency tracking).
     #[serde(default = "Utc::now")]
     pub first_sent_at: DateTime<Utc>,
+    /// Optional idempotency key. If set, duplicate dispatches with the same key
+    /// are silently dropped. Prevents duplicate work on retry/reconnect.
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
 }
 
 /// Snapshot of control-plane delivery state.
@@ -154,12 +158,19 @@ impl Dispatch {
             retry_count: 0,
             max_retries: 3,
             first_sent_at: now,
+            idempotency_key: None,
         }
     }
 
     /// Mark this dispatch as requiring acknowledgment.
     pub fn with_ack_required(mut self) -> Self {
         self.requires_ack = true;
+        self
+    }
+
+    /// Set an idempotency key to prevent duplicate execution.
+    pub fn with_idempotency_key(mut self, key: impl Into<String>) -> Self {
+        self.idempotency_key = Some(key.into());
         self
     }
 }
@@ -183,6 +194,30 @@ pub struct DispatchBus {
 }
 
 impl DispatchBus {
+    /// Check if a dispatch with this idempotency key already exists.
+    async fn has_idempotency_key(&self, key: &str) -> bool {
+        match &self.backend {
+            BusBackend::Memory { queues } => {
+                let queues = queues.lock().await;
+                queues
+                    .values()
+                    .any(|q| q.iter().any(|d| d.idempotency_key.as_deref() == Some(key)))
+            }
+            BusBackend::Sqlite { conn } => {
+                let Ok(conn) = conn.lock() else {
+                    return false;
+                };
+                conn.query_row(
+                    "SELECT COUNT(*) FROM dispatches WHERE idempotency_key = ?1",
+                    rusqlite::params![key],
+                    |row| row.get::<_, u32>(0),
+                )
+                .unwrap_or(0)
+                    > 0
+            }
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             backend: BusBackend::Memory {
@@ -258,7 +293,8 @@ impl DispatchBus {
                  requires_ack INTEGER NOT NULL DEFAULT 0,
                  retry_count INTEGER NOT NULL DEFAULT 0,
                  max_retries INTEGER NOT NULL DEFAULT 3,
-                 first_sent_at TEXT NOT NULL DEFAULT ''
+                 first_sent_at TEXT NOT NULL DEFAULT '',
+                 idempotency_key TEXT
              );
 
              CREATE INDEX IF NOT EXISTS idx_dispatches_recipient
@@ -293,6 +329,14 @@ impl DispatchBus {
     }
 
     pub async fn send(&self, mail: Dispatch) {
+        // Idempotency check: if a key is set, drop duplicate dispatches.
+        if let Some(ref key) = mail.idempotency_key
+            && self.has_idempotency_key(key).await
+        {
+            debug!(key = %key, to = %mail.to, "dispatch dropped (idempotency key already exists)");
+            return;
+        }
+
         // Capture event data before mail is consumed by backend.
         let event_from = mail.from.clone();
         let event_to = mail.to.clone();
@@ -351,8 +395,9 @@ impl DispatchBus {
                 let _ = conn.execute(
                     "INSERT INTO dispatches (
                         from_agent, to_agent, kind_json, timestamp, is_read,
-                        dispatch_id, requires_ack, retry_count, max_retries, first_sent_at
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                        dispatch_id, requires_ack, retry_count, max_retries, first_sent_at,
+                        idempotency_key
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                     rusqlite::params![
                         mail.from,
                         mail.to,
@@ -364,6 +409,7 @@ impl DispatchBus {
                         mail.retry_count,
                         mail.max_retries,
                         mail.first_sent_at.to_rfc3339(),
+                        mail.idempotency_key,
                     ],
                 );
             }
@@ -478,6 +524,7 @@ impl DispatchBus {
                             retry_count,
                             max_retries,
                             first_sent_at,
+                            idempotency_key: None,
                         });
                         ids_to_mark.push(id);
                     }
@@ -806,6 +853,7 @@ impl DispatchBus {
                     retry_count,
                     max_retries,
                     first_sent_at,
+                    idempotency_key: None,
                 });
             }
         }
@@ -932,6 +980,7 @@ mod tests {
                 retry_count: 0,
                 max_retries: 3,
                 first_sent_at: old_ts,
+                idempotency_key: None,
             });
         }
 
@@ -1078,6 +1127,7 @@ mod tests {
             retry_count: 0,
             max_retries: 3,
             first_sent_at: Utc::now(),
+            idempotency_key: None,
         })
         .await;
 
@@ -1093,6 +1143,7 @@ mod tests {
             retry_count: 0,
             max_retries: 3,
             first_sent_at: old_ts,
+            idempotency_key: None,
         })
         .await;
 
@@ -1108,6 +1159,7 @@ mod tests {
             retry_count: 1,
             max_retries: 3,
             first_sent_at: old_ts,
+            idempotency_key: None,
         })
         .await;
 
@@ -1123,6 +1175,7 @@ mod tests {
             retry_count: 2,
             max_retries: 2,
             first_sent_at: old_ts,
+            idempotency_key: None,
         })
         .await;
 
@@ -1154,6 +1207,7 @@ mod tests {
             retry_count: 0,
             max_retries: 2,
             first_sent_at: old_ts,
+            idempotency_key: None,
         })
         .await;
 
@@ -1169,6 +1223,7 @@ mod tests {
             retry_count: 1,
             max_retries: 3,
             first_sent_at: old_ts,
+            idempotency_key: None,
         })
         .await;
 
@@ -1184,6 +1239,7 @@ mod tests {
             retry_count: 2,
             max_retries: 2,
             first_sent_at: old_ts,
+            idempotency_key: None,
         })
         .await;
 
