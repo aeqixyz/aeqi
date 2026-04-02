@@ -168,6 +168,9 @@ pub struct Task {
     /// Who is working on this task.
     #[serde(default)]
     pub assignee: Option<String>,
+    /// Persistent agent UUID that owns this task. None = legacy/unbound.
+    #[serde(default)]
+    pub agent_id: Option<String>,
     /// Task IDs that must be completed before this one can start.
     #[serde(default)]
     pub depends_on: Vec<TaskId>,
@@ -214,6 +217,7 @@ impl Task {
             status: TaskStatus::Pending,
             priority: Priority::Normal,
             assignee: None,
+            agent_id: None,
             depends_on: Vec::new(),
             blocks: Vec::new(),
             mission_id: None,

@@ -288,7 +288,13 @@ impl Daemon {
 
         match self
             .registry
-            .assign_with_skill(&project, &subject, &description, &trigger.skill)
+            .assign_with_skill_and_agent(
+                &project,
+                &subject,
+                &description,
+                &trigger.skill,
+                Some(&trigger.agent_id),
+            )
             .await
         {
             Ok(task) => {
@@ -516,8 +522,9 @@ impl Daemon {
                                 "Event trigger '{}' fired. Run skill '{}'.",
                                 trigger.name, trigger.skill
                             );
+                            let trigger_agent_id = trigger.agent_id.clone();
                             if let Err(e) = registry
-                                .assign_with_skill(&project, &subject, &desc, &trigger.skill)
+                                .assign_with_skill_and_agent(&project, &subject, &desc, &trigger.skill, Some(&trigger_agent_id))
                                 .await
                             {
                                 warn!(
@@ -1483,11 +1490,14 @@ impl Daemon {
                         .get("description")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
+                    let agent_id = request
+                        .get("agent_id")
+                        .and_then(|v| v.as_str());
 
                     if project.is_empty() || subject.is_empty() {
                         serde_json::json!({"ok": false, "error": "project and subject are required"})
                     } else {
-                        match registry.assign(project, subject, description).await {
+                        match registry.assign_with_agent(project, subject, description, agent_id).await {
                             Ok(task) => serde_json::json!({
                                 "ok": true,
                                 "task": {

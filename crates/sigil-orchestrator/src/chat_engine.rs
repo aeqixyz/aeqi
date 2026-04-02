@@ -354,7 +354,7 @@ impl ChatEngine {
             .await
             .ok_or_else(|| anyhow::anyhow!("project not found: {project_name}"))?;
 
-        let task = project.create_task(subject).await?;
+        let task = project.create_task(subject, None).await?;
         let mut store = project.tasks.lock().await;
         let task = store.update(&task.id.0, |entry| {
             if !description.is_empty() {

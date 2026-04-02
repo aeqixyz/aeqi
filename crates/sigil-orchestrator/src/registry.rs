@@ -124,12 +124,23 @@ impl ProjectRegistry {
         subject: &str,
         description: &str,
     ) -> Result<sigil_tasks::Task> {
+        self.assign_with_agent(project_name, subject, description, None)
+            .await
+    }
+
+    pub async fn assign_with_agent(
+        &self,
+        project_name: &str,
+        subject: &str,
+        description: &str,
+        agent_id: Option<&str>,
+    ) -> Result<sigil_tasks::Task> {
         let projects = self.projects.read().await;
         let project = projects
             .get(project_name)
             .ok_or_else(|| anyhow::anyhow!("project not found: {project_name}"))?;
 
-        let mut task = project.create_task(subject).await?;
+        let mut task = project.create_task(subject, agent_id).await?;
 
         if !description.is_empty() {
             let mut store = project.tasks.lock().await;
@@ -158,12 +169,25 @@ impl ProjectRegistry {
         description: &str,
         skill: &str,
     ) -> Result<sigil_tasks::Task> {
+        self.assign_with_skill_and_agent(project_name, subject, description, skill, None)
+            .await
+    }
+
+    /// Assign a task with a specific skill and optional agent binding.
+    pub async fn assign_with_skill_and_agent(
+        &self,
+        project_name: &str,
+        subject: &str,
+        description: &str,
+        skill: &str,
+        agent_id: Option<&str>,
+    ) -> Result<sigil_tasks::Task> {
         let projects = self.projects.read().await;
         let project = projects
             .get(project_name)
             .ok_or_else(|| anyhow::anyhow!("project not found: {project_name}"))?;
 
-        let mut task = project.create_task(subject).await?;
+        let mut task = project.create_task(subject, agent_id).await?;
 
         {
             let mut store = project.tasks.lock().await;

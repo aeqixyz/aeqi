@@ -129,11 +129,22 @@ impl TaskBoard {
 
     /// Create a new task with auto-generated ID.
     pub fn create(&mut self, prefix: &str, subject: &str) -> Result<Task> {
+        self.create_with_agent(prefix, subject, None)
+    }
+
+    /// Create a new task with auto-generated ID and optional agent binding.
+    pub fn create_with_agent(
+        &mut self,
+        prefix: &str,
+        subject: &str,
+        agent_id: Option<&str>,
+    ) -> Result<Task> {
         let seq = self.sequences.entry(prefix.to_string()).or_insert(0);
         *seq += 1;
         let id = TaskId::root(prefix, *seq);
 
-        let task = Task::new(id, subject);
+        let mut task = Task::new(id, subject);
+        task.agent_id = agent_id.map(|s| s.to_string());
         self.persist(&task)?;
         self.tasks.insert(task.id.0.clone(), task.clone());
 

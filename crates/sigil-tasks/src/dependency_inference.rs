@@ -177,6 +177,7 @@ mod tests {
             status: TaskStatus::Pending,
             priority: Priority::Normal,
             assignee: None,
+            agent_id: None,
             depends_on: vec![],
             blocks: vec![],
             mission_id: None,

@@ -62,9 +62,13 @@ impl Project {
     }
 
     /// Create a task in this project's store.
-    pub async fn create_task(&self, subject: &str) -> Result<sigil_tasks::Task> {
+    pub async fn create_task(
+        &self,
+        subject: &str,
+        agent_id: Option<&str>,
+    ) -> Result<sigil_tasks::Task> {
         let mut store = self.tasks.lock().await;
-        store.create(&self.prefix, subject)
+        store.create_with_agent(&self.prefix, subject, agent_id)
     }
 
     /// Get ready tasks for this project.
