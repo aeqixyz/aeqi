@@ -6,10 +6,10 @@ import AgentNav from "./Sidebar";
 const NAV_ITEMS = [
   { to: "/", label: "home", end: true },
   { to: "/sessions", label: "sessions" },
-  { to: "/issues", label: "issues" },
+  { to: "/issues", label: "tasks" },
   { to: "/automations", label: "automations" },
-  { to: "/knowledge", label: "knowledge" },
-  { to: "/finance", label: "finance" },
+  { to: "/knowledge", label: "memories" },
+  { to: "/finance", label: "financials" },
 ];
 
 export default function AppLayout() {
