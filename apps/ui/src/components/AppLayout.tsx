@@ -94,9 +94,10 @@ export default function AppLayout() {
                 </div>
               </>
             )}
-            <span className="floating-nav-btn" title="New">
+            <span className="floating-nav-btn" title="Notifications">
               <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M8 3v10M3 8h10" />
+                <path d="M4 6a4 4 0 0 1 8 0c0 3 1.5 4.5 2 5H2c.5-.5 2-2 2-5z" />
+                <path d="M6.5 13a1.5 1.5 0 0 0 3 0" />
               </svg>
             </span>
           </div>
