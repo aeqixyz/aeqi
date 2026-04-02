@@ -15,7 +15,7 @@ Sigil is a runtime for persistent AI agents -- not one-shot sessions that forget
 
 **Department** -- UUID-identified organizational unit with its own hierarchy. Has a name, project scope, manager (an agent), and parent department. Escalation follows the department chain. Blackboard visibility is department-scoped.
 
-**Task** -- always agent-bound. Every task has an `agent_id` that determines which agent executes it. Tasks are never free-floating -- they're created by triggers, delegation, or direct assignment.
+**Task** -- always agent-bound. Every task has an `agent_id` that determines which agent executes it. Tasks are never free-floating -- they're created by triggers, delegation, or direct assignment. Atomic checkout with `locked_by`/`locked_at` prevents concurrent execution. State transitions are validated.
 
 **Delegation** -- unified `delegate` tool for all inter-agent interaction. One tool replaces messaging, task assignment, subagent spawning, and department broadcasts.
 
@@ -23,7 +23,7 @@ Sigil is a runtime for persistent AI agents -- not one-shot sessions that forget
 
 Everything in Sigil flows through two primitives:
 
-**Triggers** define *when* -- a cron schedule (`0 9 * * *`), an interval (`every 1h`), a one-shot time, or a runtime event (task completed, dispatch received, department message).
+**Triggers** define *when* -- a cron schedule (`0 9 * * *`), an interval (`every 1h`), a one-shot time, a runtime event (task completed, dispatch received, department message), or an external **webhook** (`POST /api/webhooks/:public_id` with optional HMAC-SHA256 signing).
 
 **Skills** define *what* -- a TOML file with a system prompt and tool restrictions that gets loaded into the agent session when a trigger fires.
 
@@ -167,17 +167,17 @@ ASYNC TASK (trigger fires / delegation / dispatch)
 
 The daemon runs every 30 seconds:
 
-1. Spawn workers for agent-bound pending tasks
-2. Fire due triggers (bind to owning agent)
-3. Hot-reload config on SIGHUP
-4. Persist dispatch bus + cost ledger
-5. Retry unacked dispatches
-6. Update metrics
-7. Prune old cost entries
-8. Expire blackboard entries
-9. Flush debounced memory writes
+1. **Reap** -- each project pool reaps completed workers independently
+2. **Collect** -- gather ready tasks + running agent counts across ALL projects
+3. **Spawn** -- enforce per-agent `max_concurrent` globally, then per-project limits
+4. **Consume dispatches** -- read mail for all active agents, create tasks from delegations
+5. Fire due triggers (bind to owning agent)
+6. Hot-reload config on SIGHUP
+7. Persist dispatch bus + cost ledger
+8. Retry unacked dispatches, detect dead letters
+9. Update metrics, prune cost/blackboard entries, flush debounced memory writes
 
-Event triggers run separately via a background subscriber on the EventBroadcaster.
+Per-agent concurrency is enforced globally -- an agent with `max_concurrent=1` can't get 2 workers even if tasks exist in different projects. Event triggers run separately via a background subscriber on the EventBroadcaster.
 
 ### Middleware Chain
 
@@ -185,15 +185,38 @@ Every agent session runs through 9 safety layers:
 
 | Layer | What it does |
 |-------|-------------|
-| Loop Detection | Kill after 5 repeated identical tool calls |
-| Cost Tracking | Enforce per-task budget ceiling |
-| Context Budget | Cap enrichment at ~200 lines |
-| Graph Guardrails | Blast radius analysis on code changes |
 | Guardrails | Block `rm -rf`, force push, `DROP TABLE` |
+| Graph Guardrails | Blast radius analysis on code changes |
+| Loop Detection | Kill after 5 repeated identical tool calls |
+| Cost Tracking | Per-task + per-scope budget enforcement |
+| Context Budget | Cap enrichment at ~200 lines |
 | Context Compression | Compact at 50% context window |
 | Memory Refresh | Re-search memory every N tool calls |
 | Clarification | Structured questions, routes via department chain |
 | Safety Net | Preserve partial work on failure |
+
+## Budget Policies
+
+Per-scope budget enforcement with auto-pause:
+
+```sql
+-- scope_type: 'agent', 'project', 'global'
+-- window: 'daily', 'monthly', 'lifetime'
+budget_policies (scope_type, scope_id, window, amount_usd, warn_pct, hard_stop)
+```
+
+Cost tracking captures per-call token breakdown (input, output, cached) with model and provider attribution.
+
+## Approval Queue
+
+Human-in-the-loop governance. Agents can create approval requests that block execution until resolved:
+
+```
+GET  /api/approvals           -- list pending approvals
+POST /api/approvals/:id/resolve  -- approve or reject
+```
+
+Types: `permission`, `clarification`, `budget`. Integrates with the clarification middleware and department escalation chain.
 
 ## Quick Start
 
@@ -222,6 +245,7 @@ sigil web start                 # start the API + web UI
 sigil agent spawn template.md   # create a persistent agent from template
 sigil agent registry            # list all registered agents
 sigil trigger create ...        # create a trigger for an agent
+sigil trigger create --webhook  # create a webhook trigger (returns URL)
 sigil trigger list              # list all triggers
 sigil chat --agent shadow       # interactive TUI chat with an agent
 sigil assign -r myproject "do X" # create a task
@@ -260,7 +284,7 @@ system = """Your instructions here..."""
 | Crate | Purpose |
 |-------|---------|
 | `sigil-cli` | CLI binary, daemon process, TUI chat |
-| `sigil-orchestrator` | Workers, triggers, chat engine, dispatch, departments, blackboard, unified delegate, middleware |
+| `sigil-orchestrator` | Worker pools, triggers, chat engine, dispatch, departments, blackboard, unified delegate, middleware, approvals, budget policies |
 | `sigil-core` | Agent loop, config, identity, traits |
 | `sigil-web` | Axum REST API + WebSocket + SPA serving |
 | `sigil-memory` | SQLite+FTS5, vector search, hybrid ranking, query planning |
@@ -276,7 +300,7 @@ All state lives in `~/.sigil/`:
 
 | File | What |
 |------|------|
-| `agents.db` | Agent registry + departments + triggers |
+| `agents.db` | Agent registry + departments + triggers + budget policies + approvals |
 | `conversations.db` | Chat history + session transcripts (FTS5) |
 | `memory.db` | Entity, domain, and system memories |
 | `blackboard.db` | Department-scoped coordination entries |
@@ -289,7 +313,7 @@ All state lives in `~/.sigil/`:
 ## Development
 
 ```bash
-cargo test              # 659+ tests
+cargo test              # 634+ tests
 cargo clippy -- -D warnings
 cargo fmt --check
 ```
