@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useLocation, Link } from "react-router-dom";
+import ProjectRail from "./ProjectRail";
 import Sidebar from "./Sidebar";
 import CommandPalette from "./CommandPalette";
 import ContextPanel from "./ContextPanel";
@@ -40,7 +41,7 @@ function ResizeHandle() {
   return <div className="resize-handle" onMouseDown={handleMouseDown} />;
 }
 
-// ── Layout picker ──
+// ── Layout picker (floating) ──
 function LayoutPicker() {
   const layout = useUIStore((s) => s.layout);
   const setLayout = useUIStore((s) => s.setLayout);
@@ -79,51 +80,48 @@ function LayoutPicker() {
   );
 }
 
-// ── Breadcrumbs ──
-function Breadcrumbs() {
+// ── Floating top bar ──
+function FloatingTopBar() {
   const { pathname } = useLocation();
-  if (pathname === "/login") return null;
-  if (pathname === "/") return <ChatBreadcrumb />;
-
-  const segments = pathname.split("/").filter(Boolean);
-  const crumbs: { label: string; href: string }[] = [];
-  for (let i = 0; i < segments.length; i++) {
-    crumbs.push({ label: segments[i], href: "/" + segments.slice(0, i + 1).join("/") });
-  }
-
-  return (
-    <div className="topbar">
-      <Link to="/" className="breadcrumb-item">sigil</Link>
-      {crumbs.map((crumb, i) => (
-        <span key={crumb.href} className="breadcrumb-segment">
-          <span className="breadcrumb-sep">/</span>
-          {i === crumbs.length - 1 ? (
-            <span className="breadcrumb-current">{crumb.label}</span>
-          ) : (
-            <Link to={crumb.href} className="breadcrumb-item">{crumb.label}</Link>
-          )}
-        </span>
-      ))}
-      <div className="topbar-right">
-        <LayoutPicker />
-      </div>
-    </div>
-  );
-}
-
-function ChatBreadcrumb() {
   const channel = useChatStore((s) => s.channel);
+  const isChatHome = pathname === "/";
+
+  const segments = isChatHome
+    ? []
+    : pathname.split("/").filter(Boolean);
+
+  const label = isChatHome
+    ? (channel ? channel.split("/").pop() : "sigil")
+    : segments[segments.length - 1] || "sigil";
+
   return (
-    <div className="topbar">
-      <span className={channel ? "breadcrumb-item" : "breadcrumb-current"} style={{ cursor: "default" }}>sigil</span>
-      {channel && (
-        <span className="breadcrumb-segment">
-          <span className="breadcrumb-sep">/</span>
-          <span className="breadcrumb-current">{channel.includes("/") ? channel.split("/").pop() : channel}</span>
-        </span>
-      )}
-      <div className="topbar-right">
-        <LayoutPicker />
+    <div className="floating-topbar">
+      <div className="floating-topbar-inner">
+        <div className="floating-topbar-left">
+          {isChatHome ? (
+            <>
+              <span className="floating-topbar-hash">#</span>
+              <span className="floating-topbar-label">{label}</span>
+            </>
+          ) : (
+            <>
+              <Link to="/" className="floating-topbar-crumb">sigil</Link>
+              {segments.map((seg, i) => (
+                <span key={i} className="floating-topbar-crumb-seg">
+                  <span className="floating-topbar-sep">/</span>
+                  {i === segments.length - 1 ? (
+                    <span className="floating-topbar-label">{seg}</span>
+                  ) : (
+                    <Link to={"/" + segments.slice(0, i + 1).join("/")} className="floating-topbar-crumb">{seg}</Link>
+                  )}
+                </span>
+              ))}
+            </>
+          )}
+        </div>
+        <div className="floating-topbar-right">
+          <LayoutPicker />
+        </div>
       </div>
     </div>
   );
@@ -138,7 +136,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const splitRatio = useUIStore((s) => s.splitRatio);
   const isChatHome = pathname === "/";
 
-  const openPalette = useCallback(() => setPaletteOpen(true), []);
   const closePalette = useCallback(() => setPaletteOpen(false), []);
 
   useEffect(() => {
@@ -162,9 +159,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className={`app-shell ${collapsed ? "app-shell-collapsed" : ""}`}>
       <div className="app-layout">
-        <Sidebar onCommandPalette={openPalette} />
+        <ProjectRail />
+        <Sidebar onCommandPalette={() => setPaletteOpen(true)} />
         <div className={`main-wrapper ${isStack && isChatHome ? "main-wrapper-stack" : ""}`}>
-          <Breadcrumbs />
+          <FloatingTopBar />
           <div
             className={`main-panels ${isStack && isChatHome ? "main-panels-stack" : ""} ${isSplit ? "main-panels-split" : ""}`}
             style={panelStyle}

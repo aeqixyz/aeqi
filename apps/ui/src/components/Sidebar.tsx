@@ -2,8 +2,6 @@ import { Link, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useChatStore } from "@/store/chat";
 import { useUIStore } from "@/store/ui";
-import { useDaemonStore } from "@/store/daemon";
-import { useWebSocket } from "@/hooks/useWebSocket";
 import { api } from "@/lib/api";
 
 export default function Sidebar({ onCommandPalette }: { onCommandPalette: () => void }) {
@@ -12,31 +10,17 @@ export default function Sidebar({ onCommandPalette }: { onCommandPalette: () => 
   const setChannel = useChatStore((s) => s.setChannel);
   const collapsed = useUIStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
-  const status = useDaemonStore((s) => s.status);
-  const fetchStatus = useDaemonStore((s) => s.fetchStatus);
-  const [projects, setProjects] = useState<any[]>([]);
-  const [cost, setCost] = useState<any>(null);
-  const [activeTasks, setActiveTasks] = useState(0);
+  const [departments, setDepartments] = useState<any[]>([]);
 
   useEffect(() => {
-    fetchStatus();
-    api.getProjects().then((d) => setProjects(d.projects || [])).catch(() => {});
-    api.getCost().then(setCost).catch(() => {});
-    api.getTasks({ status: "in_progress" }).then((d) => setActiveTasks((d.tasks || []).length)).catch(() => {});
-    const interval = setInterval(() => {
-      fetchStatus();
-      api.getProjects().then((d) => setProjects(d.projects || [])).catch(() => {});
-      api.getCost().then(setCost).catch(() => {});
-      api.getTasks({ status: "in_progress" }).then((d) => setActiveTasks((d.tasks || []).length)).catch(() => {});
-    }, 15000);
-    return () => clearInterval(interval);
-  }, [fetchStatus]);
+    if (!channel) return;
+    api.getProjects().then((d) => {
+      const proj = (d.projects || []).find((p: any) => p.name === channel);
+      setDepartments(proj?.departments || []);
+    }).catch(() => {});
+  }, [channel]);
 
-  const { connected: wsConnected } = useWebSocket();
-  const daemonOk = status?.ok === true;
   const isChatHome = pathname === "/";
-  const spent = cost?.spent_today_usd ?? 0;
-  const budget = cost?.daily_budget_usd ?? 0;
 
   if (collapsed) {
     return (
@@ -44,7 +28,7 @@ export default function Sidebar({ onCommandPalette }: { onCommandPalette: () => 
         <div className="sidebar-top">
           <button className="sidebar-toggle" onClick={toggleSidebar} title="Expand (Cmd+B)">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M2 3.5h10M2 7h10M2 10.5h10" />
+              <path d="M5 3l4 4-4 4" />
             </svg>
           </button>
         </div>
@@ -63,68 +47,56 @@ export default function Sidebar({ onCommandPalette }: { onCommandPalette: () => 
             </Link>
           ))}
         </nav>
-        <div className="sidebar-bottom-collapsed">
-          <span className={`sidebar-dot ${daemonOk ? "sidebar-dot-ok" : "sidebar-dot-err"}`} />
-        </div>
       </aside>
     );
   }
 
   return (
     <aside className="sidebar">
-      {/* Header — same height as breadcrumbs and context panel tabs */}
+      {/* Header */}
       <div className="sidebar-top">
         <button className="sidebar-toggle" onClick={toggleSidebar} title="Collapse (Cmd+B)">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M2 3.5h10M2 7h10M2 10.5h10" />
+            <path d="M9 3l-4 4 4 4" />
           </svg>
         </button>
-        <Link to="/" className="sidebar-brand">sigil</Link>
+        <span className="sidebar-context-label">
+          {channel || "sigil"}
+        </span>
         <div className="sidebar-spacer" />
         <button className="sidebar-cmd" onClick={onCommandPalette} title="Cmd+K">
           <kbd>K</kbd>
         </button>
       </div>
 
-      {/* Chat channels */}
-      <div className="sidebar-channels">
-        <div
-          className={`channel-item ${isChatHome && channel === null ? "channel-item-active" : ""}`}
-          onClick={() => setChannel(null)}
-        >
-          <Link to="/" className="channel-link">
+      {/* Department channels (when a project is selected) */}
+      {channel && departments.length > 0 && (
+        <div className="sidebar-section">
+          <div className="sidebar-section-header">Channels</div>
+          <div
+            className={`channel-item ${isChatHome && !channel.includes("/") ? "channel-item-active" : ""}`}
+            onClick={() => setChannel(channel.split("/")[0])}
+          >
             <span className="channel-hash">#</span>
-            <span className="channel-name">sigil</span>
-          </Link>
-        </div>
-        {projects.map((p: any) => (
-          <div key={p.name}>
-            <div
-              className={`channel-item ${isChatHome && channel === p.name ? "channel-item-active" : ""}`}
-              onClick={() => setChannel(p.name)}
-            >
-              <Link to="/" className="channel-link">
-                <span className="channel-hash">#</span>
-                <span className="channel-name">{p.name}</span>
-                {(p.open_tasks || 0) > 0 && <span className="channel-count">{p.open_tasks}</span>}
-              </Link>
-            </div>
-            {(p.departments || []).map((d: any) => (
-              <div
-                key={`${p.name}/${d.name}`}
-                className={`channel-item channel-item-dept ${isChatHome && channel === `${p.name}/${d.name}` ? "channel-item-active" : ""}`}
-                onClick={() => setChannel(`${p.name}/${d.name}`)}
-              >
-                <Link to="/" className="channel-link">
-                  <span className="channel-name">{d.name}</span>
-                </Link>
-              </div>
-            ))}
+            <span className="channel-name">general</span>
           </div>
-        ))}
-      </div>
+          {departments.map((d: any) => {
+            const deptChannel = `${channel.split("/")[0]}/${d.name}`;
+            return (
+              <div
+                key={deptChannel}
+                className={`channel-item ${useChatStore.getState().channel === deptChannel ? "channel-item-active" : ""}`}
+                onClick={() => setChannel(deptChannel)}
+              >
+                <span className="channel-hash">#</span>
+                <span className="channel-name">{d.name}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
-      {/* Pages */}
+      {/* Navigation */}
       <div className="sidebar-nav">
         {NAV_ITEMS.map((item) => (
           <Link
@@ -138,10 +110,9 @@ export default function Sidebar({ onCommandPalette }: { onCommandPalette: () => 
         ))}
       </div>
 
-      {/* Footer — version */}
+      {/* Footer */}
       <div className="sidebar-bottom">
-        <span className={`sidebar-dot ${daemonOk ? "sidebar-dot-ok" : "sidebar-dot-err"}`} />
-        <span className="sidebar-version">v0.2.0</span>
+        <span className="sidebar-version">v0.3.0</span>
       </div>
     </aside>
   );
@@ -151,13 +122,13 @@ const COLLAPSED_ITEMS = [
   { href: "/", title: "Chat", icon: <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M2 2h10a1 1 0 011 1v6a1 1 0 01-1 1H5l-3 3V3a1 1 0 011-1z"/></svg> },
   { href: "/dashboard", title: "Dashboard", icon: <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="1" y="1" width="5" height="5" rx="1"/><rect x="8" y="1" width="5" height="5" rx="1"/><rect x="1" y="8" width="5" height="5" rx="1"/><rect x="8" y="8" width="5" height="5" rx="1"/></svg> },
   { href: "/tasks", title: "Tasks", icon: <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M2 3h10M2 7h10M2 11h6"/></svg> },
-  { href: "/projects", title: "Projects", icon: <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M2 4l5-2 5 2v6l-5 2-5-2V4z"/><path d="M2 4l5 2 5-2"/><path d="M7 6v6"/></svg> },
   { href: "/agents", title: "Agents", icon: <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="2" y="1" width="10" height="8" rx="2"/><circle cx="5" cy="5" r="1"/><circle cx="9" cy="5" r="1"/><path d="M4 12h6"/><path d="M7 9v3"/></svg> },
   { href: "/knowledge", title: "Knowledge", icon: <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M2 2h4l1 1h5v9H2V2z"/></svg> },
   { href: "/settings", title: "Settings", icon: <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="7" cy="7" r="2"/><path d="M7 1v2M7 11v2M1 7h2M11 7h2M2.8 2.8l1.4 1.4M9.8 9.8l1.4 1.4M2.8 11.2l1.4-1.4M9.8 4.2l1.4-1.4"/></svg> },
 ];
 
 const NAV_ITEMS = [
+  { href: "/", label: "Chat", icon: "chat" },
   { href: "/dashboard", label: "Dashboard", icon: "grid" },
   { href: "/projects", label: "Projects", icon: "box" },
   { href: "/agents", label: "Agents", icon: "bot" },
@@ -171,6 +142,7 @@ const NAV_ITEMS = [
 
 function NavIcon({ name }: { name: string }) {
   const icons: Record<string, React.ReactNode> = {
+    chat: <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M2 2h10a1 1 0 011 1v6a1 1 0 01-1 1H5l-3 3V3a1 1 0 011-1z"/></svg>,
     grid: <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="1" y="1" width="5" height="5" rx="1"/><rect x="8" y="1" width="5" height="5" rx="1"/><rect x="1" y="8" width="5" height="5" rx="1"/><rect x="8" y="8" width="5" height="5" rx="1"/></svg>,
     box: <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M2 4l5-2 5 2v6l-5 2-5-2V4z"/><path d="M2 4l5 2 5-2"/><path d="M7 6v6"/></svg>,
     bot: <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="2" y="1" width="10" height="8" rx="2"/><circle cx="5" cy="5" r="1"/><circle cx="9" cy="5" r="1"/><path d="M4 12h6"/><path d="M7 9v3"/></svg>,
