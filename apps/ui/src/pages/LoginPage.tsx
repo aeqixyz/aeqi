@@ -16,9 +16,6 @@ export default function LoginPage() {
   return (
     <div className="login-page">
       <div className="login-card">
-        <div className="login-mark">
-          <span className="login-mark-text">A</span>
-        </div>
         <h1 className="login-title">AEQI</h1>
         <p className="login-subtitle">Agent Orchestration</p>
         <form className="login-form" onSubmit={handleSubmit}>
@@ -32,11 +29,11 @@ export default function LoginPage() {
           />
           {error && <div className="login-error">{error}</div>}
           <button className="btn btn-primary" type="submit" disabled={loading}>
-            {loading ? "Connecting..." : "Enter System"}
+            {loading ? "Connecting..." : "Enter"}
           </button>
         </form>
-        <p className="login-hint">
-          Enter your instance access key to connect.
+        <p className="login-footer">
+          Self-hosted instance. Enter your configured access key.
         </p>
       </div>
     </div>

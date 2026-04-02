@@ -1945,57 +1945,30 @@ a:hover {
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-.login-mark {
-  width: 48px;
-  height: 48px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto var(--space-6);
-  animation: login-icon-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both;
-}
-
-.login-mark-text {
-  font-family: var(--font-sans);
-  font-size: 1rem;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.7);
-  letter-spacing: 0.05em;
-}
-
-@keyframes login-icon-in {
-  from { opacity: 0; transform: scale(0.8); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-.login-hint {
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  text-align: center;
-  margin-top: var(--space-5);
-  opacity: 0.5;
-}
-
 .login-title {
   font-family: var(--font-sans);
-  font-size: 1.1rem;
+  font-size: 1.25rem;
   font-weight: 500;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
   text-align: center;
-  letter-spacing: 0.15em;
-  color: rgba(255, 255, 255, 0.8);
+  letter-spacing: 0.2em;
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .login-subtitle {
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
+  font-size: 0.8125rem;
+  color: rgba(255, 255, 255, 0.3);
   text-align: center;
-  margin-bottom: var(--space-6);
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
+  margin-bottom: 2rem;
+  letter-spacing: 0.08em;
+}
+
+.login-footer {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.2);
+  text-align: center;
+  margin-top: 1.5rem;
+  line-height: 1.5;
 }
 
 .login-form {
@@ -2006,24 +1979,25 @@ a:hover {
 
 .login-input {
   width: 100%;
-  padding: var(--space-3) var(--space-4);
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 0.75rem 1rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 2px;
-  color: var(--text-primary);
+  color: rgba(255, 255, 255, 0.9);
   font-family: var(--font-mono);
-  font-size: var(--font-size-sm);
-  transition: all var(--transition-smooth);
+  font-size: 0.875rem;
+  transition: border-color 0.2s ease;
   text-align: center;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.1em;
 }
 
 .login-input:focus {
   outline: none;
-  border-color: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .login-input::placeholder {
+  color: rgba(255, 255, 255, 0.2);
   letter-spacing: 0.05em;
 }
 
