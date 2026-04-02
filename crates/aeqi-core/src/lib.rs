@@ -24,8 +24,8 @@ pub use agent::{
 pub use chat_stream::{ChatStreamEvent, ChatStreamSender};
 pub use config::{
     AEQIConfig, AgentPromptConfig, AgentTriggerConfig, ContextBudgetConfig, ExecutionMode,
-    ModelTierConfig, PeerAgentConfig, ProjectConfig, ProviderKind, RuntimePresetConfig,
-    TeamConfig, discover_agents, load_agent_config,
+    ModelTierConfig, PeerAgentConfig, ProjectConfig, ProviderKind, RuntimePresetConfig, TeamConfig,
+    discover_agents, load_agent_config,
 };
 pub use identity::Identity;
 pub use security::SecretStore;

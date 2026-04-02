@@ -523,14 +523,7 @@ impl ProjectRegistry {
                     .iter()
                     .filter(|t| t.status == aeqi_tasks::task::TaskStatus::Cancelled)
                     .count() as u32;
-                (
-                    open,
-                    total,
-                    pending,
-                    in_progress,
-                    done,
-                    cancelled,
-                )
+                (open, total, pending, in_progress, done, cancelled)
             } else {
                 // Lock held by patrol — return stale/zero data rather than blocking.
                 (0, 0, 0, 0, 0, 0)

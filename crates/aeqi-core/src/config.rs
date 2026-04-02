@@ -782,7 +782,6 @@ pub struct DepartmentConfig {
     pub description: Option<String>,
 }
 
-
 fn default_max_workers() -> u32 {
     2
 }

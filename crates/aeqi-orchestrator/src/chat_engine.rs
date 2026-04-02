@@ -925,11 +925,7 @@ impl ChatEngine {
             if let Some(s) = project_summaries.first() {
                 context.push_str(&format!(
                     "{}: {} open tasks ({} pending, {} in progress, {} done)\n",
-                    s.name,
-                    s.open_tasks,
-                    s.pending_tasks,
-                    s.in_progress_tasks,
-                    s.done_tasks
+                    s.name, s.open_tasks, s.pending_tasks, s.in_progress_tasks, s.done_tasks
                 ));
                 if !s.departments.is_empty() {
                     context.push_str("Departments:\n");
