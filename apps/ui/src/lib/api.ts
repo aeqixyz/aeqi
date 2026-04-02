@@ -104,7 +104,7 @@ export const api = {
   },
 
   // Agents
-  getAgents: () => request<any>("/agents"),
+  getAgents: () => request<any>("/agents/registry"),
 
   // Audit
   getAudit: (params?: { last?: number; project?: string }) => {
