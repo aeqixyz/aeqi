@@ -1,8 +1,18 @@
-import { Fragment, useState, useEffect, useCallback } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import { useState, useEffect, useCallback } from "react";
+import { Outlet, useLocation, useNavigate, NavLink } from "react-router-dom";
 import ProjectRail from "./ProjectRail";
-import SecondaryNav from "./Sidebar";
+import AgentNav from "./Sidebar";
 import CommandPalette from "./CommandPalette";
+
+const NAV_ITEMS = [
+  { to: "/", label: "Chat", end: true },
+  { to: "/tasks", label: "Tasks" },
+  { to: "/memory", label: "Memory" },
+  { to: "/skills", label: "Skills" },
+  { to: "/triggers", label: "Triggers" },
+  { to: "/audit", label: "Audit" },
+  { to: "/cost", label: "Cost" },
+];
 
 export default function AppLayout() {
   const location = useLocation();
@@ -20,37 +30,39 @@ export default function AppLayout() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // Derive breadcrumb from path
-  const segments = location.pathname.split("/").filter(Boolean);
-
   return (
     <div className="shell">
       <ProjectRail />
-      <SecondaryNav />
+      <AgentNav />
       <div className="content-area">
-        <div className="topbar">
-          <div className="topbar-breadcrumb">
-            {segments.length === 0 ? (
-              <span>Chat</span>
-            ) : (
-              segments.map((s, i) => (
-                <Fragment key={i}>
-                  {i > 0 && <span className="topbar-breadcrumb-sep">/</span>}
-                  <span>{decodeURIComponent(s).charAt(0).toUpperCase() + decodeURIComponent(s).slice(1)}</span>
-                </Fragment>
-              ))
-            )}
-          </div>
-          <div className="topbar-actions">
-            <span
-              className="topbar-kbd"
-              onClick={() => setPaletteOpen(true)}
-            >
-              ⌘K
-            </span>
-          </div>
-        </div>
         <div className="content-scroll">
+          {/* Floating nav bar */}
+          <div className="floating-nav">
+            <div className="floating-nav-items">
+              {NAV_ITEMS.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  className={({ isActive }) =>
+                    `floating-nav-item${isActive ? " active" : ""}`
+                  }
+                >
+                  {item.label}
+                </NavLink>
+              ))}
+            </div>
+            <div className="floating-nav-actions">
+              <span
+                className="floating-nav-kbd"
+                onClick={() => setPaletteOpen(true)}
+              >
+                ⌘K
+              </span>
+            </div>
+          </div>
+
+          {/* Page content */}
           <Outlet />
         </div>
       </div>

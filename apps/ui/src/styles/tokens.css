@@ -437,60 +437,104 @@ a:hover {
   overflow: hidden;
 }
 
-/* ── Floating Breadcrumb Bar ── */
-.topbar {
-  height: 40px;
-  background: rgba(10,10,10,0.8);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(255,255,255,0.04);
+/* ── Floating Nav Bar (inside content scroll) ── */
+.floating-nav {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
-  flex-shrink: 0;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.04);
+  border-radius: 8px;
+  padding: 4px 6px;
+  margin-bottom: 24px;
+  position: sticky;
+  top: 0;
   z-index: 10;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
-.topbar-breadcrumb {
+.floating-nav-items {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
+}
+
+.floating-nav-item {
   font-size: 13px;
+  color: rgba(255,255,255,0.35);
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  text-decoration: none;
+  white-space: nowrap;
 }
 
-.topbar-breadcrumb span {
-  color: rgba(255,255,255,0.3);
+.floating-nav-item:hover {
+  color: rgba(255,255,255,0.6);
+  background: rgba(255,255,255,0.03);
 }
 
-.topbar-breadcrumb span:last-child {
-  color: rgba(255,255,255,0.7);
+.floating-nav-item.active {
+  color: rgba(255,255,255,0.85);
+  background: rgba(255,255,255,0.06);
 }
 
-.topbar-breadcrumb-sep {
-  color: rgba(255,255,255,0.15);
-  font-size: 11px;
-}
-
-.topbar-actions {
+.floating-nav-actions {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding-right: 4px;
 }
 
-.topbar-kbd {
+.floating-nav-kbd {
   font-size: 11px;
   font-family: var(--font-mono);
   color: rgba(255,255,255,0.2);
-  border: 1px solid rgba(255,255,255,0.08);
-  padding: 2px 6px;
+  border: 1px solid rgba(255,255,255,0.06);
+  padding: 2px 8px;
   border-radius: 4px;
   cursor: pointer;
 }
 
-.topbar-kbd:hover {
-  border-color: rgba(255,255,255,0.15);
+.floating-nav-kbd:hover {
+  border-color: rgba(255,255,255,0.12);
   color: rgba(255,255,255,0.4);
+}
+
+/* ── Agent nav extras ── */
+.nav-agent-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.15);
+  flex-shrink: 0;
+}
+
+.nav-item.active .nav-agent-dot {
+  background: rgba(255,255,255,0.5);
+}
+
+.nav-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 10px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: rgba(255,255,255,0.15);
+  background: none;
+  border: 1px dashed rgba(255,255,255,0.06);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  font-family: var(--font-sans);
+}
+
+.nav-add:hover {
+  color: rgba(255,255,255,0.35);
+  border-color: rgba(255,255,255,0.12);
 }
 
 .content-scroll {
