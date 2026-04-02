@@ -2620,10 +2620,7 @@ impl Daemon {
                             match template_content {
                                 Some(content) => {
                                     let project = request.get("project").and_then(|v| v.as_str());
-                                    match reg
-                                        .spawn_from_template(&content, project)
-                                        .await
-                                    {
+                                    match reg.spawn_from_template(&content, project).await {
                                         Ok(agent) => serde_json::json!({
                                             "ok": true,
                                             "agent": {

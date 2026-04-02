@@ -1112,27 +1112,11 @@ mod tests {
     async fn duplicate_names_allowed() {
         let reg = test_registry().await;
         let agent1 = reg
-            .spawn(
-                "shadow",
-                None,
-                "shadow",
-                "First shadow.",
-                None,
-                None,
-                &[],
-            )
+            .spawn("shadow", None, "shadow", "First shadow.", None, None, &[])
             .await
             .unwrap();
         let agent2 = reg
-            .spawn(
-                "shadow",
-                None,
-                "shadow",
-                "Second shadow.",
-                None,
-                None,
-                &[],
-            )
+            .spawn("shadow", None, "shadow", "Second shadow.", None, None, &[])
             .await
             .unwrap();
         // Same name, different UUIDs.
@@ -1321,39 +1305,15 @@ You are a monitoring agent.
             .unwrap();
 
         let a1 = reg
-            .spawn(
-                "eng1",
-                None,
-                "t",
-                "Eng1.",
-                Some("sigil"),
-                None,
-                &[],
-            )
+            .spawn("eng1", None, "t", "Eng1.", Some("sigil"), None, &[])
             .await
             .unwrap();
         let a2 = reg
-            .spawn(
-                "eng2",
-                None,
-                "t",
-                "Eng2.",
-                Some("sigil"),
-                None,
-                &[],
-            )
+            .spawn("eng2", None, "t", "Eng2.", Some("sigil"), None, &[])
             .await
             .unwrap();
         let a3 = reg
-            .spawn(
-                "designer",
-                None,
-                "t",
-                "Des.",
-                Some("sigil"),
-                None,
-                &[],
-            )
+            .spawn("designer", None, "t", "Des.", Some("sigil"), None, &[])
             .await
             .unwrap();
 

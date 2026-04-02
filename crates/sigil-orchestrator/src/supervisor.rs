@@ -1069,7 +1069,10 @@ impl Supervisor {
                                         DispatchKind::DelegateResponse {
                                             reply_to: task_id_clone.clone(),
                                             response_mode: "origin".to_string(),
-                                            content: format!("Task {} completed: {}", task_id_clone, summary),
+                                            content: format!(
+                                                "Task {} completed: {}",
+                                                task_id_clone, summary
+                                            ),
                                         },
                                     ))
                                     .await;
@@ -1248,7 +1251,10 @@ impl Supervisor {
                                         &format!("supervisor-{project_name_task}"),
                                         &outcome_recipient,
                                         DispatchKind::DelegateRequest {
-                                            prompt: format!("Task {} blocked: {}\n\nContext:\n{}", task_id_clone, question, full_text),
+                                            prompt: format!(
+                                                "Task {} blocked: {}\n\nContext:\n{}",
+                                                task_id_clone, question, full_text
+                                            ),
                                             response_mode: "origin".to_string(),
                                             create_task: false,
                                             skill: None,
@@ -1263,7 +1269,10 @@ impl Supervisor {
                                         &format!("supervisor-{project_name_task}"),
                                         &outcome_recipient,
                                         DispatchKind::DelegateRequest {
-                                            prompt: format!("Task {} failed: {}", task_id_clone, error),
+                                            prompt: format!(
+                                                "Task {} failed: {}",
+                                                task_id_clone, error
+                                            ),
                                             response_mode: "none".to_string(),
                                             create_task: false,
                                             skill: None,

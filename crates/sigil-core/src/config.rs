@@ -1037,8 +1037,6 @@ impl SigilConfig {
             ));
         }
 
-
-
         errors
     }
 

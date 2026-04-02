@@ -940,7 +940,10 @@ mod tests {
 
         let msgs = bus.read("b").await;
         assert_eq!(msgs.len(), 1);
-        assert!(matches!(&msgs[0].kind, DispatchKind::DelegateRequest { .. }));
+        assert!(matches!(
+            &msgs[0].kind,
+            DispatchKind::DelegateRequest { .. }
+        ));
     }
 
     #[tokio::test]
@@ -997,8 +1000,7 @@ mod tests {
     #[tokio::test]
     async fn test_ack_required_dispatch() {
         let bus = DispatchBus::new();
-        let dispatch =
-            Dispatch::new_typed("a", "b", test_delegate_request()).with_ack_required();
+        let dispatch = Dispatch::new_typed("a", "b", test_delegate_request()).with_ack_required();
         let dispatch_id = dispatch.id.clone();
         assert!(dispatch.requires_ack);
         bus.send(dispatch).await;
@@ -1044,8 +1046,7 @@ mod tests {
     #[tokio::test]
     async fn test_ack_prevents_retry() {
         let bus = DispatchBus::new();
-        let dispatch =
-            Dispatch::new_typed("a", "b", test_delegate_request()).with_ack_required();
+        let dispatch = Dispatch::new_typed("a", "b", test_delegate_request()).with_ack_required();
         let id = dispatch.id.clone();
         bus.send(dispatch).await;
         let delivered = bus.read("b").await;
@@ -1200,8 +1201,7 @@ mod tests {
         let path = dir.path().join("dispatches.jsonl");
 
         let bus = DispatchBus::with_persistence(path);
-        let dispatch =
-            Dispatch::new_typed("a", "b", test_delegate_request()).with_ack_required();
+        let dispatch = Dispatch::new_typed("a", "b", test_delegate_request()).with_ack_required();
         let id = dispatch.id.clone();
         bus.send(dispatch).await;
 
@@ -1217,14 +1217,8 @@ mod tests {
 
     #[test]
     fn test_critical_dispatches_require_ack_by_default() {
-        assert!(
-            Dispatch::new_typed("a", "leader", test_delegate_request(),).requires_ack
-        );
-        assert!(
-            !Dispatch::new_typed("a", "leader", test_delegate_response(),).requires_ack
-        );
-        assert!(
-            !Dispatch::new_typed("a", "leader", test_human_escalation(),).requires_ack
-        );
+        assert!(Dispatch::new_typed("a", "leader", test_delegate_request(),).requires_ack);
+        assert!(!Dispatch::new_typed("a", "leader", test_delegate_response(),).requires_ack);
+        assert!(!Dispatch::new_typed("a", "leader", test_human_escalation(),).requires_ack);
     }
 }

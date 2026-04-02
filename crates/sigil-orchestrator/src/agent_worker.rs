@@ -1628,12 +1628,8 @@ fn truncate_for_prompt(text: &str, max_chars: usize) -> String {
 
 fn is_relevant_dispatch(dispatch: &Dispatch, project: &str, task_id: &str) -> bool {
     match &dispatch.kind {
-        DispatchKind::DelegateRequest { reply_to, .. } => {
-            reply_to.as_deref() == Some(task_id)
-        }
-        DispatchKind::DelegateResponse { reply_to, .. } => {
-            reply_to == task_id
-        }
+        DispatchKind::DelegateRequest { reply_to, .. } => reply_to.as_deref() == Some(task_id),
+        DispatchKind::DelegateResponse { reply_to, .. } => reply_to == task_id,
         DispatchKind::HumanEscalation {
             project: dispatch_project,
             task_id: id,
