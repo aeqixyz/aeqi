@@ -365,64 +365,43 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                     // ── Primer ──
                     "aeqi_primer" => {
                         let project = args.get("project").and_then(|v| v.as_str()).unwrap_or("");
-                        let project_dir = base_dir.join("projects").join(project);
-                        let aeqi_md = project_dir.join("AEQI.md");
-                        let mut content = if aeqi_md.exists() {
-                            std::fs::read_to_string(&aeqi_md).unwrap_or_default()
+
+                        // Config is the source of truth for primers.
+                        let project_primer = if project == "shared" {
+                            config.shared_primer.clone().unwrap_or_default()
                         } else {
-                            let mut parts = Vec::new();
-                            let knowledge = project_dir.join("KNOWLEDGE.md");
-                            if knowledge.exists() {
-                                parts.push(std::fs::read_to_string(&knowledge).unwrap_or_default());
-                            }
-                            let agents_md = project_dir.join("AGENTS.md");
-                            if agents_md.exists() {
-                                parts.push(std::fs::read_to_string(&agents_md).unwrap_or_default());
-                            }
-                            parts.join("\n\n---\n\n")
+                            config
+                                .projects
+                                .iter()
+                                .find(|p| p.name == project)
+                                .and_then(|p| p.primer.clone())
+                                .unwrap_or_default()
                         };
 
-                        // Also check the project config for a `primer` field.
-                        if let Some(cfg_primer) = config
-                            .projects
-                            .iter()
-                            .find(|p| p.name == project)
-                            .and_then(|p| p.primer.as_deref())
-                        {
-                            if content.is_empty() {
-                                content = cfg_primer.to_string();
-                            } else {
-                                content =
-                                    format!("{content}\n\n---\n\n## Config Primer\n{cfg_primer}");
-                            }
+                        let shared_primer = if project != "shared" {
+                            config.shared_primer.clone().unwrap_or_default()
+                        } else {
+                            String::new()
+                        };
+
+                        let mut parts = Vec::new();
+                        if !shared_primer.is_empty() {
+                            parts.push(shared_primer);
+                        }
+                        if !project_primer.is_empty() {
+                            parts.push(project_primer);
                         }
 
-                        if content.is_empty() {
+                        if parts.is_empty() {
                             Ok(
                                 serde_json::json!({"ok": false, "error": format!("no primer found for project '{project}'")}),
                             )
                         } else {
-                            // Prepend shared primer from top-level config.
-                            let mut shared = String::new();
-                            if let Some(ref shared_primer) = config.shared_primer {
-                                shared.push_str("\n\n---\n\n");
-                                shared.push_str(shared_primer);
-                            }
-                            // Append shared AEQI.md from disk.
-                            if project != "shared" {
-                                let shared_aeqi =
-                                    base_dir.join("projects").join("shared").join("AEQI.md");
-                                if shared_aeqi.exists() {
-                                    shared.push_str(&format!(
-                                        "\n\n---\n\n{}",
-                                        std::fs::read_to_string(&shared_aeqi).unwrap_or_default()
-                                    ));
-                                }
-                            }
+                            let content = parts.join("\n\n---\n\n");
                             Ok(serde_json::json!({
                                 "ok": true,
                                 "project": project,
-                                "content": format!("{content}{shared}")
+                                "content": content,
                             }))
                         }
                     }

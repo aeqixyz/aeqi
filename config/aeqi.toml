@@ -2,6 +2,54 @@
 name = "emperor-system"
 data_dir = "~/.sigil"
 
+shared_primer = """
+# AEQI
+
+## For Every Task
+
+1. `aeqi_recall(project, query)` — gate-enforced before any edit
+2. Load a workflow skill from the list below — it contains all steps including task creation
+3. Follow the loaded workflow step by step
+
+Trivial fixes (typos, one-line config): `aeqi_recall` → edit → `aeqi_remember` → done.
+
+## Tools
+
+| Tool | Purpose |
+|------|---------|
+| `aeqi_recall(project, query)` | Search institutional memory |
+| `aeqi_remember(project, key, content, category)` | Store learnings |
+| `aeqi_skills(action, name)` | Load domain knowledge and workflows |
+| `aeqi_graph(action, project, ...)` | Code structure: search, context, impact, file |
+| `aeqi_delegate(agent, project, task_id)` | One-call agent delegation (returns prompt for subagent) |
+| `aeqi_blackboard(action, project, ...)` | Coordination: post findings, claim files, read context |
+| `aeqi_create_task(project, subject)` | Track work |
+| `aeqi_close_task(task_id)` | Close task (triggers integration check) |
+| `aeqi_agents(action, phase)` | Browse available agents by phase |
+
+## Delegation Rules (MANDATORY)
+
+When spawning subagents for research, review, implementation, or any focused work:
+
+1. **Use `aeqi_delegate`** to get the proper agent template — never spawn a raw Agent with an inline prompt
+2. **Subagents MUST post findings to blackboard** — `aeqi_blackboard(action="post", key="task:{id}:{phase}", ...)`
+3. **Read blackboard after delegation** — `aeqi_blackboard(action="query", project)` to get subagent findings
+4. **Use phase-appropriate agents** — `aeqi_agents(action="list", phase="discover")` to see available templates
+
+Do NOT spawn anonymous agents with ad-hoc prompts. The templates include blackboard posting instructions, phase-specific skills, and proper tool scoping.
+
+## Rules
+
+- No comments except `///` on public APIs.
+- No backward compat hacks. Change everywhere or don't.
+- Same concept = same name everywhere.
+- DRY. Extract at two, refactor at three.
+- Schema = source of truth.
+- Worktrees only. Never edit dev/master.
+- No secrets in git.
+- Full autonomy. BLOCKED = missing credential, unresolvable failure, or competing paths needing human choice. Nothing else.
+"""
+
 [web]
 enabled = true
 bind = "0.0.0.0:8400"
@@ -29,10 +77,6 @@ mmr_lambda = 0.7
 chunk_size_tokens = 400
 chunk_overlap_tokens = 80
 
-# Shared primer injected into ALL agents regardless of project.
-# shared_primer = "Global context that every agent should know."
-
-# Global repo pool — all agents can access all repos
 [repos]
 aeqi = "/home/claudedev/aeqi"
 aeqi-ui = "/home/claudedev/aeqi/apps/ui"
@@ -46,7 +90,6 @@ aeqi-app = "/home/claudedev/aeqi-app"
 aeqi-graph = "/home/claudedev/aeqi-graph"
 unifutures = "/home/claudedev/unifutures"
 
-# System team — Rei at the helm
 [team]
 leader = "shadow"
 agents = ["shadow"]
@@ -54,15 +97,11 @@ router_model = "stepfun/step-3.5-flash:free"
 router_cooldown_secs = 60
 max_background_cost_usd = 0.0
 
-# Agents discovered from agents/{name}/agent.toml files on disk.
-# Active: shadow, engineer, trader, designer, researcher, reviewer
-
 [channels.telegram]
 token_secret = "TELEGRAM_BOT_TOKEN"
 allowed_chats = [-5229229023]
 debounce_window_ms = 3000
 
-# Orchestration tuning — v3 feature activation
 [orchestrator]
 background_automation_enabled = false
 expertise_routing = true
@@ -75,8 +114,8 @@ infer_deps_threshold = 0.6
 blackboard_transient_ttl_hours = 48
 blackboard_durable_ttl_days = 14
 
-# Projects — each is a product you're building
-# AEQI manages itself — dogfooding is how we make it great
+# ── Projects ──
+
 [[projects]]
 name = "aeqi"
 prefix = "sg"
@@ -87,10 +126,17 @@ worktree_root = "/home/claudedev/worktrees"
 execution_mode = "agent"
 max_turns = 25
 worker_timeout_secs = 3600
-# primer = """
-# AEQI is a persistent agent orchestration platform built in Rust.
-# All agents receive this brief when working on the project.
-# """
+primer = """
+AEQI — Agent runtime, orchestration engine, and web control plane in Rust. 10 crates, 634+ tests.
+
+Crates: aeqi-cli (CLI/MCP), aeqi-core (agent loop, config, identity), aeqi-orchestrator (daemon, worker pools, middleware, departments, blackboard, dispatch), aeqi-web (Axum REST+WS), aeqi-tasks (task DAG, missions), aeqi-memory (SQLite+FTS5, vector search), aeqi-providers (OpenRouter, Anthropic, Ollama), aeqi-tools (shell, file, git, delegate, skills), aeqi-gates (Telegram, Discord, Slack), aeqi-graph (code intelligence).
+
+4 primitives: Agent (persistent identity with UUID, entity memory, department), Department (org hierarchy, escalation chains), Task (agent-bound, atomic checkout), Delegation (unified delegate tool, 5 response modes).
+
+Middleware chain: 9 layers (guardrails, graph guardrails, loop detection, context compression, context budget, cost tracking, memory refresh, clarification, safety net).
+
+Runtime: daemon patrol loop every 30s. Centralized per-agent spawning with global max_concurrent. Dispatch bus with ACK/retry. Budget policies per scope. Approval queue. Webhook triggers with HMAC signing.
+"""
 team.leader = "engineer"
 team.agents = ["engineer", "reviewer"]
 
@@ -106,7 +152,6 @@ lead = "designer"
 agents = ["designer"]
 description = "Web dashboard, UX, landing page"
 
-# HFT trading engine — the money machine
 [[projects]]
 name = "algostaking"
 prefix = "as"
@@ -138,19 +183,6 @@ lead = "researcher"
 agents = ["researcher"]
 description = "Model evaluation, feature research, backtesting"
 
-# aeqi platform
-[[projects]]
-name = "aeqi"
-prefix = "aq"
-repo = "/home/claudedev/aeqi-core"
-model = "stepfun/step-3.5-flash:free"
-max_workers = 2
-execution_mode = "agent"
-worker_timeout_secs = 1800
-team.leader = "engineer"
-team.agents = ["engineer", "designer"]
-
-# E-commerce
 [[projects]]
 name = "riftdecks-shop"
 prefix = "rd"
@@ -162,7 +194,6 @@ worker_timeout_secs = 1800
 team.leader = "designer"
 team.agents = ["designer"]
 
-# Legal platform
 [[projects]]
 name = "entity-legal"
 prefix = "el"
@@ -174,19 +205,6 @@ worker_timeout_secs = 1800
 team.leader = "designer"
 team.agents = ["designer"]
 
-# AEQI web dashboard
-[[projects]]
-name = "aeqi-ui"
-prefix = "su"
-repo = "/home/claudedev/aeqi-ui"
-model = "stepfun/step-3.5-flash:free"
-max_workers = 1
-execution_mode = "agent"
-worker_timeout_secs = 1800
-team.leader = "designer"
-team.agents = ["designer"]
-
-# Futures exchange
 [[projects]]
 name = "unifutures"
 prefix = "uf"
