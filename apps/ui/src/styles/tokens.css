@@ -645,18 +645,23 @@ a:hover {
 .floating-nav-search {
   flex: 1;
   height: 32px;
-  background: none;
-  border: none;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 8px;
   outline: none;
   color: rgba(255,255,255,0.85);
   font-family: var(--font-mono);
   font-size: 13px;
-  padding: 0 8px;
+  padding: 0 12px;
   letter-spacing: 0.01em;
 }
 
 .floating-nav-search::placeholder {
   color: rgba(255,255,255,0.2);
+}
+
+.floating-nav-search:focus {
+  border-color: rgba(255,255,255,0.4);
 }
 
 
