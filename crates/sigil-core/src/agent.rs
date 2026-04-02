@@ -83,6 +83,10 @@ const FALLBACK_TRIGGER_COUNT: u32 = 3;
 /// Preview size for persisted tool results (bytes).
 const PERSIST_PREVIEW_SIZE: usize = 2000;
 
+/// Re-inject key instructions every N iterations to combat lost-in-middle
+/// attention fade. Research shows middle-position recall drops 10-40%.
+const INSTRUCTION_REINJECT_INTERVAL: u32 = 10;
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
@@ -1441,6 +1445,32 @@ impl Agent {
                         self.config.max_iterations
                     ));
                 }
+            }
+
+            // --- Periodic instruction re-injection (defeats lost-in-middle effect) ---
+            // Research shows middle-position recall drops 10-40%. Re-injecting key
+            // instructions near the end of context keeps them in the high-attention zone.
+            if iterations > 1
+                && iterations.is_multiple_of(INSTRUCTION_REINJECT_INTERVAL)
+                && !invoked_skills.is_empty()
+            {
+                let skill_names: Vec<&str> =
+                    invoked_skills.iter().map(|s| s.name.as_str()).collect();
+                messages.push(Message {
+                    role: Role::System,
+                    content: MessageContent::text(format!(
+                        "# Instruction Refresh (turn {iterations})\n\
+                         Active skills: {}. Follow their workflow phases and gates. \
+                         Verify before claiming completion.",
+                        skill_names.join(", ")
+                    )),
+                });
+                debug!(
+                    agent = %self.config.name,
+                    turn = iterations,
+                    skills = ?skill_names,
+                    "re-injected instructions to combat attention fade"
+                );
             }
 
             // --- Track recently-read files for post-compact restoration ---
