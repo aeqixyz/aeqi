@@ -186,6 +186,10 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
 
                 pool.worker_max_budget_usd = project_cfg.max_budget_usd;
 
+                // Wire project + shared primers from config.
+                pool.project_primer = project_cfg.primer.clone();
+                pool.shared_primer = config.shared_primer.clone();
+
                 registry.register_project(project.clone(), pool).await;
             }
 

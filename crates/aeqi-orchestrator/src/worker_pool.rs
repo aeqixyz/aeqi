@@ -123,6 +123,10 @@ pub struct WorkerPool {
     pub trigger_store: Option<Arc<crate::trigger::TriggerStore>>,
     /// Conversation store — for transcript search tool and org context.
     pub conversation_store: Option<Arc<crate::ConversationStore>>,
+    /// Project primer from config — injected into every worker's context.
+    pub project_primer: Option<String>,
+    /// Shared primer from top-level config — injected into ALL workers.
+    pub shared_primer: Option<String>,
 }
 
 impl WorkerPool {
@@ -182,6 +186,8 @@ impl WorkerPool {
             agent_registry: None,
             trigger_store: None,
             conversation_store: None,
+            project_primer: None,
+            shared_primer: None,
         }
     }
 
@@ -327,6 +333,9 @@ impl WorkerPool {
                 self.task_notify.clone(),
             ),
         };
+        // Inject project + shared primers into worker.
+        worker = worker.with_primers(self.project_primer.clone(), self.shared_primer.clone());
+
         let persistent_agent_id_ref = persistent_agent_id.clone();
         if let Some(agent_id) = persistent_agent_id {
             worker = worker.with_persistent_agent(agent_id);

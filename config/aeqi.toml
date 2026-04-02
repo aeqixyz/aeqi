@@ -29,6 +29,9 @@ mmr_lambda = 0.7
 chunk_size_tokens = 400
 chunk_overlap_tokens = 80
 
+# Shared primer injected into ALL agents regardless of project.
+# shared_primer = "Global context that every agent should know."
+
 # Global repo pool — all agents can access all repos
 [repos]
 aeqi = "/home/claudedev/aeqi"
@@ -84,6 +87,10 @@ worktree_root = "/home/claudedev/worktrees"
 execution_mode = "agent"
 max_turns = 25
 worker_timeout_secs = 3600
+# primer = """
+# AEQI is a persistent agent orchestration platform built in Rust.
+# All agents receive this brief when working on the project.
+# """
 team.leader = "engineer"
 team.agents = ["engineer", "reviewer"]
 

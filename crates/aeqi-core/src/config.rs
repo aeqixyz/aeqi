@@ -21,6 +21,9 @@ pub struct AEQIConfig {
     /// Global repo pool — all agents can access all repos.
     #[serde(default)]
     pub repos: HashMap<String, String>,
+    /// Shared primer injected into ALL agents regardless of project.
+    #[serde(default)]
+    pub shared_primer: Option<String>,
     /// Projects = repos, tasks, knowledge, budget.
     #[serde(default)]
     pub projects: Vec<ProjectConfig>,
@@ -755,6 +758,10 @@ pub struct ProjectConfig {
     /// compaction prompt when agents working on this project need to compact.
     #[serde(default)]
     pub compact_instructions: Option<String>,
+    /// Project primer — injected into every agent's context when working on this project.
+    /// This is the company/project brief that all agents receive.
+    #[serde(default)]
+    pub primer: Option<String>,
 }
 
 /// Domain keyword → file mapping for automatic context injection.

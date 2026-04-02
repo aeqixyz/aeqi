@@ -1503,6 +1503,7 @@ mod tests {
             departments: Vec::new(),
             domain_hints: Vec::new(),
             compact_instructions: None,
+            primer: None,
         };
         let project = Project::from_config(&config, dir.path(), "test-model")?;
         Ok((Arc::new(project), dir))
@@ -1861,6 +1862,7 @@ mod tests {
             }],
             domain_hints: Vec::new(),
             compact_instructions: None,
+            primer: None,
         };
         let project = Arc::new(Project::from_config(&config, dir.path(), "test-model").unwrap());
         let provider: Arc<dyn Provider> = Arc::new(DoneProvider);

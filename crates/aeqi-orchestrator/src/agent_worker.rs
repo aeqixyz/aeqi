@@ -86,6 +86,10 @@ pub struct AgentWorker {
     /// Persistent agent UUID for entity-scoped memory. When set, memory queries
     /// include this agent's entity memories alongside domain/system memories.
     pub persistent_agent_id: Option<String>,
+    /// Project primer from config — injected into context before memory recall.
+    pub project_primer: Option<String>,
+    /// Shared primer from top-level config — injected into ALL workers.
+    pub shared_primer: Option<String>,
 }
 
 impl AgentWorker {
@@ -131,6 +135,8 @@ impl AgentWorker {
             event_broadcaster: None,
             write_queue: None,
             persistent_agent_id: None,
+            project_primer: None,
+            shared_primer: None,
         }
     }
 
@@ -172,6 +178,8 @@ impl AgentWorker {
             event_broadcaster: None,
             write_queue: None,
             persistent_agent_id: None,
+            project_primer: None,
+            shared_primer: None,
         }
     }
 
@@ -205,6 +213,17 @@ impl AgentWorker {
     pub fn with_adaptive_retry(mut self, model: String) -> Self {
         self.adaptive_retry = true;
         self.failure_analysis_model = model;
+        self
+    }
+
+    /// Set project and shared primers for context injection.
+    pub fn with_primers(
+        mut self,
+        project_primer: Option<String>,
+        shared_primer: Option<String>,
+    ) -> Self {
+        self.project_primer = project_primer;
+        self.shared_primer = shared_primer;
         self
     }
 
@@ -551,6 +570,28 @@ impl AgentWorker {
             "Prepared task context, checkpoints, and resume brief",
         );
 
+        // Inject project + shared primers into identity (before memory recall).
+        let mut base_identity = self.identity.clone();
+        {
+            let mut primer_parts = Vec::new();
+            if let Some(ref shared) = self.shared_primer {
+                primer_parts.push(shared.clone());
+            }
+            if let Some(ref project) = self.project_primer {
+                primer_parts.push(project.clone());
+            }
+            if !primer_parts.is_empty() {
+                let primers = primer_parts.join("\n\n---\n\n");
+                let existing = base_identity.knowledge.clone().unwrap_or_default();
+                if existing.is_empty() {
+                    base_identity.knowledge = Some(primers);
+                } else {
+                    base_identity.knowledge =
+                        Some(format!("{existing}\n\n## Project Primer\n{primers}"));
+                }
+            }
+        }
+
         // Enrich identity with dynamic memory recall via query planner.
         // When a persistent agent UUID is set, also recall entity-scoped memories.
         let enriched_identity = if let Some(ref mem) = self.memory {
@@ -615,7 +656,7 @@ impl AgentWorker {
             }
 
             if !all.is_empty() {
-                let mut id = self.identity.clone();
+                let mut id = base_identity.clone();
                 let dynamic = all
                     .iter()
                     .map(|e| format!("- [{}] {}: {}", e.scope, e.key, e.content))
@@ -625,10 +666,10 @@ impl AgentWorker {
                 id.memory = Some(format!("{existing}\n\n## Dynamic Recall\n{dynamic}"));
                 id
             } else {
-                self.identity.clone()
+                base_identity.clone()
             }
         } else {
-            self.identity.clone()
+            base_identity
         };
         runtime_session.mark_phase(
             RuntimePhase::Act,
