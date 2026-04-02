@@ -124,6 +124,16 @@ pub enum ExecutionEvent {
         from_agent: String,
         content_preview: String,
     },
+    /// A department-wide broadcast message (Phase 9).
+    ///
+    /// Emitted when an agent posts to a department conversation channel,
+    /// allowing all department members to observe cross-agent communication.
+    DepartmentMessage {
+        department_id: String,
+        department_name: String,
+        from_agent: String,
+        content: String,
+    },
 }
 
 // ---------------------------------------------------------------------------

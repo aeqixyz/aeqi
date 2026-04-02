@@ -1544,11 +1544,14 @@ impl Tool for ChannelPostTool {
             .ok_or_else(|| anyhow::anyhow!("'message' is required"))?;
 
         // Resolve channel to chat_id.
+        // Track department info for Phase 9 DepartmentMessage events.
+        let mut dept_info: Option<(String, String)> = None; // (department_id, department_name)
         let (chat_id, channel_name) = if let Some(rest) = channel.strip_prefix("dept:") {
             // Format: "dept:project:department" or "dept:department" (project from context)
             let parts: Vec<&str> = rest.splitn(2, ':').collect();
             if parts.len() == 2 {
                 let cid = crate::conversation_store::department_chat_id(parts[0], parts[1]);
+                dept_info = Some((format!("{}:{}", parts[0], parts[1]), parts[1].to_string()));
                 (cid, format!("{}/{}", parts[0], parts[1]))
             } else {
                 let cid = crate::conversation_store::named_channel_chat_id(channel);
@@ -1583,6 +1586,17 @@ impl Tool for ChannelPostTool {
                 from_agent: self.agent_name.clone(),
                 content_preview: preview,
             });
+
+        // Phase 9: Emit DepartmentMessage event for department broadcasts.
+        if let Some((department_id, department_name)) = dept_info {
+            self.event_broadcaster
+                .publish(crate::execution_events::ExecutionEvent::DepartmentMessage {
+                    department_id,
+                    department_name,
+                    from_agent: self.agent_name.clone(),
+                    content: message.to_string(),
+                });
+        }
 
         Ok(ToolResult {
             output: format!("Posted to channel '{channel_name}' (chat_id: {chat_id})"),

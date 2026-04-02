@@ -356,11 +356,13 @@ impl Supervisor {
 
         // Look up persistent agent from registry — override identity if found.
         let mut persistent_capabilities: Vec<String> = Vec::new();
+        let mut agent_department: Option<String> = None;
         let persistent_agent_id = if let Some(ref registry) = self.agent_registry {
             if let Ok(Some(pa)) = registry.get_active_by_name(&agent_name).await {
                 // Override system prompt with persistent agent's prompt.
                 identity.persona = Some(pa.system_prompt.clone());
                 persistent_capabilities = pa.capabilities.clone();
+                agent_department = pa.department.clone();
                 info!(
                     project = %self.project_name,
                     agent = %agent_name,
@@ -432,9 +434,18 @@ impl Supervisor {
         worker.audit_log = self.audit_log.clone();
 
         // Inject relevant blackboard entries into worker identity preamble.
+        // Phase 7: Use query_scoped() with agent visibility to enforce
+        // department-based blackboard access control.
         if let Some(ref bb) = self.blackboard {
             let tags: Vec<String> = task.labels.clone();
-            let entries = bb.query(&self.project_name, &tags, 5).unwrap_or_default();
+            let visibility = crate::blackboard::AgentVisibility {
+                agent_id: persistent_agent_id.clone(),
+                project: Some(self.project_name.clone()),
+                department: agent_department.clone(),
+            };
+            let entries = bb
+                .query_scoped(&self.project_name, &visibility, &tags, 5)
+                .unwrap_or_default();
             if !entries.is_empty() {
                 let bb_context = entries
                     .iter()
@@ -1570,6 +1581,11 @@ impl Supervisor {
     ///   4. Leader Agent tries (has KNOWLEDGE.md + cross-project context)
     ///   5. Leader Agent resolves → sends RESOLVED dispatch back → Supervisor re-opens task
     ///   6. Leader Agent stuck → routes to human via Telegram
+    // Phase 8: Clarification routing now goes through the department hierarchy
+    // via `escalate_to_leader()` which uses `escalation_chain_target()` (Phase 6).
+    // Blocked tasks (including clarification-blocked) are handled here:
+    //   - Low escalation depth → re-opened as Pending (project-level resolution)
+    //   - High escalation depth → escalated via department chain → leader → human
     async fn handle_blocked_tasks(&mut self) {
         let blocked_tasks = {
             let store = self.tasks.lock().await;
@@ -1585,7 +1601,8 @@ impl Supervisor {
             let escalation_depth = Self::get_escalation_depth(&task.labels);
 
             if escalation_depth >= self.max_resolution_attempts {
-                // Already tried project-level resolution. Escalate to team leader.
+                // Already tried project-level resolution. Escalate via department
+                // chain (Phase 6) → project leader → system leader → human.
                 self.escalate_to_leader(&task).await;
             } else {
                 // Attempt project-level resolution: re-open as Pending with resolution context.
@@ -1654,10 +1671,35 @@ impl Supervisor {
         });
     }
 
+    /// Walk the department hierarchy for an agent and return the first
+    /// manager name that isn't the agent itself. Returns `None` if no
+    /// department chain exists (falls back to legacy escalation_target).
+    async fn escalation_chain_target(&self, agent_name: &str) -> Option<String> {
+        let registry = self.agent_registry.as_ref()?;
+        let agent = registry.get_active_by_name(agent_name).await.ok()??;
+        // Walk parent chain to find first manager that isn't the agent itself.
+        let mut current_id = agent.id.clone();
+        // Safety limit to avoid infinite loops in a malformed tree.
+        for _ in 0..10 {
+            match registry.parent(&current_id).await {
+                Ok(Some(parent)) if parent.name != agent_name => {
+                    return Some(parent.name);
+                }
+                Ok(Some(parent)) => {
+                    // Parent has same name (shouldn't happen, but be safe) — keep walking.
+                    current_id = parent.id;
+                }
+                _ => break,
+            }
+        }
+        None
+    }
+
     /// Escalate a blocked task through the escalation chain:
-    ///   1. Project leader — first escalation
-    ///   2. System leader (orchestrator) — if project leader can't resolve
-    ///   3. Human (Telegram) — last resort
+    ///   1. Department manager (via org tree) — preferred path
+    ///   2. Project leader — first fallback
+    ///   3. System leader (orchestrator) — if project leader can't resolve
+    ///   4. Human (Telegram) — last resort
     async fn escalate_to_leader(&self, task: &sigil_tasks::Task) {
         // Determine escalation target based on current state.
         let already_escalated_project = task.labels.iter().any(|l| l == "escalated");
@@ -1720,12 +1762,28 @@ impl Supervisor {
         // If project leader == system leader, skip to system escalation.
         let project_leader_is_system = self.escalation_target == self.system_escalation_target;
 
-        let (target, label) = if !already_escalated_project && !project_leader_is_system {
-            // First escalation → project leader.
-            (&self.escalation_target, "escalated")
+        // Phase 6: Try department hierarchy first. If the task has an assignee,
+        // walk the org tree to find the department manager as the preferred
+        // escalation target. Falls back to the hardcoded escalation_target.
+        let dept_target = if !already_escalated_project {
+            if let Some(ref assignee) = task.assignee {
+                self.escalation_chain_target(assignee).await
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let (target, label) = if let Some(ref dt) = dept_target {
+            // Department chain escalation — preferred path.
+            (dt.as_str(), "escalated")
+        } else if !already_escalated_project && !project_leader_is_system {
+            // First escalation → project leader (legacy path).
+            (self.escalation_target.as_str(), "escalated")
         } else {
             // Second escalation → system leader.
-            (&self.system_escalation_target, "escalated-system")
+            (self.system_escalation_target.as_str(), "escalated-system")
         };
 
         info!(
