@@ -3,36 +3,33 @@
 [![CI](https://github.com/0xAEQI/aeqi/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/0xAEQI/aeqi/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-2024-black)](Cargo.toml)
-[![React 19](https://img.shields.io/badge/ui-React%2019-61dafb)](apps/ui)
+[![Tests](https://img.shields.io/badge/tests-634%2B-brightgreen)](Cargo.toml)
 
-**Persistent agent orchestration in Rust.** Agents that remember, coordinate, and act autonomously.
+**Persistent agent orchestration in Rust.** Build organizations of AI agents that remember, coordinate, and act autonomously.
 
-AEQI is a runtime for persistent AI agents -- not one-shot sessions that forget everything, but identities with memory, departments, and scheduled behaviors. Agents communicate through a unified delegate tool, coordinate through a department-scoped blackboard, and evolve through triggers and skills.
+AEQI is not another chatbot wrapper. It's a runtime where agents are persistent identities -- they accumulate knowledge across sessions, trigger their own behaviors on schedules and events, coordinate through departments and delegation, and operate under safety middleware that enforces budgets, detects loops, and preserves work on failure.
 
-## Four Primitives
+The orchestrator and runtime are one system. When the orchestrator owns the runtime, it can inject context mid-execution, route by empirical expertise, enforce 9 middleware layers on every tool call, and give every agent entity-scoped memory that persists forever.
 
-**Agent** -- persistent identity with UUID, system prompt, entity-scoped memory. Belongs to a department. Not a running process -- loaded into fresh sessions on demand. Accumulated knowledge persists across sessions.
+```
+aeqi daemon start    # start the orchestration plane
+aeqi web start       # API + dashboard on :8400
+aeqi chat --agent cto   # talk to an agent
+```
 
-**Department** -- UUID-identified organizational unit with its own hierarchy. Has a name, project scope, manager (an agent), and parent department. Escalation follows the department chain. Blackboard visibility is department-scoped.
+---
 
-**Task** -- always agent-bound. Every task has an `agent_id` that determines which agent executes it. Tasks are never free-floating -- they're created by triggers, delegation, or direct assignment. Atomic checkout with `locked_by`/`locked_at` prevents concurrent execution. State transitions are validated.
+## Core Concepts
 
-**Delegation** -- unified `delegate` tool for all inter-agent interaction. One tool replaces messaging, task assignment, subagent spawning, and department broadcasts.
+### Agents
 
-## Triggers + Skills
-
-Everything in AEQI flows through two primitives:
-
-**Triggers** define *when* -- a cron schedule (`0 9 * * *`), an interval (`every 1h`), a one-shot time, a runtime event (task completed, dispatch received, department message), or an external **webhook** (`POST /api/webhooks/:public_id` with optional HMAC-SHA256 signing).
-
-**Skills** define *what* -- a TOML file with a system prompt and tool restrictions that gets loaded into the agent session when a trigger fires.
+An agent is a persistent identity with a UUID, a system prompt, entity-scoped memory, and a department. Agents are not running processes -- they're loaded into fresh sessions on demand. Knowledge accumulates across sessions via the memory system.
 
 ```toml
 # agents/cto/agent.toml
 display_name = "CTO"
 model_tier = "capable"
-max_workers = 2
-max_turns = 30
+department = "engineering"
 expertise = ["architecture", "systems", "rust"]
 capabilities = ["spawn_agents", "manage_triggers"]
 
@@ -40,275 +37,293 @@ capabilities = ["spawn_agents", "manage_triggers"]
 name = "memory-consolidation"
 schedule = "every 6h"
 skill = "memory-consolidation"
-
-[prompt]
-system = """
-You are CTO — the technology executive...
-"""
 ```
 
-An agent's "subconscious" -- health checks, memory consolidation, self-reflection -- is just triggers and skills in the template. No special subsystems.
-
-## Departments
-
-Agents are organized into departments stored in SQLite (`~/.aeqi/agents.db`). Each department has a UUID, a manager, and a parent department. Agents belong to a department via `department_id`.
-
-```
-Root Department (manager: Shadow)
-  +-- "AEQI Core" (manager: CTO)
-  |     +-- "Backend" (manager: BackendLead)
-  |     |     members: API Engineer, DB Engineer
-  |     +-- "Frontend" (manager: FrontendLead)
-  |           members: UI Engineer
-  +-- "Trading" (manager: TradingLead)
-        members: StrategyBot, RiskBot
-```
-
-Escalation follows the department chain: agent blocked -> department manager -> parent department manager -> ... -> Shadow -> user.
-
-## Unified Delegate Tool
-
-One tool for all inter-agent interaction:
-
-```
-delegate(to, prompt, response, create_task, skill, tools)
-```
-
-| `to` | What happens |
-|------|-------------|
-| Agent name | Message or task delegation to a persistent agent |
-| `"dept:Engineering"` | Broadcast to all department members |
-| `"subagent"` | Spawn an ephemeral subagent |
-
-| `response` mode | Where the response goes |
-|-----------------|------------------------|
-| `"origin"` | Back into the calling session |
-| `"perpetual"` | Into the agent's perpetual session |
-| `"async"` | Fresh async session for the sender |
-| `"department"` | Posted to the department channel |
-| `"none"` | Fire and forget |
-
-## Agent Roster
-
-AEQI ships with a C-suite of persistent agent identities. Each declares a `model_tier` (resolved centrally) instead of hardcoding a model name.
-
-| Agent | Tier | Function |
-|-------|------|----------|
-| **Shadow** | balanced | Personal assistant, default identity, first-use experience |
-| **CEO** | capable | Strategic coordination, cross-functional decisions |
-| **CTO** | capable | Architecture, engineering quality, technical strategy |
-| **CPO** | balanced | Product strategy, UX, feature prioritization |
-| **CFO** | capable | Financial ops, quantitative strategy, risk |
-| **COO** | balanced | Deployment, monitoring, reliability |
-| **GC** | capable | Legal, compliance, contracts |
-| **CISO** | capable | Security, threat modeling, incident response |
-
-### Model Tiers
-
-Agents declare capability intent. The `[models]` config resolves to actual models:
+Agents declare a `model_tier` (capable, balanced, fast, cheapest) instead of hardcoding a model. One config change updates all agents:
 
 ```toml
 [models]
 capable = "anthropic/claude-sonnet-4-6"
 balanced = "anthropic/claude-sonnet-4-6"
 fast = "anthropic/claude-haiku-4-5"
-cheapest = "anthropic/claude-haiku-4-5"
 ```
 
-Change once, applies to all agents. Per-project overrides via `[[projects]]` config.
+### Memory
 
-## Skills & Subagents
+Every agent has three memory scopes:
 
-**Workflow skills** (11): feature, bugfix, refactor, research, synthesis, security-audit, plan-review, orchestrate, incident-response, release, migration
+| Scope | What it stores | Lifetime |
+|-------|---------------|----------|
+| **Entity** | Agent-specific knowledge (per UUID) | Permanent |
+| **Domain** | Project-level facts and procedures | Permanent |
+| **System** | Cross-project knowledge | Permanent |
 
-**Subagent templates** (9): explore, implement, spec-review, quality-review, verify, plan-review, test-generator, build-resolver, doc-writer, language-reviewer
+Memory is backed by SQLite with FTS5 full-text search and optional vector embeddings for hybrid retrieval. A query planner generates typed queries (fact, procedure, preference, context) from task context. Memories decay over time -- older facts rank lower unless reinforced.
 
-**Reference skills**: scope-decision-framework, model-tier-routing, observation-learning
+Agents can build semantic knowledge graphs through `memory_edges` -- relationships like "mentions", "requires", "contradicts" between facts.
 
-All skills live in `projects/shared/skills/`. Agent templates in `agents/*/agent.toml`.
+### Triggers
 
-## Architecture
+Triggers define *when* an agent acts:
 
-Two ways agents run:
+| Type | Example | How it works |
+|------|---------|-------------|
+| **Schedule** | `0 9 * * *` or `every 1h` | Cron expression or interval |
+| **Event** | `task_completed`, `dispatch_received` | Pattern match on runtime events with cooldown |
+| **Once** | `2026-04-15T09:00:00Z` | Fire once at a specific time, auto-disable |
+| **Webhook** | `POST /api/webhooks/:id` | External HTTP trigger with optional HMAC-SHA256 signing |
 
-```
-CHAT SESSION (CLI / Telegram / Slack / Web)
+When a trigger fires, it creates an agent-bound task that loads the associated skill.
 
-    User sends message
-        |
-        v
-    Agent session (identity + memory + tools + dept context)
-        |
-        v
-    Agent loop: LLM --> tool calls --> LLM --> ... --> response
-        |
-        v
-    Conversation persists in ConversationStore
+### Skills
 
+Skills define *what* an agent does when triggered. A skill is a TOML file with a system prompt and tool restrictions:
 
-ASYNC TASK (trigger fires / delegation / dispatch)
+```toml
+[skill]
+name = "code-review"
+description = "Review code changes for quality and correctness"
 
-    Trigger or delegate creates agent-bound task
-        |
-        v
-    Worker loads: agent identity + skill + memory + dept context + blackboard
-        |
-        v
-    Agent loop: LLM --> tool calls --> LLM --> ... --> done
-        |
-        v
-    Outcome: DONE / BLOCKED (escalate via dept chain) / FAILED (retry)
-        |
-        v
-    Transcript saved (FTS5 searchable)
+[tools]
+allow = ["shell", "read_file", "grep", "glob", "delegate"]
+
+[prompt]
+system = """Review the code changes. Check for..."""
 ```
 
-### Daemon Patrol Loop
+Skills are composable -- agents load the right skill per task. Tool restrictions are enforced: a skill that only allows `read_file` cannot execute shell commands, even if the agent tries.
 
-The daemon runs every 30 seconds:
+### Delegation
 
-1. **Reap** -- each project pool reaps completed workers independently
-2. **Collect** -- gather ready tasks + running agent counts across ALL projects
+One tool for all inter-agent interaction:
+
+```
+delegate(to, prompt, response_mode, create_task, skill)
+```
+
+| `to` | What happens |
+|------|-------------|
+| Agent name | Task delegation to a persistent agent |
+| `"dept:Engineering"` | Broadcast to department members |
+| `"subagent"` | Spawn an ephemeral worker |
+
+| Response mode | Where the result goes |
+|--------------|----------------------|
+| `origin` | Back into the calling session |
+| `department` | Posted to department channel |
+| `async` | Fresh session for the sender |
+| `none` | Fire and forget |
+
+Delegation creates a `DelegateRequest` dispatch. The daemon consumes dispatches for all active agents every patrol cycle, creates tasks, and routes responses back when complete.
+
+### Departments
+
+Agents are organized into a department hierarchy:
+
+```
+Root (manager: Shadow)
+  +-- Engineering (manager: CTO)
+  |     +-- Backend
+  |     +-- Frontend
+  +-- Operations (manager: COO)
+```
+
+Departments control:
+- **Escalation** -- blocked agents escalate to their department manager, then up the chain
+- **Blackboard visibility** -- entries scoped by department
+- **Clarification routing** -- questions follow the department hierarchy
+
+### Tasks
+
+Every task is agent-bound. Tasks are created by triggers, delegation, IPC, or direct assignment.
+
+```
+Pending → InProgress → Done
+                    → Blocked (escalate via department chain)
+                    → Failed (adaptive retry with LLM failure analysis)
+```
+
+Tasks have atomic checkout (`locked_by`/`locked_at`) to prevent concurrent execution. State transitions are validated. Retry logic supports adaptive analysis: the system uses an LLM to classify failures as external blockers, missing context, or budget exhaustion, and routes accordingly.
+
+---
+
+## Runtime
+
+### The Daemon
+
+`aeqi daemon start` runs the orchestration plane. Every 30 seconds:
+
+1. **Reap** -- each project pool reaps completed workers
+2. **Collect** -- gather ready tasks and running agent counts across all projects
 3. **Spawn** -- enforce per-agent `max_concurrent` globally, then per-project limits
 4. **Consume dispatches** -- read mail for all active agents, create tasks from delegations
-5. Fire due triggers (bind to owning agent)
-6. Hot-reload config on SIGHUP
-7. Persist dispatch bus + cost ledger
-8. Retry unacked dispatches, detect dead letters
-9. Update metrics, prune cost/blackboard entries, flush debounced memory writes
+5. **Fire triggers** -- schedule, once, and event-driven
+6. **Housekeeping** -- persist state, retry unacked dispatches, prune expired entries, flush memory writes
 
-Per-agent concurrency is enforced globally -- an agent with `max_concurrent=1` can't get 2 workers even if tasks exist in different projects. Event triggers run separately via a background subscriber on the EventBroadcaster.
+Per-agent concurrency is enforced globally -- an agent with `max_concurrent=1` cannot get two workers even if tasks exist in different projects.
 
 ### Middleware Chain
 
-Every agent session runs through 9 safety layers:
+Every agent execution runs through 9 composable safety layers:
 
-| Layer | What it does |
-|-------|-------------|
-| Guardrails | Block `rm -rf`, force push, `DROP TABLE` |
-| Graph Guardrails | Blast radius analysis on code changes |
-| Loop Detection | Kill after 5 repeated identical tool calls |
-| Cost Tracking | Per-task + per-scope budget enforcement |
-| Context Budget | Cap enrichment at ~200 lines |
-| Context Compression | Compact at 50% context window |
-| Memory Refresh | Re-search memory every N tool calls |
-| Clarification | Structured questions, routes via department chain |
-| Safety Net | Preserve partial work on failure |
+| Order | Layer | What it does |
+|-------|-------|-------------|
+| 200 | **Guardrails** | Block dangerous commands (`rm -rf`, `DROP TABLE`, force push) |
+| 210 | **Graph Guardrails** | Blast radius analysis on code changes |
+| 300 | **Loop Detection** | MD5 hash sliding window -- warn at 3 repeats, kill at 5 |
+| 350 | **Context Compression** | Compact history at 50% context window, preserve first/last |
+| 400 | **Context Budget** | Cap enrichment at ~200 lines per attachment |
+| 600 | **Cost Tracking** | Per-task and per-scope budget enforcement |
+| 50 | **Memory Refresh** | Re-search memory every N tool calls |
+| 800 | **Clarification** | Structured questions routed via department chain |
+| 900 | **Safety Net** | Detect and preserve partial work (git diffs, file edits) on failure |
 
-## Budget Policies
+Middleware hooks fire at 8 points: `on_start`, `before_model`, `after_model`, `before_tool`, `after_tool`, `after_turn`, `on_complete`, `on_error`.
+
+### Budget Policies
 
 Per-scope budget enforcement with auto-pause:
 
-```sql
--- scope_type: 'agent', 'project', 'global'
--- window: 'daily', 'monthly', 'lifetime'
-budget_policies (scope_type, scope_id, window, amount_usd, warn_pct, hard_stop)
+```
+scope_type: agent | project | global
+window: daily | monthly | lifetime
+amount_usd: 50.0
+warn_pct: 0.8
+hard_stop: true
 ```
 
-Cost tracking captures per-call token breakdown (input, output, cached) with model and provider attribution.
+When a hard stop triggers, the scope is paused and an approval is created. Cost tracking captures per-call token breakdown (input, output, cached) with model and provider attribution.
 
-## Approval Queue
+### Approval Queue
 
-Human-in-the-loop governance. Agents can create approval requests that block execution until resolved:
+Human-in-the-loop governance for autonomous agents:
 
 ```
-GET  /api/approvals           -- list pending approvals
+GET  /api/approvals              -- list pending
 POST /api/approvals/:id/resolve  -- approve or reject
 ```
 
-Types: `permission`, `clarification`, `budget`. Integrates with the clarification middleware and department escalation chain.
+Types: `permission` (dangerous action), `clarification` (agent question), `budget` (spend limit hit). Integrates with the middleware chain and department escalation.
+
+### Blackboard
+
+A department-scoped coordination surface for inter-agent knowledge sharing:
+
+- **Transient** entries (24h TTL) for active coordination
+- **Durable** entries (7d TTL) for findings and decisions
+- Tag-based queries, cross-project search
+- Department visibility scoping via `query_scoped()`
+
+### Dispatch Bus
+
+Reliable inter-agent messaging with delivery guarantees:
+
+- Idempotency keys prevent duplicate execution
+- ACK tracking with automatic retry (60s threshold, max 3 retries)
+- Dead-letter detection for undeliverable messages
+- SQLite-backed persistence across daemon restarts
+
+### Expertise Routing
+
+Agents are scored empirically using Wilson score lower-bound confidence on historical outcomes per domain. The system learns which agents are best at which types of work.
+
+---
 
 ## Quick Start
 
-**Prerequisites:** Rust stable, Node.js 22+, an LLM provider key (`OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY`)
+**Prerequisites:** Rust stable, an LLM provider key (`OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY`)
 
 ```bash
-# Clone and configure
 git clone https://github.com/0xAEQI/aeqi && cd aeqi
 cp config/aeqi.example.toml config/aeqi.toml
 # Edit config/aeqi.toml with your provider key
 
-# Build
-cargo build
-npm --prefix apps/ui ci && npm --prefix apps/ui run build
-
-# Run
-cargo run --bin aeqi -- daemon start   # orchestration plane
-cargo run --bin aeqi -- web start      # API + UI on :8400
+cargo build --release
+./target/release/aeqi daemon start   # orchestration plane
+./target/release/aeqi web start      # API + dashboard on :8400
 ```
 
-## CLI
+### CLI
 
 ```bash
-aeqi daemon start              # start the orchestration daemon
-aeqi web start                 # start the API + web UI
-aeqi agent spawn template.md   # create a persistent agent from template
+aeqi daemon start              # orchestration daemon
+aeqi web start                 # REST API + WebSocket + dashboard
+aeqi agent spawn agents/cto/   # create a persistent agent from template
 aeqi agent registry            # list all registered agents
-aeqi trigger create ...        # create a trigger for an agent
-aeqi trigger create --webhook  # create a webhook trigger (returns URL)
-aeqi trigger list              # list all triggers
-aeqi chat --agent shadow       # interactive TUI chat with an agent
-aeqi assign -r myproject "do X" # create a task
-aeqi monitor                   # live dashboard
+aeqi trigger create ...        # schedule, event, or webhook trigger
+aeqi trigger create --webhook  # webhook trigger (prints URL + signing info)
+aeqi chat --agent shadow       # interactive TUI chat
+aeqi assign -r myproject "task description"
+aeqi monitor                   # live terminal dashboard
 ```
 
-## Extending AEQI
+---
 
-**Add a skill** -- drop a `.toml` file in `projects/shared/skills/` or `projects/{name}/skills/`:
+## Architecture
 
-```toml
-[skill]
-name = "my-skill"
-description = "What this skill does"
-phase = "autonomous"
+```
+CHAT SESSION (CLI / Telegram / Slack / Web)
+    User message → Agent session (identity + memory + tools + department context)
+    → Agent loop: LLM → tool calls → LLM → ... → response
+    → Transcript persisted (FTS5 searchable by agent and task)
 
-[tools]
-allow = ["shell", "read_file", "grep"]
-
-[prompt]
-system = """Your instructions here..."""
+ASYNC TASK (trigger / delegation / webhook)
+    Task created → Worker loads agent identity + skill + memory + blackboard
+    → Middleware chain wraps execution (9 layers)
+    → Agent loop: LLM → tool calls → LLM → ... → outcome
+    → DONE: response routed back | BLOCKED: escalate | FAILED: adaptive retry
 ```
 
-**Add a trigger** -- in an agent template's YAML frontmatter, or at runtime via the `manage_triggers` tool.
-
-**Add a tool** -- implement the `Tool` trait in Rust, wire into the builder.
-
-**Add a provider** -- implement the `Provider` trait for any LLM API.
-
-**Add a channel** -- implement the `Channel` trait for any messaging platform.
-
-**Add a department** -- via `AgentRegistry::create_department()` through IPC or agent tool.
-
-## Crates
+### Crates
 
 | Crate | Purpose |
 |-------|---------|
-| `aeqi-cli` | CLI binary, daemon process, TUI chat |
-| `aeqi-orchestrator` | Worker pools, triggers, chat engine, dispatch, departments, blackboard, unified delegate, middleware, approvals, budget policies |
-| `aeqi-core` | Agent loop, config, identity, traits |
-| `aeqi-web` | Axum REST API + WebSocket + SPA serving |
-| `aeqi-memory` | SQLite+FTS5, vector search, hybrid ranking, query planning |
-| `aeqi-tasks` | Task DAG, missions, dependency inference |
+| `aeqi-cli` | CLI binary, daemon, TUI chat |
+| `aeqi-orchestrator` | Worker pools, triggers, dispatch, departments, blackboard, middleware, approvals, budget |
+| `aeqi-core` | Agent loop, config, identity, compaction, traits |
+| `aeqi-web` | Axum REST API + WebSocket streaming + SPA |
+| `aeqi-memory` | SQLite+FTS5, vector search, hybrid ranking, query planning, knowledge graph |
+| `aeqi-tasks` | Task DAG, missions, dependency inference, atomic checkout |
 | `aeqi-providers` | OpenRouter, Anthropic, Ollama + cost estimation |
 | `aeqi-gates` | Telegram, Discord, Slack channels |
 | `aeqi-tools` | Shell, file I/O, git, grep, glob, delegate, skills |
-| `aeqi-graph` | Code intelligence: Rust/TS/Solidity parsing, impact analysis |
+| `aeqi-graph` | Code intelligence: Rust/TS/Solidity parsing, community detection, impact analysis |
 
-## Storage
+### Storage
 
 All state lives in `~/.aeqi/`:
 
 | File | What |
 |------|------|
-| `agents.db` | Agent registry + departments + triggers + budget policies + approvals |
+| `agents.db` | Agent registry, departments, triggers, budget policies, approvals |
 | `conversations.db` | Chat history + session transcripts (FTS5) |
-| `memory.db` | Entity, domain, and system memories |
+| `memory.db` | Entity, domain, and system memories + knowledge graph |
 | `blackboard.db` | Department-scoped coordination entries |
-| `dispatches.db` | Agent-to-agent dispatch queue |
-| `audit.db` | Decision audit trail |
-| `expertise.db` | Agent performance per domain |
-| `cost_ledger.jsonl` | Token spend tracking |
+| `dispatches.db` | Agent-to-agent dispatch queue with ACK tracking |
+| `audit.db` | Decision audit trail with reasoning |
+| `expertise.db` | Agent performance scores per domain |
+| `cost_ledger.jsonl` | Per-call token spend with model/provider attribution |
 | `rm.sock` | Unix IPC socket |
+
+---
+
+## Extending AEQI
+
+**Add a skill** -- drop a `.toml` in `projects/shared/skills/` or `projects/{name}/skills/`.
+
+**Add a trigger** -- in agent template TOML, via CLI (`aeqi trigger create`), or at runtime through the `manage_triggers` tool.
+
+**Add a tool** -- implement the `Tool` trait, wire into the builder.
+
+**Add a provider** -- implement the `Provider` trait for any LLM API.
+
+**Add a channel** -- implement the `Channel` trait for Telegram, Discord, Slack, or any platform.
+
+**Add middleware** -- implement the `Middleware` trait with ordered hook points, add to the chain.
+
+**Add a department** -- via `AgentRegistry::create_department()` through IPC or the agent delegate tool.
+
+---
 
 ## Development
 
@@ -322,11 +337,11 @@ Pre-push hook runs all three automatically.
 
 ## Docs
 
-- [Orchestration redesign](docs/orchestration-redesign.md) -- full architecture spec
-- [Architecture overview](docs/architecture.md)
-- [Vision](docs/vision.md)
-- [Deployment model](docs/deployment.md)
+- [Architecture](docs/architecture.md)
+- [Orchestration design](docs/orchestration-redesign.md)
+- [Deployment](docs/deployment.md)
 - [Project setup](docs/project-setup.md)
+- [Vision](docs/vision.md)
 
 ## License
 
