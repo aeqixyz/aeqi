@@ -1,0 +1,10 @@
+name = "shadow"
+prefix = "sh"
+model = "stepfun/step-3.5-flash:free"
+role = "orchestrator"
+voice = "vocal"
+execution_mode = "agent"
+max_workers = 3
+max_turns = 30
+capabilities = ["spawn_agents", "spawn_projects", "manage_triggers"]
+expertise = ["orchestration", "coordination", "personal-assistance"]

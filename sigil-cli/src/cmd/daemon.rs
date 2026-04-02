@@ -419,90 +419,90 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             }
 
             // Register the leader agent as a project (so it can receive tasks).
-            let leader_cfg = config
-                .leader_agent()
-                .cloned()
-                .context("no leader agent configured")?;
-            let fa_agent_dir =
-                find_agent_dir(&leader_name).unwrap_or_else(|_| PathBuf::from("agents/aurelia"));
-            let fa_identity = augment_identity_with_org_context(
-                &config,
-                Identity::load(&fa_agent_dir, None).unwrap_or_default(),
-                Some(&leader_name),
-                None,
-            );
-            let fa_tasks_dir = fa_agent_dir.join(".tasks");
-            std::fs::create_dir_all(&fa_tasks_dir).ok();
-            let fa_task_board = sigil_tasks::TaskBoard::open(&fa_tasks_dir)?;
-            let fa_model = config.model_for_agent(&leader_name);
-            let fa_prefix = leader_cfg.prefix.clone();
-            let fa_workdir = leader_cfg
-                .default_repo
-                .as_ref()
-                .map(|r| config.resolve_repo(r))
-                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+            // Optional — daemon runs fine without a leader agent configured.
+            if let Some(leader_cfg) = config.leader_agent().cloned() {
+                let fa_agent_dir = find_agent_dir(&leader_name)
+                    .unwrap_or_else(|_| PathBuf::from("agents/aurelia"));
+                let fa_identity = augment_identity_with_org_context(
+                    &config,
+                    Identity::load(&fa_agent_dir, None).unwrap_or_default(),
+                    Some(&leader_name),
+                    None,
+                );
+                let fa_tasks_dir = fa_agent_dir.join(".tasks");
+                std::fs::create_dir_all(&fa_tasks_dir).ok();
+                let fa_task_board = sigil_tasks::TaskBoard::open(&fa_tasks_dir)?;
+                let fa_model = config.model_for_agent(&leader_name);
+                let fa_prefix = leader_cfg.prefix.clone();
+                let fa_workdir = leader_cfg
+                    .default_repo
+                    .as_ref()
+                    .map(|r| config.resolve_repo(r))
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
-            let fa_rig = Arc::new(Project {
-                name: leader_name.clone(),
-                prefix: fa_prefix.clone(),
-                repo: fa_workdir.clone(),
-                worktree_root: dirs::home_dir().unwrap_or_default().join("worktrees"),
-                model: fa_model,
-                max_workers: leader_cfg.max_workers,
-                worker_timeout_secs: 1800,
-                project_identity: fa_identity,
-                tasks: Arc::new(tokio::sync::Mutex::new(fa_task_board)),
-                task_notify: fa_task_notify.clone(),
-                departments: Vec::new(),
-            });
+                let fa_rig = Arc::new(Project {
+                    name: leader_name.clone(),
+                    prefix: fa_prefix.clone(),
+                    repo: fa_workdir.clone(),
+                    worktree_root: dirs::home_dir().unwrap_or_default().join("worktrees"),
+                    model: fa_model,
+                    max_workers: leader_cfg.max_workers,
+                    worker_timeout_secs: 1800,
+                    project_identity: fa_identity,
+                    tasks: Arc::new(tokio::sync::Mutex::new(fa_task_board)),
+                    task_notify: fa_task_notify.clone(),
+                    departments: Vec::new(),
+                });
 
-            // Build leader agent tools: basic + tasks + orchestration.
-            let mut fa_tools: Vec<Arc<dyn sigil_core::traits::Tool>> =
-                build_project_tools(&fa_workdir, &fa_tasks_dir, &fa_prefix, None);
-            let fa_memory: Option<Arc<dyn sigil_core::traits::Memory>> =
-                match open_memory(&config, None) {
-                    Ok(m) => {
-                        info!("leader agent memory initialized");
-                        Some(Arc::new(m))
+                let mut fa_tools: Vec<Arc<dyn sigil_core::traits::Tool>> =
+                    build_project_tools(&fa_workdir, &fa_tasks_dir, &fa_prefix, None);
+                let fa_memory: Option<Arc<dyn sigil_core::traits::Memory>> =
+                    match open_memory(&config, None) {
+                        Ok(m) => {
+                            info!("leader agent memory initialized");
+                            Some(Arc::new(m))
+                        }
+                        Err(e) => {
+                            warn!("failed to open leader agent memory: {e}");
+                            None
+                        }
+                    };
+                let orch_tools = build_orchestration_tools(
+                    registry.clone(),
+                    dispatch_bus.clone(),
+                    channels.clone(),
+                    get_api_key(&config).ok(),
+                    fa_memory,
+                    registry.blackboard.clone(),
+                );
+                fa_tools.extend(orch_tools);
+
+                let leader_provider = build_provider_for_agent(&config, &leader_name)?;
+                let mut fa_witness = Supervisor::new(
+                    &fa_rig,
+                    leader_provider.clone(),
+                    fa_tools,
+                    dispatch_bus.clone(),
+                );
+                fa_witness.event_broadcaster = Some(event_broadcaster.clone());
+
+                if let Ok(mem) = open_memory(&config, Some(&leader_name)) {
+                    let mem: Arc<dyn Memory> = Arc::new(mem);
+                    fa_witness.memory = Some(mem);
+                    if background_automation_enabled {
+                        fa_witness.reflect_provider = Some(leader_provider.clone());
+                        fa_witness.reflect_model = config.default_model_for_provider(
+                            sigil_core::config::ProviderKind::OpenRouter,
+                        );
                     }
-                    Err(e) => {
-                        warn!("failed to open leader agent memory: {e}");
-                        None
-                    }
-                };
-            let orch_tools = build_orchestration_tools(
-                registry.clone(),
-                dispatch_bus.clone(),
-                channels.clone(),
-                get_api_key(&config).ok(),
-                fa_memory,
-                registry.blackboard.clone(),
-            );
-            fa_tools.extend(orch_tools);
-
-            let leader_provider = build_provider_for_agent(&config, &leader_name)?;
-            let mut fa_witness = Supervisor::new(
-                &fa_rig,
-                leader_provider.clone(),
-                fa_tools,
-                dispatch_bus.clone(),
-            );
-            fa_witness.event_broadcaster = Some(event_broadcaster.clone());
-
-            // Wire memory + reflection for leader agent worker insight extraction.
-            if let Ok(mem) = open_memory(&config, Some(&leader_name)) {
-                let mem: Arc<dyn Memory> = Arc::new(mem);
-                fa_witness.memory = Some(mem);
-                if background_automation_enabled {
-                    fa_witness.reflect_provider = Some(leader_provider.clone());
-                    fa_witness.reflect_model = config
-                        .default_model_for_provider(sigil_core::config::ProviderKind::OpenRouter);
                 }
+
+                fa_witness.worker_max_budget_usd = leader_cfg.max_budget_usd;
+
+                registry.register_project(fa_rig, fa_witness).await;
+            } else {
+                warn!("no leader agent configured — daemon will run without one");
             }
-
-            fa_witness.worker_max_budget_usd = leader_cfg.max_budget_usd;
-
-            registry.register_project(fa_rig, fa_witness).await;
 
             let project_count = registry.project_count().await;
             println!("Sigil daemon starting...");
