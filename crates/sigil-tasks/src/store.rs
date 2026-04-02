@@ -149,8 +149,8 @@ impl TaskBoard {
         Ok(())
     }
 
-    /// Create a new task with auto-generated ID.
-    pub fn create(&mut self, prefix: &str, subject: &str) -> Result<Task> {
+    /// Deprecated: prefer create_with_agent() which binds to a persistent agent.
+    pub fn create_unbound(&mut self, prefix: &str, subject: &str) -> Result<Task> {
         self.create_with_agent(prefix, subject, None)
     }
 
@@ -172,8 +172,13 @@ impl TaskBoard {
         Ok(task)
     }
 
-    /// Create a child task under a parent.
+    /// Create a child task under a parent. Inherits the parent's `agent_id`.
     pub fn create_child(&mut self, parent_id: &TaskId, subject: &str) -> Result<Task> {
+        let parent_agent_id = self
+            .tasks
+            .get(&parent_id.0)
+            .and_then(|p| p.agent_id.clone());
+
         // Count existing children to determine next child seq.
         let child_count = self
             .tasks
@@ -183,7 +188,8 @@ impl TaskBoard {
 
         let id = parent_id.child(child_count + 1);
         let mut task = Task::new(id, subject);
-        // Inherit prefix from parent.
+        // Inherit agent_id from parent.
+        task.agent_id = parent_agent_id;
         task.depends_on = Vec::new();
 
         self.persist(&task)?;
@@ -746,11 +752,11 @@ mod tests {
     #[test]
     fn test_create_and_get() {
         let (mut store, _dir) = temp_store();
-        let task = store.create("as", "Fix login bug").unwrap();
+        let task = store.create_unbound("as", "Fix login bug").unwrap();
         assert_eq!(task.id.0, "as-001");
         assert_eq!(task.subject, "Fix login bug");
 
-        let task2 = store.create("as", "Add logout button").unwrap();
+        let task2 = store.create_unbound("as", "Add logout button").unwrap();
         assert_eq!(task2.id.0, "as-002");
 
         assert!(store.get("as-001").is_some());
@@ -761,7 +767,7 @@ mod tests {
     #[test]
     fn test_children() {
         let (mut store, _dir) = temp_store();
-        let parent = store.create("as", "Feature X").unwrap();
+        let parent = store.create_unbound("as", "Feature X").unwrap();
         let child1 = store.create_child(&parent.id, "Step 1").unwrap();
         let child2 = store.create_child(&parent.id, "Step 2").unwrap();
 
@@ -773,8 +779,8 @@ mod tests {
     #[test]
     fn test_dependencies_and_ready() {
         let (mut store, _dir) = temp_store();
-        let b1 = store.create("as", "Task 1").unwrap();
-        let b2 = store.create("as", "Task 2").unwrap();
+        let b1 = store.create_unbound("as", "Task 1").unwrap();
+        let b2 = store.create_unbound("as", "Task 2").unwrap();
 
         store.add_dependency(&b2.id.0, &b1.id.0).unwrap();
 
@@ -793,8 +799,8 @@ mod tests {
     #[test]
     fn test_scheduler_hold_excludes_task_from_ready() {
         let (mut store, _dir) = temp_store();
-        let held = store.create("as", "Held task").unwrap();
-        let free = store.create("as", "Free task").unwrap();
+        let held = store.create_unbound("as", "Held task").unwrap();
+        let free = store.create_unbound("as", "Free task").unwrap();
 
         store
             .update(&held.id.0, |b| {
@@ -819,8 +825,8 @@ mod tests {
 
         {
             let mut store = TaskBoard::open(dir.path()).unwrap();
-            store.create("rd", "Price check").unwrap();
-            store.create("rd", "Inventory update").unwrap();
+            store.create_unbound("rd", "Price check").unwrap();
+            store.create_unbound("rd", "Inventory update").unwrap();
         }
 
         // Reopen and verify data persisted.
@@ -833,16 +839,16 @@ mod tests {
     #[test]
     fn test_self_dependency_rejected() {
         let (mut store, _dir) = temp_store();
-        let b1 = store.create("as", "Task 1").unwrap();
+        let b1 = store.create_unbound("as", "Task 1").unwrap();
         assert!(store.add_dependency(&b1.id.0, &b1.id.0).is_err());
     }
 
     #[test]
     fn test_circular_dependency_rejected() {
         let (mut store, _dir) = temp_store();
-        let b1 = store.create("as", "Task A").unwrap();
-        let b2 = store.create("as", "Task B").unwrap();
-        let b3 = store.create("as", "Task C").unwrap();
+        let b1 = store.create_unbound("as", "Task A").unwrap();
+        let b2 = store.create_unbound("as", "Task B").unwrap();
+        let b3 = store.create_unbound("as", "Task C").unwrap();
 
         store.add_dependency(&b2.id.0, &b1.id.0).unwrap();
         store.add_dependency(&b3.id.0, &b2.id.0).unwrap();
@@ -856,7 +862,7 @@ mod tests {
 
         {
             let mut store = TaskBoard::open(dir.path()).unwrap();
-            store.create("as", "Task 1").unwrap();
+            store.create_unbound("as", "Task 1").unwrap();
             store
                 .update("as-001", |b| {
                     b.status = TaskStatus::InProgress;
@@ -878,7 +884,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
 
         let mut store = TaskBoard::open(dir.path()).unwrap();
-        store.create("as", "Task 1").unwrap();
+        store.create_unbound("as", "Task 1").unwrap();
         // Multiple updates = multiple append lines.
         for i in 0..5 {
             store
@@ -905,7 +911,7 @@ mod tests {
     #[test]
     fn test_auto_close_parent_when_all_children_done() {
         let (mut store, _dir) = temp_store();
-        let parent = store.create("as", "Pipeline: Deploy").unwrap();
+        let parent = store.create_unbound("as", "Pipeline: Deploy").unwrap();
         let c1 = store.create_child(&parent.id, "Step 1: Build").unwrap();
         let c2 = store.create_child(&parent.id, "Step 2: Test").unwrap();
         let c3 = store.create_child(&parent.id, "Step 3: Ship").unwrap();
@@ -932,7 +938,7 @@ mod tests {
     #[test]
     fn test_auto_close_cascades_upward() {
         let (mut store, _dir) = temp_store();
-        let grandparent = store.create("as", "Epic").unwrap();
+        let grandparent = store.create_unbound("as", "Epic").unwrap();
         let parent = store.create_child(&grandparent.id, "Feature").unwrap();
         let child = store.create_child(&parent.id, "Task").unwrap();
 
@@ -965,14 +971,14 @@ mod tests {
         let (mut store, _dir) = temp_store();
         let m = store.create_mission("as", "Auth Overhaul").unwrap();
 
-        let t1 = store.create("as", "Add JWT validation").unwrap();
+        let t1 = store.create_unbound("as", "Add JWT validation").unwrap();
         store
             .update(&t1.id.0, |t| {
                 t.mission_id = Some(m.id.clone());
             })
             .unwrap();
 
-        let t2 = store.create("as", "Add refresh tokens").unwrap();
+        let t2 = store.create_unbound("as", "Add refresh tokens").unwrap();
         store
             .update(&t2.id.0, |t| {
                 t.mission_id = Some(m.id.clone());
@@ -980,7 +986,7 @@ mod tests {
             .unwrap();
 
         // Unrelated task, no mission.
-        store.create("as", "Fix typo").unwrap();
+        store.create_unbound("as", "Fix typo").unwrap();
 
         let mission_tasks = store.mission_tasks(&m.id);
         assert_eq!(mission_tasks.len(), 2);
@@ -991,14 +997,14 @@ mod tests {
         let (mut store, _dir) = temp_store();
         let m = store.create_mission("as", "Deploy Pipeline").unwrap();
 
-        let t1 = store.create("as", "Build").unwrap();
+        let t1 = store.create_unbound("as", "Build").unwrap();
         store
             .update(&t1.id.0, |t| {
                 t.mission_id = Some(m.id.clone());
             })
             .unwrap();
 
-        let t2 = store.create("as", "Test").unwrap();
+        let t2 = store.create_unbound("as", "Test").unwrap();
         store
             .update(&t2.id.0, |t| {
                 t.mission_id = Some(m.id.clone());

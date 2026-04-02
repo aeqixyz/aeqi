@@ -1755,13 +1755,26 @@ impl Daemon {
                         .get("description")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
-                    let agent_id = request.get("agent_id").and_then(|v| v.as_str());
+                    let explicit_agent_id = request.get("agent_id").and_then(|v| v.as_str());
+
+                    // Fall back to project default agent when no explicit agent_id.
+                    let resolved_agent_id: Option<String> = if explicit_agent_id.is_some() {
+                        explicit_agent_id.map(|s| s.to_string())
+                    } else if let Some(ref ar) = agent_registry {
+                        ar.default_for_project(Some(project))
+                            .await
+                            .ok()
+                            .flatten()
+                            .map(|a| a.id)
+                    } else {
+                        None
+                    };
 
                     if project.is_empty() || subject.is_empty() {
                         serde_json::json!({"ok": false, "error": "project and subject are required"})
                     } else {
                         match registry
-                            .assign_with_agent(project, subject, description, agent_id)
+                            .assign_with_agent(project, subject, description, resolved_agent_id.as_deref())
                             .await
                         {
                             Ok(task) => serde_json::json!({

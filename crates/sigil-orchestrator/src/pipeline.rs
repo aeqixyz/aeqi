@@ -63,7 +63,7 @@ impl Pipeline {
 
         // Create parent task.
         let parent_subject = self.interpolate(&self.meta.description, vars);
-        let parent = store.create(prefix, &parent_subject)?;
+        let parent = store.create_unbound(prefix, &parent_subject)?;
 
         // Create step tasks as children.
         let mut step_task_ids: HashMap<String, TaskId> = HashMap::new();

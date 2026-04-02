@@ -23,7 +23,7 @@ pub(crate) async fn cmd_assign(
     };
 
     let mut store = open_tasks_for_project(project_name)?;
-    let mut task = store.create(&prefix, subject)?;
+    let mut task = store.create_unbound(&prefix, subject)?;
 
     if !description.is_empty() || priority.is_some() || mission_id.is_some() {
         let mid = mission_id.map(|s| s.to_string());

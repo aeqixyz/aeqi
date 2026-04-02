@@ -118,6 +118,8 @@ impl ProjectRegistry {
         }
     }
 
+    /// Create an unbound task (no agent_id). Callers should prefer
+    /// `assign_with_agent` with an explicit agent ID when available.
     pub async fn assign(
         &self,
         project_name: &str,
@@ -275,7 +277,7 @@ impl ProjectRegistry {
                 Ok(response) if response.content.is_some() => {
                     let mut result =
                         DecompositionResult::parse(response.content.as_deref().unwrap());
-                    let task_ids = result.materialize(&mut store, &project.prefix, &mission.id)?;
+                    let task_ids = result.materialize(&mut store, &project.prefix, &mission.id, None)?;
                     info!(
                         project = %project_name,
                         mission = %mission.id,

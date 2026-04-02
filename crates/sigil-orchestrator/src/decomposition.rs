@@ -152,12 +152,14 @@ impl DecompositionResult {
     }
 
     /// Materialize decomposed tasks into a TaskBoard, wiring dependencies.
-    /// Returns the created task IDs.
+    /// Returns the created task IDs. If `agent_id` is provided, all created
+    /// tasks are bound to that agent.
     pub fn materialize(
         &mut self,
         board: &mut TaskBoard,
         prefix: &str,
         mission_id: &str,
+        agent_id: Option<&str>,
     ) -> Result<Vec<TaskId>> {
         let mut created_ids: Vec<TaskId> = Vec::new();
 
@@ -181,7 +183,7 @@ impl DecompositionResult {
 
         // Create tasks.
         for task in &self.tasks {
-            let mut created = board.create(prefix, &task.subject)?;
+            let mut created = board.create_with_agent(prefix, &task.subject, agent_id)?;
             created = board.update(&created.id.0, |t| {
                 t.description = task.description.clone();
                 t.priority = task.priority;
@@ -249,7 +251,7 @@ mod tests {
 
         let text = "TASK: Step A\nDESC: First\nDEPS:\nLABELS:\n---\nTASK: Step B\nDESC: Second\nDEPS: 0\nLABELS:";
         let mut result = DecompositionResult::parse(text);
-        let ids = result.materialize(&mut board, "ts", "ts-m001").unwrap();
+        let ids = result.materialize(&mut board, "ts", "ts-m001", None).unwrap();
 
         assert_eq!(ids.len(), 2);
         let t1 = board.get(&ids[0].0).unwrap();
@@ -294,7 +296,7 @@ mod tests {
             cost_usd: 0.0,
         };
 
-        assert!(result.materialize(&mut board, "ts", "ts-m001").is_err());
+        assert!(result.materialize(&mut board, "ts", "ts-m001", None).is_err());
     }
 
     #[test]
@@ -304,7 +306,7 @@ mod tests {
 
         let text = "TASK: Only task\nDESC: solo\nDEPS:\nLABELS:";
         let mut result = DecompositionResult::parse(text);
-        let ids = result.materialize(&mut board, "ts", "ts-m042").unwrap();
+        let ids = result.materialize(&mut board, "ts", "ts-m042", None).unwrap();
 
         let task = board.get(&ids[0].0).unwrap();
         assert_eq!(task.mission_id.as_deref(), Some("ts-m042"));
