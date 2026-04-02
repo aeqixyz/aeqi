@@ -164,7 +164,9 @@ export default function AgentNav() {
 
   const handleSelectAgent = (name: string) => {
     setSelectedAgent(name);
-    navigate("/");
+    const currentPath = window.location.pathname;
+    const base = currentPath === "/login" ? "/" : currentPath;
+    navigate(`${base}?agent=${encodeURIComponent(name)}`);
   };
 
   const handleSelectDept = (id: string) => {
@@ -176,7 +178,7 @@ export default function AgentNav() {
     <nav className="agent-nav">
       <div
         className={`agent-row scope-header${!selectedAgent ? " active" : ""}`}
-        onClick={() => { setSelectedAgent(null); navigate("/"); }}
+        onClick={() => { setSelectedAgent(null); navigate(window.location.pathname); }}
       >
         {scopeName}
       </div>
