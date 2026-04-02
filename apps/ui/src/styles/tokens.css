@@ -213,7 +213,7 @@ a:hover {
 .rail-add {
   width: 40px;
   height: 40px;
-  border-radius: 12px;
+  border-radius: 14px;
   background: rgba(255,255,255,0.03);
   display: flex;
   align-items: center;
@@ -398,7 +398,7 @@ a:hover {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  border-radius: 20px;
+  border-radius: 14px;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -412,12 +412,14 @@ a:hover {
 .agent-row.active {
   color: #0a0a0a;
   background: rgba(255,255,255,0.88);
+  border-radius: 14px;
 }
 
 .agent-row.scope-header {
   justify-content: center;
   font-family: var(--font-mono);
   font-size: 11px;
+  font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -530,7 +532,7 @@ a:hover {
 
 .agent-nav-add {
   height: 40px;
-  border-radius: 20px;
+  border-radius: 14px;
   background: rgba(255,255,255,0.03);
   border: none;
   display: flex;
@@ -552,7 +554,7 @@ a:hover {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding-bottom: 4px;
+  padding-bottom: 10px;
 }
 
 .agent-nav-footer {
@@ -646,7 +648,7 @@ a:hover {
   flex: 1;
   height: 32px;
   background: rgba(255,255,255,0.02);
-  border: 1px solid rgba(255,255,255,0.25);
+  border: 2px solid rgba(255,255,255,0.5);
   border-radius: 8px;
   outline: none;
   color: rgba(255,255,255,0.85);
@@ -661,7 +663,7 @@ a:hover {
 }
 
 .floating-nav-search:focus {
-  border-color: rgba(255,255,255,0.4);
+  border-color: rgba(255,255,255,0.7);
 }
 
 
