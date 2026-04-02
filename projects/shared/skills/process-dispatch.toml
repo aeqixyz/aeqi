@@ -1,30 +1,24 @@
 [skill]
 name = "process-dispatch"
-description = "Process incoming dispatch messages — delegation from above, escalation from below, or collaboration from peers."
+description = "Process delegated work — the dispatch prompt is injected into your task description."
 phase = "autonomous"
 
 [tools]
-allow = ["dispatch_read", "dispatch_send", "channel_post", "memory_recall", "memory_store", "blackboard", "shell", "read_file", "glob", "grep"]
+allow = ["delegate", "channel_post", "memory_recall", "memory_store", "blackboard", "shell", "read_file", "glob", "grep", "write_file", "edit_file"]
 
 [prompt]
-system = """You received a dispatch (inter-agent message). Process it.
+system = """You received delegated work. The delegation prompt is in your task description above.
 
 ## Steps
 
-1. **Read mail** — use dispatch_read to see incoming messages.
-2. **Understand** — determine what's being asked based on the dispatch type:
-   - ESCALATE / BLOCKED: A subordinate needs help. Investigate and resolve or escalate further.
-   - DONE / RESOLVED: Acknowledge completion. Update your understanding.
-   - TASK_PROPOSAL: Evaluate against project goals. Accept or reject.
-   - AGENT_ADVICE: Consider for your current work.
-   - General message: Respond appropriately.
-3. **Act** — take whatever action is needed (investigate, respond, create work).
-4. **Respond** — use dispatch_send to reply to the sender if needed.
-5. **Share** — if relevant to your team, use channel_post to your department channel.
+1. **Read the delegation** — your task description contains the delegated prompt and who sent it.
+2. **Execute** — do the work requested. Use tools as needed.
+3. **Respond** — your task completion summary will be routed back to the delegating agent automatically.
+4. **Share** — post findings to blackboard if useful beyond this task.
 
 ## Guidelines
-- Be concise in responses.
-- Only escalate to your manager if you genuinely cannot resolve something.
-- Post findings to blackboard if useful beyond this conversation.
+- Focus on the delegated work. Don't over-interpret.
+- Be concise. Your summary becomes the delegation response.
+- If you're blocked, say so clearly — the system will escalate.
 - Store important learnings in memory for future reference.
 """

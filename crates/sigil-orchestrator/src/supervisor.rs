@@ -1081,22 +1081,68 @@ impl Supervisor {
 
                         match &outcome {
                             TaskOutcome::Done(summary) => {
-                                dispatch_bus_worker
-                                    .send(Dispatch::new_typed(
-                                        &format!("supervisor-{project_name_task}"),
-                                        &outcome_recipient,
-                                        DispatchKind::DelegateResponse {
-                                            reply_to: delegate_dispatch_id
-                                                .clone()
-                                                .unwrap_or_else(|| task_id_clone.clone()),
-                                            response_mode: delegate_response_mode.clone(),
-                                            content: format!(
-                                                "Task {} completed: {}",
-                                                task_id_clone, summary
-                                            ),
-                                        },
-                                    ))
-                                    .await;
+                                let response_content = format!(
+                                    "Task {} completed: {}",
+                                    task_id_clone, summary
+                                );
+                                let reply_to_id = delegate_dispatch_id
+                                    .clone()
+                                    .unwrap_or_else(|| task_id_clone.clone());
+
+                                match delegate_response_mode.as_str() {
+                                    "none" => {
+                                        // Fire-and-forget: no response dispatch.
+                                        debug!(
+                                            task = %task_id_clone,
+                                            "response_mode=none, skipping response dispatch"
+                                        );
+                                    }
+                                    "department" => {
+                                        // Post to department channel via ConversationStore.
+                                        if let Some(ref cs) = conversation_store {
+                                            let channel_name = format!("dept:{}", outcome_recipient);
+                                            let chat_id = crate::conversation_store::named_channel_chat_id(&channel_name);
+                                            let _ = cs.ensure_channel(chat_id, "department", &channel_name).await;
+                                            let _ = cs.record_with_source(
+                                                chat_id,
+                                                "assistant",
+                                                &response_content,
+                                                Some("delegation"),
+                                            ).await;
+                                            debug!(
+                                                task = %task_id_clone,
+                                                channel = %channel_name,
+                                                "response_mode=department, posted to channel"
+                                            );
+                                        }
+                                        // Also send dispatch so delegate_from agent gets notified.
+                                        dispatch_bus_worker
+                                            .send(Dispatch::new_typed(
+                                                &format!("supervisor-{project_name_task}"),
+                                                &outcome_recipient,
+                                                DispatchKind::DelegateResponse {
+                                                    reply_to: reply_to_id,
+                                                    response_mode: delegate_response_mode.clone(),
+                                                    content: response_content.clone(),
+                                                },
+                                            ))
+                                            .await;
+                                    }
+                                    // "origin", "perpetual", "async", or unknown: send to delegate_from.
+                                    _ => {
+                                        dispatch_bus_worker
+                                            .send(Dispatch::new_typed(
+                                                &format!("supervisor-{project_name_task}"),
+                                                &outcome_recipient,
+                                                DispatchKind::DelegateResponse {
+                                                    reply_to: reply_to_id,
+                                                    response_mode: delegate_response_mode.clone(),
+                                                    content: response_content,
+                                                },
+                                            ))
+                                            .await;
+                                    }
+                                }
 
                                 // Post completion summary to blackboard for sibling workers.
                                 if let Some(ref bb) = blackboard_worker

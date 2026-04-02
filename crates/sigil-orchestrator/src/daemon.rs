@@ -330,6 +330,156 @@ impl Daemon {
         }
     }
 
+    /// Consume pending DelegateRequest dispatches for all active agents.
+    /// For each dispatch, creates an agent-bound task with the delegation prompt.
+    /// This is the primary consumption path — agents don't need DispatchReceived
+    /// event triggers to receive delegated work.
+    async fn consume_agent_dispatches(&self) {
+        let agent_registry = match &self.agent_registry {
+            Some(ar) => ar,
+            None => return,
+        };
+
+        let agents = match agent_registry.list_active().await {
+            Ok(a) => a,
+            Err(_) => return,
+        };
+
+        for agent in &agents {
+            // Leader mail is already consumed in patrol_all(). Skip to avoid double-processing.
+            if agent.name == self.registry.leader_agent_name {
+                continue;
+            }
+
+            let dispatches = self.dispatch_bus.read(&agent.name).await;
+            if dispatches.is_empty() {
+                // Also check by agent UUID (dispatches may be addressed by ID).
+                let id_dispatches = self.dispatch_bus.read(&agent.id).await;
+                if id_dispatches.is_empty() {
+                    continue;
+                }
+                self.process_agent_dispatches(&agent.id, &agent.name, &agent.project, &id_dispatches)
+                    .await;
+            } else {
+                self.process_agent_dispatches(&agent.id, &agent.name, &agent.project, &dispatches)
+                    .await;
+            }
+        }
+    }
+
+    /// Process a batch of dispatches for a specific agent.
+    async fn process_agent_dispatches(
+        &self,
+        agent_id: &str,
+        agent_name: &str,
+        project: &Option<String>,
+        dispatches: &[crate::message::Dispatch],
+    ) {
+        let project = match project {
+            Some(p) => p.clone(),
+            None => {
+                warn!(agent = %agent_name, "agent has no project scope, cannot create task for dispatch");
+                return;
+            }
+        };
+
+        for dispatch in dispatches {
+            if dispatch.requires_ack {
+                self.dispatch_bus.acknowledge(&dispatch.id).await;
+            }
+
+            match &dispatch.kind {
+                DispatchKind::DelegateRequest {
+                    prompt,
+                    response_mode,
+                    create_task,
+                    skill,
+                    ..
+                } => {
+                    if !create_task {
+                        // Fire-and-forget: just log and skip task creation.
+                        info!(
+                            agent = %agent_name,
+                            from = %dispatch.from,
+                            "dispatch consumed (no task requested)"
+                        );
+                        continue;
+                    }
+
+                    let subject = format!(
+                        "Delegation from {}",
+                        dispatch.from
+                    );
+                    let description = format!(
+                        "## Delegated Work\n\n{}\n\n---\n*From: {} | Response mode: {}*",
+                        prompt, dispatch.from, response_mode
+                    );
+
+                    let labels = vec![
+                        format!("delegate_from:{}", dispatch.from),
+                        format!("delegate_dispatch:{}", dispatch.id),
+                        format!("delegate_response_mode:{}", response_mode),
+                    ];
+
+                    let skill_name = skill.as_deref().unwrap_or("process-dispatch");
+
+                    match self
+                        .registry
+                        .assign_with_skill_agent_labels(
+                            &project,
+                            &subject,
+                            &description,
+                            skill_name,
+                            Some(agent_id),
+                            &labels,
+                        )
+                        .await
+                    {
+                        Ok(task) => {
+                            info!(
+                                task = %task.id,
+                                agent = %agent_name,
+                                from = %dispatch.from,
+                                response_mode = %response_mode,
+                                "dispatch consumed → task created"
+                            );
+                        }
+                        Err(e) => {
+                            warn!(
+                                agent = %agent_name,
+                                from = %dispatch.from,
+                                error = %e,
+                                "failed to create task from dispatch"
+                            );
+                        }
+                    }
+                }
+                DispatchKind::DelegateResponse { content, reply_to, .. } => {
+                    // DelegateResponses for non-leader agents: log for now.
+                    // Future: inject into agent's perpetual session.
+                    info!(
+                        agent = %agent_name,
+                        reply_to = %reply_to,
+                        content_len = content.len(),
+                        "delegate response received (logged, not yet injected into session)"
+                    );
+                }
+                DispatchKind::HumanEscalation { subject, .. } => {
+                    info!(
+                        agent = %agent_name,
+                        subject = %subject,
+                        "human escalation received by non-leader agent, re-routing to leader"
+                    );
+                    // Re-route to leader.
+                    let mut rerouted = dispatch.clone();
+                    rerouted.to = self.registry.leader_agent_name.clone();
+                    rerouted.read = false;
+                    self.dispatch_bus.send(rerouted).await;
+                }
+            }
+        }
+    }
+
     /// Start the session tracker in a dedicated tokio::spawn.
     /// Returns the shutdown Notify so it can be stopped later.
     pub fn start_session_tracker(&mut self, tracker: SessionTracker) {
@@ -692,6 +842,9 @@ impl Daemon {
             if let Err(e) = self.registry.patrol_all().await {
                 warn!(error = %e, "patrol cycle failed");
             }
+
+            // 1b. Consume dispatches for all active agents (not just leader).
+            self.consume_agent_dispatches().await;
 
             // 2. Run due triggers (schedule + once types).
             if let Some(ref trigger_store) = self.trigger_store {
