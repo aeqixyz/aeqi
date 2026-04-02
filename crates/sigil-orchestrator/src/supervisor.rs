@@ -133,10 +133,6 @@ pub struct Supervisor {
 }
 
 impl Supervisor {
-    /// Select which agent runs a task. In the current architecture tasks are
-    /// always agent-bound (one supervisor per project), so we simply return the
-    /// project name as the agent identity.
-
     pub fn new(
         project: &Project,
         provider: Arc<dyn Provider>,
