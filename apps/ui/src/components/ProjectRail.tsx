@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useChatStore } from "@/store/chat";
 import { useDaemonStore } from "@/store/daemon";
 import { api } from "@/lib/api";
 import ProjectPatternIcon from "./ProjectPatternIcon";
 
 export default function ProjectRail() {
-  const { pathname } = useLocation();
   const navigate = useNavigate();
   const channel = useChatStore((s) => s.channel);
   const setChannel = useChatStore((s) => s.setChannel);
@@ -34,20 +33,14 @@ export default function ProjectRail() {
   const selectedProject = channel ?? null;
 
   return (
-    <div className="project-rail">
-      {/* AEQI home icon */}
-      <div className="rail-home">
-        <button
-          className={`rail-home-btn ${!channel && pathname === "/" ? "rail-home-btn-active" : ""}`}
-          onClick={() => { setChannel(null); navigate("/"); }}
-          title="AEQI"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M12 2L2 7l10 5 10-5-10-5z" />
-            <path d="M2 17l10 5 10-5" />
-            <path d="M2 12l10 5 10-5" />
-          </svg>
-        </button>
+    <div className="rail">
+      {/* AEQI mark */}
+      <div
+        className={`rail-icon${!channel ? " active" : ""}`}
+        onClick={() => { setChannel(null); navigate("/"); }}
+        title="AEQI"
+      >
+        A
       </div>
 
       <div className="rail-separator" />
@@ -61,7 +54,7 @@ export default function ProjectRail() {
           return (
             <div key={p.name} className="rail-project-wrapper">
               {/* Selection pill */}
-              <div className={`rail-pill ${isSelected ? "rail-pill-selected" : ""}`} />
+              <div className={`rail-pill${isSelected ? " rail-pill-selected" : ""}`} />
 
               <button
                 className="rail-project-btn"
@@ -82,6 +75,9 @@ export default function ProjectRail() {
           );
         })}
       </div>
+
+      {/* Add project button */}
+      <div className="rail-add" title="New project">+</div>
 
       {/* Bottom status */}
       <div className="rail-bottom">
