@@ -66,7 +66,9 @@ export default function AppLayout() {
             </span>
           </div>
 
-          <Outlet />
+          <div className="content-panel">
+            <Outlet />
+          </div>
         </div>
       </div>
       <CommandPalette open={paletteOpen} onClose={closePalette} />

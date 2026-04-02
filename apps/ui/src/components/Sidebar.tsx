@@ -178,7 +178,7 @@ export default function AgentNav() {
         className={`agent-row scope-header${!selectedAgent ? " active" : ""}`}
         onClick={() => { setSelectedAgent(null); navigate("/"); }}
       >
-        _{scopeName}_
+        {scopeName}
       </div>
 
       <div className="agent-nav-sep" />
