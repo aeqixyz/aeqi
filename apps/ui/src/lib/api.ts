@@ -11,7 +11,7 @@ class ApiError extends Error {
 }
 
 function getToken(): string | null {
-  return localStorage.getItem("sigil_token");
+  return localStorage.getItem("aeqi_token");
 }
 
 async function parseResponseBody(res: Response): Promise<any> {
@@ -42,7 +42,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const body = await parseResponseBody(res);
 
   if (res.status === 401) {
-    localStorage.removeItem("sigil_token");
+    localStorage.removeItem("aeqi_token");
     window.location.href = "/login";
     throw new ApiError(401, "Unauthorized");
   }
