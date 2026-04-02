@@ -236,6 +236,12 @@ export default function App() {
           >
             Docs
           </a>
+          <a
+            href="https://app.aeqi.ai"
+            className="px-4 py-1.5 border border-white/10 hover:border-white/20 hover:text-white/70 transition-colors"
+          >
+            Enter
+          </a>
         </div>
       </nav>
 
@@ -263,16 +269,16 @@ export default function App() {
         <FadeIn delay={450}>
           <div className="flex gap-4">
             <a
-              href="https://github.com/0xAEQI/aeqi"
+              href="https://app.aeqi.ai"
               className="px-6 py-3 text-[13px] font-medium tracking-wide border border-white/20 text-white/80 hover:bg-white/5 transition-colors"
             >
-              View Source
+              Enter System
             </a>
             <a
-              href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md"
+              href="https://github.com/0xAEQI/aeqi"
               className="px-6 py-3 text-[13px] font-medium tracking-wide text-white/30 hover:text-white/50 transition-colors"
             >
-              Read Architecture
+              View Source
             </a>
           </div>
         </FadeIn>
