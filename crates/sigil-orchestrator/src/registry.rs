@@ -324,44 +324,8 @@ impl ProjectRegistry {
     pub async fn patrol_all(&self) -> Result<()> {
         let whispers = self.dispatch_bus.read(&self.leader_agent_name).await;
         for w in &whispers {
-            let mut handled = true;
-            match &w.kind {
-                crate::message::DispatchKind::PatrolReport {
-                    project,
-                    active,
-                    pending,
-                } => {
-                    info!(from = %w.from, project = %project, active = active, pending = pending, "supervisor report");
-                }
-                crate::message::DispatchKind::WorkerCrashed {
-                    project,
-                    worker,
-                    error,
-                } => {
-                    warn!(from = %w.from, project = %project, worker = %worker, error = %error, "worker crashed");
-                }
-                crate::message::DispatchKind::TaskDone { task_id, .. } => {
-                    if let Some(ref operation_store) = self.operation_store {
-                        let qid = sigil_tasks::TaskId(task_id.clone());
-                        let mut store = operation_store.lock().await;
-                        match store.mark_task_closed(&qid) {
-                            Ok(completed_ops) => {
-                                for op_id in completed_ops {
-                                    info!(operation = %op_id, "operation completed");
-                                }
-                            }
-                            Err(e) => {
-                                handled = false;
-                                warn!(task = %task_id, error = %e, "failed to update operation store");
-                            }
-                        }
-                    }
-                }
-                _ => {
-                    info!(from = %w.from, kind = %w.kind.subject_tag(), "dispatch received");
-                }
-            }
-            if handled && w.requires_ack {
+            info!(from = %w.from, kind = %w.kind.subject_tag(), "dispatch received");
+            if w.requires_ack {
                 self.dispatch_bus.acknowledge(&w.id).await;
             }
         }
@@ -391,23 +355,6 @@ impl ProjectRegistry {
 
         futures::future::join_all(futures).await;
 
-        // Dispatch Resolution messages to the appropriate supervisors.
-        // Leader agent sends Resolution dispatches addressed to "supervisor-{project}".
-        for (project_name, sup) in &supervisor_entries {
-            let sup_recipient = format!("supervisor-{}", project_name);
-            let dispatches = self.dispatch_bus.read(&sup_recipient).await;
-            for w in dispatches {
-                if let crate::message::DispatchKind::Resolution { task_id, answer } = &w.kind {
-                    info!(project = %project_name, task = %task_id, "dispatching resolution to supervisor");
-                    let s = sup.lock().await;
-                    s.handle_resolution(task_id, answer).await;
-                    if w.requires_ack {
-                        self.dispatch_bus.acknowledge(&w.id).await;
-                    }
-                }
-            }
-        }
-
         Ok(())
     }
 
@@ -425,10 +372,10 @@ impl ProjectRegistry {
                 (0, 0, 0)
             };
 
-            // Get team leader from the supervisor.
+            // Get escalation target from the supervisor.
             let team_leader = if let Some(s) = supervisors.get(name) {
                 let guard = s.lock().await;
-                guard.team.as_ref().map(|t| t.leader.clone())
+                Some(guard.escalation_target.clone())
             } else {
                 None
             };
@@ -564,14 +511,6 @@ impl ProjectRegistry {
                 .collect()
         }; // projects RwLock RELEASED here.
 
-        let supervisor_refs: Vec<(String, Arc<Mutex<Supervisor>>)> = {
-            let supervisors = self.supervisors.read().await;
-            supervisors
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect()
-        }; // supervisors RwLock RELEASED here.
-
         // Step 2: Read each project's data without holding registry locks.
         let mut summaries = Vec::new();
 
@@ -624,22 +563,9 @@ impl ProjectRegistry {
                 (0, 0, 0, 0, 0, 0, 0, 0)
             };
 
-            let team_info = supervisor_refs
-                .iter()
-                .find(|(k, _)| k == name)
-                .and_then(|(_, sup)| {
-                    sup.try_lock().ok().and_then(|guard| {
-                        guard.team.as_ref().map(|t| TeamSummary {
-                            leader: t.leader.clone(),
-                            agents: t.effective_agents(),
-                        })
-                    })
-                });
-
             summaries.push(ProjectSummary {
                 name: name.clone(),
                 prefix: project.prefix.clone(),
-                team: team_info,
                 open_tasks,
                 total_tasks,
                 pending_tasks,
@@ -688,7 +614,6 @@ pub struct ProjectStatus {
 pub struct ProjectSummary {
     pub name: String,
     pub prefix: String,
-    pub team: Option<TeamSummary>,
     pub open_tasks: u32,
     pub total_tasks: u32,
     pub pending_tasks: u32,
@@ -708,194 +633,55 @@ pub struct DepartmentSummary {
     pub description: Option<String>,
 }
 
-#[derive(Debug, Clone)]
-pub struct TeamSummary {
-    pub leader: String,
-    pub agents: Vec<String>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::message::{Dispatch, DispatchKind};
-    use anyhow::Result;
-    use async_trait::async_trait;
-    use sigil_core::ExecutionMode;
-    use sigil_core::config::ProjectConfig;
-    use sigil_core::traits::{ChatRequest, ChatResponse, Provider, StopReason, Usage};
-    use std::path::Path;
-    use tempfile::TempDir;
-    use tokio::time::{Duration, sleep};
-
-    struct DoneProvider;
-
-    #[async_trait]
-    impl Provider for DoneProvider {
-        async fn chat(&self, _request: &ChatRequest) -> Result<ChatResponse> {
-            Ok(ChatResponse {
-                content: Some("DONE: fixed".to_string()),
-                tool_calls: Vec::new(),
-                usage: Usage::default(),
-                stop_reason: StopReason::EndTurn,
-            })
-        }
-
-        fn name(&self) -> &str {
-            "done-provider"
-        }
-
-        async fn health_check(&self) -> Result<()> {
-            Ok(())
-        }
-    }
-
-    fn temp_project(name: &str, prefix: &str) -> Result<(Arc<Project>, TempDir)> {
-        let dir = TempDir::new()?;
-        std::fs::create_dir_all(dir.path().join(".tasks"))?;
-        let config = ProjectConfig {
-            name: name.to_string(),
-            prefix: prefix.to_string(),
-            repo: dir.path().display().to_string(),
-            model: Some("test-model".to_string()),
-            runtime: None,
-            max_workers: 1,
-            worktree_root: None,
-            execution_mode: ExecutionMode::Agent,
-            max_turns: Some(1),
-            max_budget_usd: None,
-            worker_timeout_secs: 60,
-            max_cost_per_day_usd: None,
-            team: None,
-            orchestrator: None,
-            missions: Vec::new(),
-            departments: Vec::new(),
-            domain_hints: Vec::new(),
-            compact_instructions: None,
-        };
-        let project = Project::from_config(&config, dir.path(), "test-model")?;
-        Ok((Arc::new(project), dir))
-    }
 
     #[tokio::test]
-    async fn patrol_all_closes_operations_from_taskdone_dispatches() {
+    async fn patrol_all_consumes_leader_dispatches() {
         let dispatch_bus = Arc::new(DispatchBus::new());
-        let mut registry = ProjectRegistry::new(dispatch_bus.clone(), "leader".to_string());
-
-        let op_dir = TempDir::new().unwrap();
-        let operation_store = Arc::new(Mutex::new(
-            OperationStore::open(Path::new(&op_dir.path().join("operations.json"))).unwrap(),
-        ));
-        registry.set_operation_store(operation_store.clone());
-
-        let (project, _project_dir) = temp_project("demo", "dm").unwrap();
-        let provider: Arc<dyn Provider> = Arc::new(DoneProvider);
-        let mut supervisor = Supervisor::new(&project, provider, Vec::new(), dispatch_bus.clone());
-        supervisor.execution_mode = sigil_core::ExecutionMode::Agent;
-        registry.register_project(project.clone(), supervisor).await;
-
-        let task = registry.assign("demo", "close the loop", "").await.unwrap();
-        let operation_id = {
-            let mut store = operation_store.lock().await;
-            store
-                .create("demo-op", vec![(task.id.clone(), "demo".to_string())])
-                .unwrap()
-                .id
-                .clone()
-        };
-
-        let mut completed = false;
-        for _ in 0..20 {
-            registry.patrol_all().await.unwrap();
-            {
-                let store = operation_store.lock().await;
-                if let Some(op) = store.get(&operation_id)
-                    && op.closed_at.is_some()
-                {
-                    completed = true;
-                    break;
-                }
-            }
-            sleep(Duration::from_millis(20)).await;
-        }
-
-        assert!(
-            completed,
-            "operation should close after TaskDone dispatch is processed"
-        );
-    }
-
-    #[tokio::test]
-    async fn patrol_all_updates_operations_from_leader_inbox_dispatches() {
-        let dispatch_bus = Arc::new(DispatchBus::new());
-        let mut registry = ProjectRegistry::new(dispatch_bus.clone(), "leader".to_string());
-
-        let op_dir = TempDir::new().unwrap();
-        let operation_store = Arc::new(Mutex::new(
-            OperationStore::open(Path::new(&op_dir.path().join("operations.json"))).unwrap(),
-        ));
-        registry.set_operation_store(operation_store.clone());
-
-        let (project, _project_dir) = temp_project("demo", "dm").unwrap();
-        registry.register_project_only(project.clone()).await;
-
-        let task = registry.assign("demo", "manual close", "").await.unwrap();
-        let operation_id = {
-            let mut store = operation_store.lock().await;
-            store
-                .create("manual-op", vec![(task.id.clone(), "demo".to_string())])
-                .unwrap()
-                .id
-                .clone()
-        };
+        let registry = ProjectRegistry::new(dispatch_bus.clone(), "leader".to_string());
 
         dispatch_bus
             .send(Dispatch::new_typed(
                 "supervisor-demo",
                 "leader",
-                DispatchKind::TaskDone {
-                    task_id: task.id.to_string(),
-                    summary: "done".to_string(),
+                DispatchKind::DelegateResponse {
+                    reply_to: "t1".to_string(),
+                    response_mode: "origin".to_string(),
+                    content: "done".to_string(),
                 },
             ))
             .await;
 
         registry.patrol_all().await.unwrap();
 
-        let store = operation_store.lock().await;
-        let op = store.get(&operation_id).unwrap();
-        assert!(op.closed_at.is_some());
+        // Dispatches are consumed by patrol_all.
+        let remaining = dispatch_bus.read("leader").await;
+        assert!(remaining.is_empty());
     }
 
     #[tokio::test]
-    async fn patrol_all_acknowledges_processed_taskdone_dispatches() {
+    async fn patrol_all_acknowledges_processed_dispatches() {
         let dispatch_bus = Arc::new(DispatchBus::new());
-        let mut registry = ProjectRegistry::new(dispatch_bus.clone(), "leader".to_string());
-
-        let op_dir = TempDir::new().unwrap();
-        let operation_store = Arc::new(Mutex::new(
-            OperationStore::open(Path::new(&op_dir.path().join("operations.json"))).unwrap(),
-        ));
-        registry.set_operation_store(operation_store.clone());
-
-        let (project, _project_dir) = temp_project("demo", "dm").unwrap();
-        registry.register_project_only(project.clone()).await;
-        let task = registry.assign("demo", "acked close", "").await.unwrap();
-        {
-            let mut store = operation_store.lock().await;
-            store
-                .create("acked-op", vec![(task.id.clone(), "demo".to_string())])
-                .unwrap();
-        }
+        let registry = ProjectRegistry::new(dispatch_bus.clone(), "leader".to_string());
 
         dispatch_bus
-            .send(Dispatch::new_typed(
-                "supervisor-demo",
-                "leader",
-                DispatchKind::TaskDone {
-                    task_id: task.id.to_string(),
-                    summary: "done".to_string(),
-                },
-            ))
+            .send(
+                Dispatch::new_typed(
+                    "supervisor-demo",
+                    "leader",
+                    DispatchKind::DelegateRequest {
+                        prompt: "do something".to_string(),
+                        response_mode: "origin".to_string(),
+                        create_task: false,
+                        skill: None,
+                        reply_to: None,
+                    },
+                )
+                .with_ack_required(),
+            )
             .await;
 
         registry.patrol_all().await.unwrap();
@@ -903,7 +689,7 @@ mod tests {
         let retries = dispatch_bus.retry_unacked(0).await;
         assert!(
             retries.is_empty(),
-            "processed TaskDone dispatch should be acknowledged"
+            "processed dispatch should be acknowledged"
         );
     }
 }

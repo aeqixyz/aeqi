@@ -330,31 +330,6 @@ impl Default for TeamConfig {
     }
 }
 
-/// Per-project team assignment — which agents own this project.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProjectTeamConfig {
-    /// The team leader for this project.
-    pub leader: String,
-    /// Team members (includes leader). If empty, defaults to just the leader.
-    #[serde(default)]
-    pub agents: Vec<String>,
-}
-
-impl ProjectTeamConfig {
-    /// Get the effective agent list (leader is always included).
-    pub fn effective_agents(&self) -> Vec<String> {
-        if self.agents.is_empty() {
-            vec![self.leader.clone()]
-        } else {
-            let mut agents = self.agents.clone();
-            if !agents.contains(&self.leader) {
-                agents.insert(0, self.leader.clone());
-            }
-            agents
-        }
-    }
-}
-
 fn default_leader() -> String {
     "leader".to_string()
 }
@@ -676,9 +651,6 @@ pub struct ProjectConfig {
     pub worker_timeout_secs: u64,
     #[serde(default)]
     pub max_cost_per_day_usd: Option<f64>,
-    /// Per-project team assignment. If None, falls back to system team.
-    #[serde(default)]
-    pub team: Option<ProjectTeamConfig>,
     /// Per-project orchestrator overrides. If None, falls back to global [orchestrator].
     #[serde(default)]
     pub orchestrator: Option<OrchestratorConfig>,
@@ -1040,21 +1012,6 @@ impl SigilConfig {
             .collect()
     }
 
-    /// Get the effective team for a project.
-    /// Returns the project's own team if configured, otherwise builds one from the system team.
-    pub fn project_team(&self, project_name: &str) -> ProjectTeamConfig {
-        if let Some(project) = self.project(project_name)
-            && let Some(ref team) = project.team
-        {
-            return team.clone();
-        }
-        // Fall back to system team leader.
-        ProjectTeamConfig {
-            leader: self.team.leader.clone(),
-            agents: vec![self.team.leader.clone()],
-        }
-    }
-
     /// Get the system team leader agent name.
     pub fn leader(&self) -> &str {
         &self.team.leader
@@ -1080,25 +1037,7 @@ impl SigilConfig {
             ));
         }
 
-        // Validate per-project teams.
-        for project in &self.projects {
-            if let Some(ref team) = project.team {
-                if !agent_names.contains(team.leader.as_str()) {
-                    errors.push(format!(
-                        "project '{}' team leader '{}' is not a defined agent",
-                        project.name, team.leader
-                    ));
-                }
-                for name in &team.agents {
-                    if !agent_names.contains(name.as_str()) {
-                        errors.push(format!(
-                            "project '{}' team references unknown agent: '{name}'",
-                            project.name
-                        ));
-                    }
-                }
-            }
-        }
+
 
         errors
     }
@@ -1585,131 +1524,6 @@ sigil = "/home/user/sigil"
             PathBuf::from("/home/user/sigil")
         );
         assert_eq!(config.resolve_repo("/raw/path"), PathBuf::from("/raw/path"));
-    }
-
-    #[test]
-    fn test_per_project_team_config() {
-        let toml = r#"
-[sigil]
-name = "test"
-
-[team]
-leader = "alpha"
-agents = ["alpha"]
-
-[[agents]]
-name = "alpha"
-prefix = "au"
-role = "orchestrator"
-
-[[agents]]
-name = "beta"
-prefix = "fk"
-role = "advisor"
-expertise = ["project-a"]
-
-[[agents]]
-name = "gamma"
-prefix = "fm"
-role = "advisor"
-expertise = ["project-b"]
-
-[[projects]]
-name = "project-a"
-prefix = "as"
-repo = "/tmp/algo"
-team.leader = "beta"
-team.agents = ["beta"]
-
-[[projects]]
-name = "project-b"
-prefix = "rd"
-repo = "/tmp/rift"
-team.leader = "gamma"
-team.agents = ["gamma"]
-
-[[projects]]
-name = "standalone"
-prefix = "sa"
-repo = "/tmp/standalone"
-"#;
-        let config = SigilConfig::parse(toml).unwrap();
-
-        // Per-project teams.
-        let algo_team = config.project_team("project-a");
-        assert_eq!(algo_team.leader, "beta");
-        assert_eq!(algo_team.effective_agents(), vec!["beta"]);
-
-        let rift_team = config.project_team("project-b");
-        assert_eq!(rift_team.leader, "gamma");
-        assert_eq!(rift_team.effective_agents(), vec!["gamma"]);
-
-        // Fallback to system team.
-        let standalone_team = config.project_team("standalone");
-        assert_eq!(standalone_team.leader, "alpha");
-        assert_eq!(standalone_team.effective_agents(), vec!["alpha"]);
-
-        // System leader.
-        assert_eq!(config.leader(), "alpha");
-
-        // Validation should pass.
-        let issues = config.validate();
-        assert!(issues.is_empty(), "unexpected issues: {issues:?}");
-    }
-
-    #[test]
-    fn test_team_validation_unknown_agent() {
-        let toml = r#"
-[sigil]
-name = "test"
-
-[team]
-leader = "alpha"
-
-[[agents]]
-name = "alpha"
-prefix = "au"
-role = "orchestrator"
-
-[[projects]]
-name = "alpha"
-prefix = "al"
-repo = "/tmp/alpha"
-team.leader = "ghost"
-team.agents = ["ghost"]
-"#;
-        let config = SigilConfig::parse(toml).unwrap();
-        let issues = config.validate_teams();
-        assert!(
-            issues.iter().any(|i| i.contains("ghost")),
-            "expected team validation to flag unknown agent 'ghost': {issues:?}"
-        );
-    }
-
-    #[test]
-    fn test_project_team_effective_agents() {
-        use super::ProjectTeamConfig;
-
-        // Empty agents list → leader only.
-        let team = ProjectTeamConfig {
-            leader: "beta".to_string(),
-            agents: vec![],
-        };
-        assert_eq!(team.effective_agents(), vec!["beta"]);
-
-        // Leader already in agents list.
-        let team = ProjectTeamConfig {
-            leader: "beta".to_string(),
-            agents: vec!["beta".to_string(), "gamma".to_string()],
-        };
-        assert_eq!(team.effective_agents(), vec!["beta", "gamma"]);
-
-        // Leader not in agents list → prepended.
-        let team = ProjectTeamConfig {
-            leader: "beta".to_string(),
-            agents: vec!["gamma".to_string()],
-        };
-        assert_eq!(team.effective_agents(), vec!["beta", "gamma"]);
     }
 
     #[test]

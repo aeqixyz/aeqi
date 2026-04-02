@@ -16,7 +16,7 @@ pub(crate) async fn cmd_team(
     println!("  max_bg_cost: ${:.2}", config.team.max_background_cost_usd);
     println!();
 
-    // Show per-project teams.
+    // Show per-project info.
     let projects: Vec<_> = if let Some(name) = project_filter {
         config.projects.iter().filter(|p| p.name == name).collect()
     } else {
@@ -30,21 +30,13 @@ pub(crate) async fn cmd_team(
         return Ok(());
     }
 
-    println!("Project Teams:");
+    println!("Projects:");
     for project_cfg in projects {
-        let team = config.project_team(&project_cfg.name);
-        let source = if project_cfg.team.is_some() {
-            "configured"
-        } else {
-            "system fallback"
-        };
         let org_hint = format_project_org_hint(&config, &project_cfg.name);
         println!(
-            "  {} → leader={} agents=[{}] ({}){}",
+            "  {} → leader={}{}",
             project_cfg.name,
-            team.leader,
-            team.effective_agents().join(", "),
-            source,
+            config.leader(),
             org_hint,
         );
     }

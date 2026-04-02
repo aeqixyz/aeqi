@@ -932,13 +932,6 @@ impl ChatEngine {
                     s.done_tasks,
                     s.active_missions
                 ));
-                if let Some(t) = &s.team {
-                    context.push_str(&format!(
-                        "Team: {} (lead), agents: {}\n",
-                        t.leader,
-                        t.agents.join(", ")
-                    ));
-                }
                 if !s.departments.is_empty() {
                     context.push_str("Departments:\n");
                     for d in &s.departments {
@@ -1224,32 +1217,24 @@ impl ChatEngine {
         let summaries = registry.list_project_summaries().await;
         let summary = summaries.into_iter().find(|s| s.name == project_name)?;
 
+        let department_name = department_hint?;
+
         let mut allowed = HashSet::new();
-
-        if let Some(department_name) = department_hint {
-            if let Some(department) = summary
-                .departments
-                .iter()
-                .find(|d| d.name.eq_ignore_ascii_case(department_name))
-            {
-                if let Some(lead) = &department.lead {
-                    allowed.insert(lead.clone());
-                }
-                allowed.extend(department.agents.iter().cloned());
-            } else {
-                warn!(
-                    project = %project_name,
-                    department = %department_name,
-                    "department-scoped chat referenced unknown department, falling back to project team"
-                );
-            }
-        }
-
-        if allowed.is_empty()
-            && let Some(team) = summary.team
+        if let Some(department) = summary
+            .departments
+            .iter()
+            .find(|d| d.name.eq_ignore_ascii_case(department_name))
         {
-            allowed.insert(team.leader);
-            allowed.extend(team.agents);
+            if let Some(lead) = &department.lead {
+                allowed.insert(lead.clone());
+            }
+            allowed.extend(department.agents.iter().cloned());
+        } else {
+            warn!(
+                project = %project_name,
+                department = %department_name,
+                "department-scoped chat referenced unknown department"
+            );
         }
 
         Some(allowed)
@@ -1498,7 +1483,7 @@ mod tests {
     use async_trait::async_trait;
     use chrono::Utc;
     use sigil_core::config::{
-        DepartmentConfig, ExecutionMode, PeerAgentConfig, ProjectConfig, ProjectTeamConfig,
+        DepartmentConfig, ExecutionMode, PeerAgentConfig, ProjectConfig,
     };
     use sigil_core::traits::{
         ChatRequest, ChatResponse as ProviderChatResponse, Provider, StopReason, Usage,
@@ -1522,7 +1507,6 @@ mod tests {
             max_budget_usd: None,
             worker_timeout_secs: 60,
             max_cost_per_day_usd: None,
-            team: None,
             orchestrator: None,
             missions: Vec::new(),
             departments: Vec::new(),
@@ -1877,10 +1861,6 @@ mod tests {
             max_budget_usd: None,
             worker_timeout_secs: 60,
             max_cost_per_day_usd: None,
-            team: Some(ProjectTeamConfig {
-                leader: "leader".to_string(),
-                agents: vec!["researcher".to_string(), "reviewer".to_string()],
-            }),
             orchestrator: None,
             missions: Vec::new(),
             departments: vec![DepartmentConfig {
@@ -1896,13 +1876,7 @@ mod tests {
         let provider: Arc<dyn Provider> = Arc::new(DoneProvider);
         let mut supervisor = Supervisor::new(&project, provider, Vec::new(), dispatch_bus.clone());
         supervisor.execution_mode = sigil_core::ExecutionMode::Agent;
-        supervisor.set_team(
-            ProjectTeamConfig {
-                leader: "leader".to_string(),
-                agents: vec!["researcher".to_string(), "reviewer".to_string()],
-            },
-            "leader",
-        );
+        supervisor.set_escalation_targets("leader", "leader");
         registry.register_project(project, supervisor).await;
 
         let conv_dir = TempDir::new().unwrap();
@@ -1971,13 +1945,9 @@ mod tests {
             intent_classifier: None,
         };
 
-        let project_scoped = engine
-            .scoped_advisor_names(Some("app"), None)
-            .await
-            .unwrap();
-        assert!(project_scoped.contains("researcher"));
-        assert!(project_scoped.contains("reviewer"));
-        assert!(!project_scoped.contains("outsider"));
+        // Without a department hint, project-only scope returns None (no restriction).
+        let project_scoped = engine.scoped_advisor_names(Some("app"), None).await;
+        assert!(project_scoped.is_none());
 
         let department_scoped = engine
             .scoped_advisor_names(Some("app"), Some("backend"))

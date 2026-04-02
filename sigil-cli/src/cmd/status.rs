@@ -49,16 +49,14 @@ pub(crate) async fn cmd_status(config_path: &Option<PathBuf>) -> Result<()> {
     println!("Projects:");
     for project_cfg in &config.projects {
         let repo_ok = PathBuf::from(&project_cfg.repo).exists();
-        let team = config.project_team(&project_cfg.name);
         print!(
-            "  {} [{}] prefix={} runtime={} model={} workers={} leader={}",
+            "  {} [{}] prefix={} runtime={} model={} workers={}",
             project_cfg.name,
             if repo_ok { "OK" } else { "MISSING" },
             project_cfg.prefix,
             config.runtime_for_project(&project_cfg.name).provider,
             config.model_for_project(&project_cfg.name),
             project_cfg.max_workers,
-            team.leader,
         );
 
         // Show task counts.

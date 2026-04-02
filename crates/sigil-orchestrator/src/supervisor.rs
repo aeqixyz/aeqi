@@ -1,5 +1,4 @@
 use anyhow::Result;
-use sigil_core::config::ProjectTeamConfig;
 use sigil_core::traits::{
     Channel, ChatRequest, Memory, Message, MessageContent, OutgoingMessage, Provider, Role, Tool,
 };
@@ -68,8 +67,6 @@ pub struct Supervisor {
     pub cost_ledger: Option<Arc<CostLedger>>,
     /// Shared metrics registry.
     pub metrics: Option<Arc<SigilMetrics>>,
-    /// Per-project team config — which agents work on this project.
-    pub team: Option<ProjectTeamConfig>,
     /// Name of the project's team leader to escalate to first.
     pub escalation_target: String,
     /// Name of the system team leader to escalate to if project leader can't resolve.
@@ -154,7 +151,6 @@ impl Supervisor {
             running_tasks: Vec::new(),
             worker_timeout_secs: project.worker_timeout_secs,
             last_report: (0, 0),
-            team: None,
             escalation_target: "leader".to_string(),
             system_escalation_target: "leader".to_string(),
             cost_ledger: None,
@@ -195,11 +191,10 @@ impl Supervisor {
         }
     }
 
-    /// Set the per-project team config and escalation targets.
-    pub fn set_team(&mut self, team: ProjectTeamConfig, system_leader: &str) {
-        self.escalation_target = team.leader.clone();
+    /// Set escalation targets.
+    pub fn set_escalation_targets(&mut self, project_leader: &str, system_leader: &str) {
+        self.escalation_target = project_leader.to_string();
         self.system_escalation_target = system_leader.to_string();
-        self.team = Some(team);
     }
 
     /// Look up a skill's system prompt by name from skills directories.
@@ -291,7 +286,7 @@ impl Supervisor {
                 // Override system prompt with persistent agent's prompt.
                 identity.persona = Some(pa.system_prompt.clone());
                 persistent_capabilities = pa.capabilities.clone();
-                agent_department = pa.department.clone();
+                agent_department = pa.department_id.clone();
                 info!(
                     project = %self.project_name,
                     agent = %agent_name,
@@ -407,19 +402,11 @@ impl Supervisor {
             );
         }
 
-        // Inject communication tools for all persistent agents (dispatch + channel).
+        // Inject communication tools for all persistent agents.
         if persistent_agent_id.is_some()
             && let crate::agent_worker::WorkerExecution::Agent { ref mut tools, .. } =
                 worker.execution
         {
-            // dispatch_read + dispatch_send for agent-to-agent messaging.
-            tools.push(Arc::new(crate::tools::MailReadTool::new(
-                self.dispatch_bus.clone(),
-            )));
-            tools.push(Arc::new(crate::tools::MailSendTool::new(
-                self.dispatch_bus.clone(),
-            )));
-
             // channel_post for department/project conversation channels.
             // transcript_search for cross-session recall.
             if let (Some(convs), Some(broadcaster)) =
@@ -436,41 +423,42 @@ impl Supervisor {
             }
         }
 
-        // Inject org context into identity (manager, peers, reports, channels).
+        // Inject org context into identity (department members, channels).
         if let (Some(registry), Some(agent_id)) = (&self.agent_registry, &persistent_agent_id) {
             let mut org_lines = Vec::new();
 
-            if let Ok(Some(parent)) = registry.parent(agent_id).await {
-                org_lines.push(format!(
-                    "Manager: {}{}",
-                    parent.name,
-                    parent
-                        .display_name
-                        .as_ref()
-                        .map(|d| format!(" ({d})"))
-                        .unwrap_or_default()
-                ));
-            }
-
-            if let Ok(siblings) = registry.siblings(agent_id).await {
-                let names: Vec<&str> = siblings
-                    .iter()
-                    .filter(|s| s.status == crate::agent_registry::AgentStatus::Active)
-                    .map(|s| s.name.as_str())
-                    .collect();
-                if !names.is_empty() {
-                    org_lines.push(format!("Peers: {}", names.join(", ")));
-                }
-            }
-
-            if let Ok(children) = registry.children(agent_id).await {
-                let names: Vec<&str> = children
-                    .iter()
-                    .filter(|c| c.status == crate::agent_registry::AgentStatus::Active)
-                    .map(|c| c.name.as_str())
-                    .collect();
-                if !names.is_empty() {
-                    org_lines.push(format!("Reports: {}", names.join(", ")));
+            // Show department peers if agent is in a department.
+            if let Ok(Some(agent)) = registry.get(agent_id).await {
+                if let Some(ref dept_id) = agent.department_id {
+                    if let Ok(members) = registry.department_members(dept_id).await {
+                        let names: Vec<&str> = members
+                            .iter()
+                            .filter(|m| {
+                                m.id != *agent_id
+                                    && m.status == crate::agent_registry::AgentStatus::Active
+                            })
+                            .map(|m| m.name.as_str())
+                            .collect();
+                        if !names.is_empty() {
+                            org_lines.push(format!("Department peers: {}", names.join(", ")));
+                        }
+                    }
+                    if let Ok(Some(dept)) = registry.get_department(dept_id).await {
+                        if let Some(ref mgr_id) = dept.manager_id {
+                            if mgr_id != agent_id {
+                                if let Ok(Some(mgr)) = registry.get(mgr_id).await {
+                                    org_lines.push(format!(
+                                        "Department manager: {}{}",
+                                        mgr.name,
+                                        mgr.display_name
+                                            .as_ref()
+                                            .map(|d| format!(" ({d})"))
+                                            .unwrap_or_default()
+                                    ));
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -668,13 +656,15 @@ impl Supervisor {
                 .send(Dispatch::new_typed(
                     &format!("supervisor-{}", self.project_name),
                     &self.escalation_target,
-                    DispatchKind::WorkerCrashed {
-                        project: self.project_name.clone(),
-                        worker: format!("timeout-{}", task_id),
-                        error: format!(
-                            "Worker timed out after {}s on task {}",
-                            self.worker_timeout_secs, task_id
+                    DispatchKind::DelegateRequest {
+                        prompt: format!(
+                            "Worker timed out after {}s on task {} in project {}. Please investigate.",
+                            self.worker_timeout_secs, task_id, self.project_name
                         ),
+                        response_mode: "none".to_string(),
+                        create_task: false,
+                        skill: None,
+                        reply_to: None,
                     },
                 ))
                 .await;
@@ -1076,9 +1066,10 @@ impl Supervisor {
                                     .send(Dispatch::new_typed(
                                         &format!("supervisor-{project_name_task}"),
                                         &outcome_recipient,
-                                        DispatchKind::TaskDone {
-                                            task_id: task_id_clone.clone(),
-                                            summary: summary.clone(),
+                                        DispatchKind::DelegateResponse {
+                                            reply_to: task_id_clone.clone(),
+                                            response_mode: "origin".to_string(),
+                                            content: format!("Task {} completed: {}", task_id_clone, summary),
                                         },
                                     ))
                                     .await;
@@ -1226,10 +1217,12 @@ impl Supervisor {
                                             .send(Dispatch::new_typed(
                                                 &format!("verification-{project_name_task}"),
                                                 &outcome_recipient,
-                                                DispatchKind::TaskBlocked {
-                                                    task_id: task_id_clone.clone(),
-                                                    question: feedback,
-                                                    context: String::new(),
+                                                DispatchKind::DelegateRequest {
+                                                    prompt: feedback,
+                                                    response_mode: "origin".to_string(),
+                                                    create_task: false,
+                                                    skill: None,
+                                                    reply_to: Some(task_id_clone.clone()),
                                                 },
                                             ))
                                             .await;
@@ -1254,10 +1247,12 @@ impl Supervisor {
                                     .send(Dispatch::new_typed(
                                         &format!("supervisor-{project_name_task}"),
                                         &outcome_recipient,
-                                        DispatchKind::TaskBlocked {
-                                            task_id: task_id_clone.clone(),
-                                            question: question.clone(),
-                                            context: full_text.clone(),
+                                        DispatchKind::DelegateRequest {
+                                            prompt: format!("Task {} blocked: {}\n\nContext:\n{}", task_id_clone, question, full_text),
+                                            response_mode: "origin".to_string(),
+                                            create_task: false,
+                                            skill: None,
+                                            reply_to: Some(task_id_clone.clone()),
                                         },
                                     ))
                                     .await;
@@ -1267,9 +1262,12 @@ impl Supervisor {
                                     .send(Dispatch::new_typed(
                                         &format!("supervisor-{project_name_task}"),
                                         &outcome_recipient,
-                                        DispatchKind::TaskFailed {
-                                            task_id: task_id_clone.clone(),
-                                            error: error.clone(),
+                                        DispatchKind::DelegateRequest {
+                                            prompt: format!("Task {} failed: {}", task_id_clone, error),
+                                            response_mode: "none".to_string(),
+                                            create_task: false,
+                                            skill: None,
+                                            reply_to: Some(task_id_clone.clone()),
                                         },
                                     ))
                                     .await;
@@ -1477,10 +1475,13 @@ impl Supervisor {
                 .send(Dispatch::new_typed(
                     &format!("supervisor-{}", self.project_name),
                     &self.escalation_target,
-                    DispatchKind::PatrolReport {
-                        project: self.project_name.clone(),
-                        active,
-                        pending,
+                    DispatchKind::DelegateResponse {
+                        reply_to: format!("patrol-{}", self.project_name),
+                        response_mode: "none".to_string(),
+                        content: format!(
+                            "Project {}: {} active workers, {} pending tasks",
+                            self.project_name, active, pending
+                        ),
                     },
                 ))
                 .await;
@@ -1600,25 +1601,26 @@ impl Supervisor {
     }
 
     /// Walk the department hierarchy for an agent and return the first
-    /// manager name that isn't the agent itself. Returns `None` if no
+    /// department manager name that isn't the agent itself. Returns `None` if no
     /// department chain exists (falls back to legacy escalation_target).
     async fn escalation_chain_target(&self, agent_name: &str) -> Option<String> {
         let registry = self.agent_registry.as_ref()?;
         let agent = registry.get_active_by_name(agent_name).await.ok()??;
-        // Walk parent chain to find first manager that isn't the agent itself.
-        let mut current_id = agent.id.clone();
-        // Safety limit to avoid infinite loops in a malformed tree.
+
+        // Walk department chain to find a manager.
+        let mut current_dept_id = agent.department_id.clone();
         for _ in 0..10 {
-            match registry.parent(&current_id).await {
-                Ok(Some(parent)) if parent.name != agent_name => {
-                    return Some(parent.name);
+            let dept_id = current_dept_id.as_ref()?;
+            let dept = registry.get_department(dept_id).await.ok()??;
+            if let Some(ref mgr_id) = dept.manager_id {
+                if let Ok(Some(mgr)) = registry.get(mgr_id).await {
+                    if mgr.name != agent_name {
+                        return Some(mgr.name);
+                    }
                 }
-                Ok(Some(parent)) => {
-                    // Parent has same name (shouldn't happen, but be safe) — keep walking.
-                    current_id = parent.id;
-                }
-                _ => break,
             }
+            // Walk up to parent department.
+            current_dept_id = dept.parent_id;
         }
         None
     }
@@ -1747,24 +1749,26 @@ impl Supervisor {
             .send(Dispatch::new_typed(
                 &format!("supervisor-{}", self.project_name),
                 target,
-                DispatchKind::Escalation {
-                    project: self.project_name.clone(),
-                    task_id: task.id.to_string(),
-                    subject: task.subject.clone(),
-                    description: format!(
-                        "Priority: {}\n\nFull description:\n{}\n\n\
+                DispatchKind::DelegateRequest {
+                    prompt: format!(
+                        "Escalation from project {}: task {} — {}\n\n\
+                         Priority: {}\n\nFull description:\n{}\n\n\
                          This task has been blocked after {} resolution attempt(s). \
                          Escalated to: {target}. \
                          Please try to resolve using your cross-project knowledge (KNOWLEDGE.md). \
-                         If you can answer the blocker question, send a RESOLVED dispatch back to \
-                         supervisor-{} with the answer. If you cannot resolve it, escalate to the \
-                         human operator via Telegram.",
+                         If you can answer the blocker question, send a delegation response back. \
+                         If you cannot resolve it, escalate to the human operator via Telegram.",
+                        self.project_name,
+                        task.id,
+                        task.subject,
                         task.priority,
                         task.description,
                         Self::get_escalation_depth(&task.labels),
-                        self.project_name,
                     ),
-                    attempts: Self::get_escalation_depth(&task.labels),
+                    response_mode: "origin".to_string(),
+                    create_task: false,
+                    skill: None,
+                    reply_to: Some(task.id.to_string()),
                 },
             ))
             .await;

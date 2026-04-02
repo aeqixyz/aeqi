@@ -432,7 +432,7 @@ pub async fn run(
         };
 
         if let Ok(content) = std::fs::read_to_string(path) {
-            match registry.spawn_from_template(&content, project, None).await {
+            match registry.spawn_from_template(&content, project).await {
                 Ok(spawned) => {
                     let display = spawned.display_name.as_deref().unwrap_or(&spawned.name);
                     eprintln!();

@@ -352,16 +352,11 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                             .projects
                             .iter()
                             .map(|p| {
-                                let mut obj = serde_json::json!({
+                                serde_json::json!({
                                     "name": p.name,
                                     "prefix": p.prefix,
                                     "repo": p.repo,
-                                });
-                                if let Some(ref team) = p.team {
-                                    obj["leader"] = serde_json::json!(team.leader);
-                                    obj["agents"] = serde_json::json!(team.agents);
-                                }
-                                obj
+                                })
                             })
                             .collect();
                         Ok(serde_json::json!({"ok": true, "projects": projects}))

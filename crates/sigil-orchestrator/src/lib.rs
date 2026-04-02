@@ -68,7 +68,7 @@ pub use metrics::SigilMetrics;
 pub use operation::{Operation, OperationStore};
 pub use pipeline::{Pipeline, PipelineStep};
 pub use project::Project;
-pub use registry::{ProjectRegistry, ProjectSummary, TeamSummary};
+pub use registry::{ProjectRegistry, ProjectSummary};
 pub use runtime::{
     Artifact, ArtifactKind, RuntimeExecution, RuntimeOutcome, RuntimeOutcomeStatus, RuntimePhase,
     RuntimeSession, RuntimeSessionStatus, VerificationReport,

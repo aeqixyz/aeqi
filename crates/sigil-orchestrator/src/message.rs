@@ -8,50 +8,6 @@ use tracing::{debug, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DispatchKind {
-    TaskDone {
-        task_id: String,
-        summary: String,
-    },
-    TaskBlocked {
-        task_id: String,
-        question: String,
-        context: String,
-    },
-    TaskFailed {
-        task_id: String,
-        error: String,
-    },
-
-    PatrolReport {
-        project: String,
-        active: usize,
-        pending: usize,
-    },
-    WorkerCrashed {
-        project: String,
-        worker: String,
-        error: String,
-    },
-    Escalation {
-        project: String,
-        task_id: String,
-        subject: String,
-        description: String,
-        attempts: u32,
-    },
-
-    Resolution {
-        task_id: String,
-        answer: String,
-    },
-
-    HumanEscalation {
-        project: String,
-        task_id: String,
-        subject: String,
-        summary: String,
-    },
-
     /// A delegation request from one agent to another.
     DelegateRequest {
         prompt: String,
@@ -73,80 +29,30 @@ pub enum DispatchKind {
         /// The response content.
         content: String,
     },
+    /// Escalation to human operator when all automated resolution is exhausted.
+    HumanEscalation {
+        project: String,
+        task_id: String,
+        subject: String,
+        summary: String,
+    },
 }
 
 impl DispatchKind {
     pub fn requires_ack_by_default(&self) -> bool {
-        matches!(
-            self,
-            Self::TaskDone { .. }
-                | Self::TaskBlocked { .. }
-                | Self::TaskFailed { .. }
-                | Self::WorkerCrashed { .. }
-                | Self::Resolution { .. }
-                | Self::Escalation { .. }
-                | Self::DelegateRequest { .. }
-        )
+        matches!(self, Self::DelegateRequest { .. })
     }
 
     pub fn subject_tag(&self) -> &'static str {
         match self {
-            Self::TaskDone { .. } => "DONE",
-            Self::TaskBlocked { .. } => "BLOCKED",
-            Self::TaskFailed { .. } => "FAILED",
-            Self::PatrolReport { .. } => "PATROL",
-            Self::WorkerCrashed { .. } => "WORKER_CRASHED",
-            Self::Escalation { .. } => "ESCALATE",
-            Self::Resolution { .. } => "RESOLVED",
-            Self::HumanEscalation { .. } => "HUMAN_ESCALATION",
             Self::DelegateRequest { .. } => "DELEGATE_REQUEST",
             Self::DelegateResponse { .. } => "DELEGATE_RESPONSE",
+            Self::HumanEscalation { .. } => "HUMAN_ESCALATION",
         }
     }
 
     pub fn body_text(&self) -> String {
         match self {
-            Self::TaskDone { task_id, summary } => format!("Completed task {task_id}: {summary}"),
-            Self::TaskBlocked {
-                task_id,
-                question,
-                context,
-            } => format!("Task {task_id} blocked: {question}\n\nFull context:\n{context}"),
-            Self::TaskFailed { task_id, error } => format!("Failed task {task_id}: {error}"),
-            Self::PatrolReport {
-                project,
-                active,
-                pending,
-            } => format!("Project {project}: {active} active workers, {pending} pending tasks"),
-            Self::WorkerCrashed {
-                project,
-                worker,
-                error,
-            } => format!("Worker {worker} crashed in {project}: {error}"),
-            Self::Escalation {
-                project,
-                task_id,
-                subject,
-                description,
-                attempts,
-            } => format!(
-                "Project {project} needs help resolving a blocker.\n\n\
-                     Task: {task_id} — {subject}\n\n\
-                     Full description:\n{description}\n\n\
-                     Blocked after {attempts} resolution attempt(s).",
-            ),
-            Self::Resolution { task_id, answer } => {
-                format!("Resolution for task {task_id}: {answer}")
-            }
-            Self::HumanEscalation {
-                project,
-                task_id,
-                subject,
-                summary,
-            } => format!(
-                "BLOCKED: {project}/{task_id} — {subject}\n\n{summary}\n\n\
-                     This task has exhausted all automated resolution attempts and requires human input.",
-            ),
             Self::DelegateRequest {
                 prompt,
                 response_mode,
@@ -172,6 +78,15 @@ impl DispatchKind {
                 content,
             } => format!(
                 "Delegation response (reply_to: {reply_to}, mode: {response_mode})\n\n{content}"
+            ),
+            Self::HumanEscalation {
+                project,
+                task_id,
+                subject,
+                summary,
+            } => format!(
+                "BLOCKED: {project}/{task_id} — {subject}\n\n{summary}\n\n\
+                     This task has exhausted all automated resolution attempts and requires human input.",
             ),
         }
     }
@@ -939,18 +854,38 @@ impl Default for DispatchBus {
 mod tests {
     use super::*;
 
+    fn test_delegate_request() -> DispatchKind {
+        DispatchKind::DelegateRequest {
+            prompt: "do something".into(),
+            response_mode: "origin".into(),
+            create_task: false,
+            skill: None,
+            reply_to: None,
+        }
+    }
+
+    fn test_delegate_response() -> DispatchKind {
+        DispatchKind::DelegateResponse {
+            reply_to: "d-123".into(),
+            response_mode: "origin".into(),
+            content: "done".into(),
+        }
+    }
+
+    fn test_human_escalation() -> DispatchKind {
+        DispatchKind::HumanEscalation {
+            project: "demo".into(),
+            task_id: "t1".into(),
+            subject: "blocked".into(),
+            summary: "help".into(),
+        }
+    }
+
     #[tokio::test]
     async fn test_send_and_read() {
         let bus = DispatchBus::new();
-        bus.send(Dispatch::new_typed(
-            "a",
-            "b",
-            DispatchKind::TaskDone {
-                task_id: "q1".into(),
-                summary: "done".into(),
-            },
-        ))
-        .await;
+        bus.send(Dispatch::new_typed("a", "b", test_delegate_request()))
+            .await;
 
         let msgs = bus.read("b").await;
         assert_eq!(msgs.len(), 1);
@@ -963,24 +898,10 @@ mod tests {
     async fn test_indexed_recipient() {
         let bus = DispatchBus::new();
 
-        bus.send(Dispatch::new_typed(
-            "a",
-            "b",
-            DispatchKind::TaskDone {
-                task_id: "q1".into(),
-                summary: "done".into(),
-            },
-        ))
-        .await;
-        bus.send(Dispatch::new_typed(
-            "a",
-            "c",
-            DispatchKind::TaskFailed {
-                task_id: "q2".into(),
-                error: "err".into(),
-            },
-        ))
-        .await;
+        bus.send(Dispatch::new_typed("a", "b", test_delegate_request()))
+            .await;
+        bus.send(Dispatch::new_typed("a", "c", test_delegate_response()))
+            .await;
 
         assert_eq!(bus.read("b").await.len(), 1);
         assert_eq!(bus.read("c").await.len(), 1);
@@ -992,15 +913,8 @@ mod tests {
         let mut bus = DispatchBus::new();
         bus.set_ttl(1);
 
-        bus.send(Dispatch::new_typed(
-            "a",
-            "b",
-            DispatchKind::TaskDone {
-                task_id: "q1".into(),
-                summary: "done".into(),
-            },
-        ))
-        .await;
+        bus.send(Dispatch::new_typed("a", "b", test_delegate_request()))
+            .await;
         assert_eq!(bus.read("b").await.len(), 1);
 
         if let BusBackend::Memory { ref queues } = bus.backend {
@@ -1010,10 +924,7 @@ mod tests {
             q.push_back(Dispatch {
                 from: "a".into(),
                 to: "b".into(),
-                kind: DispatchKind::TaskDone {
-                    task_id: "old".into(),
-                    summary: "old".into(),
-                },
+                kind: test_delegate_response(),
                 timestamp: old_ts,
                 read: false,
                 id: default_dispatch_id(),
@@ -1024,22 +935,12 @@ mod tests {
             });
         }
 
-        bus.send(Dispatch::new_typed(
-            "a",
-            "b",
-            DispatchKind::TaskDone {
-                task_id: "new".into(),
-                summary: "new".into(),
-            },
-        ))
-        .await;
+        bus.send(Dispatch::new_typed("a", "b", test_delegate_request()))
+            .await;
 
         let msgs = bus.read("b").await;
         assert_eq!(msgs.len(), 1);
-        match &msgs[0].kind {
-            DispatchKind::TaskDone { task_id, .. } => assert_eq!(task_id, "new"),
-            _ => panic!("unexpected kind"),
-        }
+        assert!(matches!(&msgs[0].kind, DispatchKind::DelegateRequest { .. }));
     }
 
     #[tokio::test]
@@ -1048,15 +949,8 @@ mod tests {
         let path = dir.path().join("dispatches.jsonl");
 
         let bus = DispatchBus::with_persistence(path.clone());
-        bus.send(Dispatch::new_typed(
-            "a",
-            "b",
-            DispatchKind::TaskDone {
-                task_id: "q1".into(),
-                summary: "done".into(),
-            },
-        ))
-        .await;
+        bus.send(Dispatch::new_typed("a", "b", test_delegate_request()))
+            .await;
 
         let bus2 = DispatchBus::with_persistence(path);
         let count = bus2.load().await.unwrap();
@@ -1072,24 +966,10 @@ mod tests {
         let path = dir.path().join("dispatches.jsonl");
 
         let bus = DispatchBus::with_persistence(path);
-        bus.send(Dispatch::new_typed(
-            "a",
-            "b",
-            DispatchKind::TaskDone {
-                task_id: "q1".into(),
-                summary: "done".into(),
-            },
-        ))
-        .await;
-        bus.send(Dispatch::new_typed(
-            "a",
-            "c",
-            DispatchKind::TaskFailed {
-                task_id: "q2".into(),
-                error: "err".into(),
-            },
-        ))
-        .await;
+        bus.send(Dispatch::new_typed("a", "b", test_delegate_request()))
+            .await;
+        bus.send(Dispatch::new_typed("a", "c", test_delegate_response()))
+            .await;
 
         assert_eq!(bus.pending_count(), 2);
         let drained = bus.drain();
@@ -1105,16 +985,9 @@ mod tests {
         let mut bus = DispatchBus::with_persistence(path);
         bus.max_queue_per_recipient = 3;
 
-        for i in 0..5 {
-            bus.send(Dispatch::new_typed(
-                "a",
-                "b",
-                DispatchKind::TaskDone {
-                    task_id: format!("q{i}"),
-                    summary: format!("msg{i}"),
-                },
-            ))
-            .await;
+        for _i in 0..5 {
+            bus.send(Dispatch::new_typed("a", "b", test_delegate_request()))
+                .await;
         }
 
         let msgs = bus.read("b").await;
@@ -1124,18 +997,8 @@ mod tests {
     #[tokio::test]
     async fn test_ack_required_dispatch() {
         let bus = DispatchBus::new();
-        let dispatch = Dispatch::new_typed(
-            "a",
-            "b",
-            DispatchKind::Escalation {
-                project: "test".into(),
-                task_id: "t1".into(),
-                subject: "blocked".into(),
-                description: "help".into(),
-                attempts: 1,
-            },
-        )
-        .with_ack_required();
+        let dispatch =
+            Dispatch::new_typed("a", "b", test_delegate_request()).with_ack_required();
         let dispatch_id = dispatch.id.clone();
         assert!(dispatch.requires_ack);
         bus.send(dispatch).await;
@@ -1156,28 +1019,18 @@ mod tests {
     #[tokio::test]
     async fn test_dead_letter_after_max_retries() {
         let bus = DispatchBus::new();
-        let mut dispatch = Dispatch::new_typed(
-            "a",
-            "b",
-            DispatchKind::Escalation {
-                project: "test".into(),
-                task_id: "t1".into(),
-                subject: "blocked".into(),
-                description: "help".into(),
-                attempts: 1,
-            },
-        )
-        .with_ack_required();
+        let mut dispatch =
+            Dispatch::new_typed("a", "b", test_delegate_request()).with_ack_required();
         dispatch.max_retries = 2;
         bus.send(dispatch).await;
         let delivered = bus.read("b").await;
         assert_eq!(delivered.len(), 1);
 
         // Retry twice to exhaust max_retries.
-        let _ = bus.retry_unacked(0).await; // retry_count → 1
+        let _ = bus.retry_unacked(0).await; // retry_count -> 1
         let retried = bus.read("b").await;
         assert_eq!(retried.len(), 1);
-        let _ = bus.retry_unacked(0).await; // retry_count → 2
+        let _ = bus.retry_unacked(0).await; // retry_count -> 2
 
         // Should now be dead-lettered.
         let dead = bus.dead_letters().await;
@@ -1191,15 +1044,8 @@ mod tests {
     #[tokio::test]
     async fn test_ack_prevents_retry() {
         let bus = DispatchBus::new();
-        let dispatch = Dispatch::new_typed(
-            "a",
-            "b",
-            DispatchKind::Resolution {
-                task_id: "t1".into(),
-                answer: "yes".into(),
-            },
-        )
-        .with_ack_required();
+        let dispatch =
+            Dispatch::new_typed("a", "b", test_delegate_request()).with_ack_required();
         let id = dispatch.id.clone();
         bus.send(dispatch).await;
         let delivered = bus.read("b").await;
@@ -1219,14 +1065,11 @@ mod tests {
         let bus = DispatchBus::new();
         let old_ts = Utc::now() - chrono::Duration::seconds(120);
 
+        // Unread, no ack required
         bus.send(Dispatch {
             from: "a".into(),
             to: "leader".into(),
-            kind: DispatchKind::PatrolReport {
-                project: "demo".into(),
-                active: 2,
-                pending: 3,
-            },
+            kind: test_human_escalation(),
             timestamp: Utc::now(),
             read: false,
             id: default_dispatch_id(),
@@ -1237,13 +1080,11 @@ mod tests {
         })
         .await;
 
+        // Read, ack required, overdue (old timestamp)
         bus.send(Dispatch {
             from: "a".into(),
             to: "leader".into(),
-            kind: DispatchKind::Resolution {
-                task_id: "t-overdue".into(),
-                answer: "answer".into(),
-            },
+            kind: test_delegate_response(),
             timestamp: old_ts,
             read: true,
             id: default_dispatch_id(),
@@ -1253,16 +1094,12 @@ mod tests {
             first_sent_at: old_ts,
         })
         .await;
+
+        // Unread, ack required, retrying
         bus.send(Dispatch {
             from: "a".into(),
             to: "leader".into(),
-            kind: DispatchKind::Escalation {
-                project: "demo".into(),
-                task_id: "t-retry".into(),
-                subject: "blocked".into(),
-                description: "help".into(),
-                attempts: 1,
-            },
+            kind: test_delegate_request(),
             timestamp: Utc::now(),
             read: false,
             id: default_dispatch_id(),
@@ -1272,13 +1109,12 @@ mod tests {
             first_sent_at: old_ts,
         })
         .await;
+
+        // Unread, ack required, dead-lettered (retry_count >= max_retries)
         bus.send(Dispatch {
             from: "a".into(),
             to: "leader".into(),
-            kind: DispatchKind::TaskFailed {
-                task_id: "t-dead".into(),
-                error: "boom".into(),
-            },
+            kind: test_delegate_request(),
             timestamp: Utc::now(),
             read: false,
             id: default_dispatch_id(),
@@ -1304,13 +1140,12 @@ mod tests {
         let bus = DispatchBus::with_persistence(path);
 
         let old_ts = Utc::now() - chrono::Duration::seconds(120);
+
+        // Read, ack required, overdue
         bus.send(Dispatch {
             from: "a".into(),
             to: "leader".into(),
-            kind: DispatchKind::Resolution {
-                task_id: "t-overdue".into(),
-                answer: "answer".into(),
-            },
+            kind: test_delegate_response(),
             timestamp: old_ts,
             read: true,
             id: default_dispatch_id(),
@@ -1320,16 +1155,12 @@ mod tests {
             first_sent_at: old_ts,
         })
         .await;
+
+        // Unread, ack required, retrying
         bus.send(Dispatch {
             from: "a".into(),
             to: "leader".into(),
-            kind: DispatchKind::Escalation {
-                project: "demo".into(),
-                task_id: "t-retry".into(),
-                subject: "blocked".into(),
-                description: "help".into(),
-                attempts: 1,
-            },
+            kind: test_delegate_request(),
             timestamp: Utc::now(),
             read: false,
             id: default_dispatch_id(),
@@ -1339,13 +1170,12 @@ mod tests {
             first_sent_at: old_ts,
         })
         .await;
+
+        // Unread, dead-lettered
         bus.send(Dispatch {
             from: "a".into(),
             to: "leader".into(),
-            kind: DispatchKind::TaskFailed {
-                task_id: "t-dead".into(),
-                error: "boom".into(),
-            },
+            kind: test_delegate_request(),
             timestamp: Utc::now(),
             read: false,
             id: default_dispatch_id(),
@@ -1370,15 +1200,8 @@ mod tests {
         let path = dir.path().join("dispatches.jsonl");
 
         let bus = DispatchBus::with_persistence(path);
-        let dispatch = Dispatch::new_typed(
-            "a",
-            "b",
-            DispatchKind::Resolution {
-                task_id: "t1".into(),
-                answer: "yes".into(),
-            },
-        )
-        .with_ack_required();
+        let dispatch =
+            Dispatch::new_typed("a", "b", test_delegate_request()).with_ack_required();
         let id = dispatch.id.clone();
         bus.send(dispatch).await;
 
@@ -1395,38 +1218,13 @@ mod tests {
     #[test]
     fn test_critical_dispatches_require_ack_by_default() {
         assert!(
-            Dispatch::new_typed(
-                "a",
-                "leader",
-                DispatchKind::TaskDone {
-                    task_id: "t1".into(),
-                    summary: "done".into(),
-                },
-            )
-            .requires_ack
+            Dispatch::new_typed("a", "leader", test_delegate_request(),).requires_ack
         );
         assert!(
-            Dispatch::new_typed(
-                "a",
-                "leader",
-                DispatchKind::Resolution {
-                    task_id: "t1".into(),
-                    answer: "yes".into(),
-                },
-            )
-            .requires_ack
+            !Dispatch::new_typed("a", "leader", test_delegate_response(),).requires_ack
         );
         assert!(
-            !Dispatch::new_typed(
-                "a",
-                "leader",
-                DispatchKind::PatrolReport {
-                    project: "demo".into(),
-                    active: 1,
-                    pending: 2,
-                },
-            )
-            .requires_ack
+            !Dispatch::new_typed("a", "leader", test_human_escalation(),).requires_ack
         );
     }
 }

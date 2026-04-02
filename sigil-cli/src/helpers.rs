@@ -189,15 +189,11 @@ pub(crate) fn build_provider_for_runtime(
     }
 }
 
-pub(crate) fn one_shot_agent_name(config: &SigilConfig, project_name: Option<&str>) -> String {
-    project_name
-        .map(|name| config.project_team(name).leader)
-        .unwrap_or_else(|| {
-            config
-                .leader_agent()
-                .map(|agent| agent.name.clone())
-                .unwrap_or_else(|| config.leader().to_string())
-        })
+pub(crate) fn one_shot_agent_name(config: &SigilConfig, _project_name: Option<&str>) -> String {
+    config
+        .leader_agent()
+        .map(|agent| agent.name.clone())
+        .unwrap_or_else(|| config.leader().to_string())
 }
 
 pub(crate) fn build_provider_for_one_shot(
@@ -389,23 +385,16 @@ pub(crate) fn augment_identity_with_org_context(
     config: &SigilConfig,
     mut identity: Identity,
     _agent_name: Option<&str>,
-    project_name: Option<&str>,
+    _project_name: Option<&str>,
 ) -> Identity {
-    if let Some(project_name) = project_name {
-        let team = config.project_team(project_name);
-        let mut lines = vec![format!("Project team leader: {}", team.leader)];
-        lines.push(format!(
-            "Project team agents: {}",
-            team.effective_agents().join(", ")
-        ));
-        let section = format!("# Project Team Context\n\n{}", lines.join("\n"));
-        let existing = identity.operational.unwrap_or_default();
-        identity.operational = Some(if existing.is_empty() {
-            section
-        } else {
-            format!("{existing}\n\n---\n\n{section}")
-        });
-    }
+    let leader = config.leader();
+    let section = format!("# Team Context\n\nSystem leader: {leader}");
+    let existing = identity.operational.unwrap_or_default();
+    identity.operational = Some(if existing.is_empty() {
+        section
+    } else {
+        format!("{existing}\n\n---\n\n{section}")
+    });
 
     identity
 }

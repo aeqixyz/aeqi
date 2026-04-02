@@ -154,9 +154,8 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     }
                 }
 
-                // Wire per-project team if configured.
-                let project_team = config.project_team(&project_cfg.name);
-                witness.set_team(project_team, config.leader());
+                // Wire escalation targets.
+                witness.set_escalation_targets(config.leader(), config.leader());
                 witness.identity = augment_identity_with_org_context(
                     &config,
                     witness.identity.clone(),

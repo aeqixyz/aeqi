@@ -91,7 +91,7 @@ pub(crate) async fn cmd_agent(
                 sigil_orchestrator::agent_registry::AgentRegistry::open(&config.data_dir())?;
             let content = std::fs::read_to_string(&template)?;
             let agent = registry
-                .spawn_from_template(&content, project.as_deref(), None)
+                .spawn_from_template(&content, project.as_deref())
                 .await?;
             println!("Spawned persistent agent:");
             println!("  ID:      {}", agent.id);

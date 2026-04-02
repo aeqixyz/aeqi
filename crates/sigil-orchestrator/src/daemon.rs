@@ -1022,10 +1022,6 @@ impl Daemon {
                             serde_json::json!({
                                 "name": s.name,
                                 "prefix": s.prefix,
-                                "team": s.team.as_ref().map(|t| serde_json::json!({
-                                    "leader": t.leader,
-                                    "agents": t.agents,
-                                })),
                                 "open_tasks": s.open_tasks,
                                 "total_tasks": s.total_tasks,
                                 "pending_tasks": s.pending_tasks,
@@ -2579,8 +2575,7 @@ impl Daemon {
                                         "display_name": a.display_name,
                                         "template": a.template,
                                         "project": a.project,
-                                        "department": a.department,
-                                        "parent_id": a.parent_id,
+                                        "department_id": a.department_id,
                                         "model": a.model,
                                         "capabilities": a.capabilities,
                                         "status": a.status,
@@ -2625,10 +2620,8 @@ impl Daemon {
                             match template_content {
                                 Some(content) => {
                                     let project = request.get("project").and_then(|v| v.as_str());
-                                    let department =
-                                        request.get("department").and_then(|v| v.as_str());
                                     match reg
-                                        .spawn_from_template(&content, project, department)
+                                        .spawn_from_template(&content, project)
                                         .await
                                     {
                                         Ok(agent) => serde_json::json!({
