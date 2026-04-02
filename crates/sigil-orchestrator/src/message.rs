@@ -52,6 +52,27 @@ pub enum DispatchKind {
         summary: String,
     },
 
+    /// A delegation request from one agent to another.
+    DelegateRequest {
+        prompt: String,
+        /// How the response should be routed: "origin", "perpetual", "async", "department", "none".
+        response_mode: String,
+        /// Whether to also create a tracked task for this delegation.
+        create_task: bool,
+        /// Optional skill hint for the target agent.
+        skill: Option<String>,
+        /// Dispatch ID this is replying to (for chained delegations).
+        reply_to: Option<String>,
+    },
+    /// A response to a previous DelegateRequest.
+    DelegateResponse {
+        /// The dispatch ID of the original DelegateRequest.
+        reply_to: String,
+        /// Copied from the request for routing purposes.
+        response_mode: String,
+        /// The response content.
+        content: String,
+    },
 }
 
 impl DispatchKind {
@@ -64,6 +85,7 @@ impl DispatchKind {
                 | Self::WorkerCrashed { .. }
                 | Self::Resolution { .. }
                 | Self::Escalation { .. }
+                | Self::DelegateRequest { .. }
         )
     }
 
@@ -77,6 +99,8 @@ impl DispatchKind {
             Self::Escalation { .. } => "ESCALATE",
             Self::Resolution { .. } => "RESOLVED",
             Self::HumanEscalation { .. } => "HUMAN_ESCALATION",
+            Self::DelegateRequest { .. } => "DELEGATE_REQUEST",
+            Self::DelegateResponse { .. } => "DELEGATE_RESPONSE",
         }
     }
 
@@ -122,6 +146,30 @@ impl DispatchKind {
             } => format!(
                 "BLOCKED: {project}/{task_id} — {subject}\n\n{summary}\n\n\
                      This task has exhausted all automated resolution attempts and requires human input.",
+            ),
+            Self::DelegateRequest {
+                prompt,
+                response_mode,
+                create_task,
+                skill,
+                reply_to,
+            } => {
+                let mut text = format!("Delegation request (response_mode: {response_mode}, create_task: {create_task})");
+                if let Some(s) = skill {
+                    text.push_str(&format!(", skill: {s}"));
+                }
+                if let Some(rt) = reply_to {
+                    text.push_str(&format!(", reply_to: {rt}"));
+                }
+                text.push_str(&format!("\n\n{prompt}"));
+                text
+            }
+            Self::DelegateResponse {
+                reply_to,
+                response_mode,
+                content,
+            } => format!(
+                "Delegation response (reply_to: {reply_to}, mode: {response_mode})\n\n{content}"
             ),
         }
     }

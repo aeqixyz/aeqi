@@ -1221,7 +1221,11 @@ pub fn build_orchestration_tools(
         Arc::new(QuestCancelTool::new(registry.clone())),
         Arc::new(QuestReprioritizeTool::new(registry.clone())),
         Arc::new(MailReadTool::new(dispatch_bus.clone())),
-        Arc::new(MailSendTool::new(dispatch_bus)),
+        Arc::new(MailSendTool::new(dispatch_bus.clone())),
+        Arc::new(crate::unified_delegate::UnifiedDelegateTool::new(
+            dispatch_bus,
+            leader_name.clone(),
+        )),
         Arc::new(AllReadyTool::new(registry)),
         Arc::new(UsageStatsTool::new(api_key)),
     ];

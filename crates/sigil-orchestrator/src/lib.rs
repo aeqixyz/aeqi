@@ -44,6 +44,7 @@ pub mod supervisor;
 pub mod template;
 pub mod tools;
 pub mod trigger;
+pub mod unified_delegate;
 pub mod verification;
 
 pub use agent_registry::Department;
