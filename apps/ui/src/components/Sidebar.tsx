@@ -215,7 +215,7 @@ export default function AgentNav() {
       <div className="agent-nav-bottom">
         <div className="agent-nav-sep" />
         <div className="agent-nav-add" onClick={() => navigate("/agents")}>+</div>
-        <div className="agent-nav-text-btn" onClick={() => navigate("/agents")}>agents</div>
+        <a className="agent-nav-text-btn" href="https://github.com/0xAEQI/aeqi" target="_blank" rel="noopener">docs</a>
       </div>
     </nav>
   );
