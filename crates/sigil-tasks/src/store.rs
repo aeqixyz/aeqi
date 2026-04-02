@@ -6,6 +6,28 @@ use tracing::debug;
 use crate::mission::Mission;
 use crate::task::{Task, TaskId, TaskOutcomeKind, TaskOutcomeRecord, TaskStatus};
 
+/// Valid transitions for the task state machine.
+fn valid_transition(from: &TaskStatus, to: &TaskStatus) -> bool {
+    use TaskStatus::*;
+    matches!(
+        (from, to),
+        // Normal forward flow
+        (Pending, InProgress)
+            | (InProgress, Done)
+            | (InProgress, Blocked)
+            | (InProgress, Cancelled)
+            // Retry/re-queue (from worker failure handling)
+            | (InProgress, Pending)
+            | (Blocked, Pending)
+            // Cancellation from any non-terminal state
+            | (Pending, Cancelled)
+            | (Blocked, Cancelled)
+            // Same-state (no-op)
+            | (Pending, Pending)
+            | (InProgress, InProgress)
+    )
+}
+
 /// JSONL-based task store. One file per prefix, git-native.
 pub struct TaskBoard {
     dir: PathBuf,
@@ -143,8 +165,7 @@ impl TaskBoard {
         *seq += 1;
         let id = TaskId::root(prefix, *seq);
 
-        let mut task = Task::new(id, subject);
-        task.agent_id = agent_id.map(|s| s.to_string());
+        let task = Task::with_agent(id, subject, agent_id);
         self.persist(&task)?;
         self.tasks.insert(task.id.0.clone(), task.clone());
 
@@ -194,6 +215,62 @@ impl TaskBoard {
         self.persist(&task)?;
 
         Ok(task)
+    }
+
+    /// Update a task with state transition validation.
+    ///
+    /// Like `update()`, but logs a warning if the status change is not a valid
+    /// transition in the task state machine. Does NOT block the update — callers
+    /// can migrate from `update()` over time.
+    pub fn validated_update(&mut self, id: &str, f: impl FnOnce(&mut Task)) -> Result<Task> {
+        let old_status = self
+            .tasks
+            .get(id)
+            .ok_or_else(|| anyhow::anyhow!("task not found: {id}"))?
+            .status;
+
+        let task = self.update(id, f)?;
+
+        if !valid_transition(&old_status, &task.status) {
+            tracing::warn!(
+                task = %id,
+                from = ?old_status,
+                to = ?task.status,
+                "invalid task state transition (allowed for backwards compat)"
+            );
+        }
+
+        Ok(task)
+    }
+
+    /// Atomically claim a task for execution. Returns Err if already locked.
+    pub fn checkout(&mut self, id: &str, worker_id: &str) -> Result<Task> {
+        let task = self
+            .tasks
+            .get(id)
+            .ok_or_else(|| anyhow::anyhow!("task not found: {id}"))?;
+
+        if task.status != TaskStatus::Pending {
+            anyhow::bail!("task {} is not Pending (status: {:?})", id, task.status);
+        }
+
+        if let Some(ref locked_by) = task.locked_by {
+            anyhow::bail!("task {} already locked by {}", id, locked_by);
+        }
+
+        self.update(id, |t| {
+            t.locked_by = Some(worker_id.to_string());
+            t.locked_at = Some(chrono::Utc::now());
+            t.status = TaskStatus::InProgress;
+        })
+    }
+
+    /// Release the execution lock (on completion or failure).
+    pub fn release(&mut self, id: &str) -> Result<Task> {
+        self.update(id, |t| {
+            t.locked_by = None;
+            t.locked_at = None;
+        })
     }
 
     /// Close a task (mark as done with reason).

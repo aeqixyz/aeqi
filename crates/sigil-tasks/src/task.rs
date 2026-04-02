@@ -205,11 +205,22 @@ pub struct Task {
     /// What "done" looks like — worker validates output against this.
     #[serde(default)]
     pub acceptance_criteria: Option<String>,
+    /// Worker that currently holds the execution lock.
+    #[serde(default)]
+    pub locked_by: Option<String>,
+    /// When the execution lock was acquired.
+    #[serde(default)]
+    pub locked_at: Option<DateTime<Utc>>,
 }
 
 impl Task {
     /// Create a new task with minimal fields.
     pub fn new(id: TaskId, subject: impl Into<String>) -> Self {
+        Self::with_agent(id, subject, None)
+    }
+
+    /// Create a new task bound to a specific agent.
+    pub fn with_agent(id: TaskId, subject: impl Into<String>, agent_id: Option<&str>) -> Self {
         Self {
             id,
             subject: subject.into(),
@@ -217,7 +228,7 @@ impl Task {
             status: TaskStatus::Pending,
             priority: Priority::Normal,
             assignee: None,
-            agent_id: None,
+            agent_id: agent_id.map(|s| s.to_string()),
             depends_on: Vec::new(),
             blocks: Vec::new(),
             mission_id: None,
@@ -231,7 +242,14 @@ impl Task {
             closed_at: None,
             closed_reason: None,
             acceptance_criteria: None,
+            locked_by: None,
+            locked_at: None,
         }
+    }
+
+    /// Whether this task is bound to a persistent agent.
+    pub fn is_agent_bound(&self) -> bool {
+        self.agent_id.is_some()
     }
 
     /// Is this task in a terminal state?

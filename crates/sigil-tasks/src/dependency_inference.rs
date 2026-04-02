@@ -191,6 +191,8 @@ mod tests {
             closed_at: None,
             closed_reason: None,
             acceptance_criteria: None,
+            locked_by: None,
+            locked_at: None,
         }
     }
 
