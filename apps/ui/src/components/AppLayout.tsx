@@ -39,6 +39,11 @@ const NAV_ITEMS = [
     label: "Knowledge",
     icon: "M2 2h5l1 1.5L9 2h5v11H9l-1 1-1-1H2z",
   },
+  {
+    to: "/finance",
+    label: "Finance",
+    icon: "M2 13V5h3v8M6.5 13V3h3v10M11 13V7h3v6",
+  },
 ];
 
 export default function AppLayout() {

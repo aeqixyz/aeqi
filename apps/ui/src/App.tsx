@@ -9,6 +9,7 @@ import DepartmentsPage from "@/pages/DepartmentsPage";
 import MemoryPage from "@/pages/MemoryPage";
 import TriggersPage from "@/pages/TriggersPage";
 import SkillsPage from "@/pages/SkillsPage";
+import FinancePage from "@/pages/FinancePage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -34,6 +35,7 @@ export default function App() {
         <Route path="issues" element={<TasksPage />} />
         <Route path="automations" element={<TriggersPage />} />
         <Route path="knowledge" element={<MemoryPage />} />
+        <Route path="finance" element={<FinancePage />} />
 
         {/* Contextual routes */}
         <Route path="departments/:id" element={<DepartmentsPage />} />
