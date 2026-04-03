@@ -624,7 +624,7 @@ a:hover {
   align-items: center;
   justify-content: space-between;
   height: 40px;
-  background: var(--bg-elevated);
+  background: var(--bg-base);
   border-radius: 10px;
   padding: 0 4px;
   gap: 2px;
@@ -2087,6 +2087,16 @@ a:hover {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.sessions-list-title {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-align: center;
+  padding: 8px 0;
+  letter-spacing: 0.06em;
 }
 
 .sessions-list-header {
