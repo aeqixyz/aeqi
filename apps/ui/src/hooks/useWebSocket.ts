@@ -72,7 +72,7 @@ export function useWebSocket() {
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const connect = useCallback(() => {
-    const token = localStorage.getItem("sigil_token");
+    const token = localStorage.getItem("aeqi_token");
     if (!token) return;
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";

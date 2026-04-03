@@ -1,179 +1,213 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
-
-interface Session {
-  id: string;
-  subject: string;
-  status: string;
-  agent: string;
-  project: string;
-  skill?: string;
-  created_at?: string;
-  updated_at?: string;
-}
+import { useAuthStore } from "@/store/auth";
 
 interface Message {
   role: string;
   content: string;
-  timestamp: string;
+  timestamp?: string;
+  source?: string;
 }
 
-function timeAgo(ts: string): string {
-  const diff = Date.now() - new Date(ts).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "now";
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
-  return `${Math.floor(hrs / 24)}d`;
-}
-
-function statusDot(status: string) {
-  if (status === "InProgress" || status === "in_progress") return "● ";
-  if (status === "Done" || status === "done") return "○ ";
-  if (status === "Blocked" || status === "blocked") return "◌ ";
-  return "◌ ";
+interface StreamEvent {
+  type: string;
+  text?: string;
+  delta?: string;
+  message?: string;
+  tool_name?: string;
+  name?: string;
+  input?: any;
+  output?: string;
+  result?: string;
+  success?: boolean;
+  cost_usd?: number;
+  stop_reason?: string;
+  event_type?: string;
+  [key: string]: any;
 }
 
 export default function SessionsPage() {
   const [searchParams] = useSearchParams();
   const agentFilter = searchParams.get("agent");
   const selectedAgent = useChatStore((s) => s.selectedAgent);
+  const token = useAuthStore((s) => s.token);
   const scope = agentFilter || selectedAgent;
 
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [activeSession, setActiveSession] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
+  const [streaming, setStreaming] = useState(false);
+  const [streamText, setStreamText] = useState("");
+  const [activeTools, setActiveTools] = useState<string[]>([]);
   const messagesEnd = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
-  // Load sessions from tasks
+  // Load conversation history
   useEffect(() => {
-    api.getTasks({}).then((d: any) => {
-      let tasks = (d.tasks || []).map((t: any) => ({
-        id: t.id,
-        subject: t.subject,
-        status: t.status,
-        agent: t.assignee || t.agent_id || "—",
-        project: t.project || "—",
-        skill: t.skill,
-        created_at: t.created_at,
-        updated_at: t.updated_at,
-      }));
-
-      // Filter by agent scope
-      if (scope && !scope.startsWith("dept:")) {
-        tasks = tasks.filter((t: Session) =>
-          t.agent.toLowerCase().includes(scope.toLowerCase())
-        );
-      }
-
-      // Sort: running first, then by time
-      tasks.sort((a: Session, b: Session) => {
-        const aActive = a.status === "InProgress" || a.status === "in_progress";
-        const bActive = b.status === "InProgress" || b.status === "in_progress";
-        if (aActive && !bActive) return -1;
-        if (!aActive && bActive) return 1;
-        return (b.updated_at || b.created_at || "").localeCompare(a.updated_at || a.created_at || "");
-      });
-
-      setSessions(tasks);
-    }).catch(() => {});
+    if (!scope) {
+      // No agent selected — show overview
+      setMessages([]);
+      return;
+    }
+    api.getChatHistory({ project: undefined, limit: 30 })
+      .then((d: any) => setMessages(d.messages || []))
+      .catch(() => setMessages([]));
   }, [scope]);
 
-  // Load transcript for active session
+  // Auto-scroll on new messages
   useEffect(() => {
-    if (!activeSession) return;
-    api.getChatHistory({ chat_id: undefined, project: undefined, limit: 100 })
-      .then((d: any) => {
-        // Filter messages that match this task's transcript channel
-        setMessages(d.messages || []);
-        setTimeout(() => messagesEnd.current?.scrollIntoView({ behavior: "smooth" }), 100);
-      })
-      .catch(() => setMessages([]));
-  }, [activeSession]);
+    messagesEnd.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, streamText]);
 
-  // Send message to session
-  const handleSend = async () => {
-    if (!input.trim() || sending) return;
-    setSending(true);
-    try {
-      await api.chatFull({
-        message: input,
-        sender: "operator",
-      });
-      setInput("");
-    } catch { /* ignore */ }
-    setSending(false);
-  };
+  // Send message via WebSocket streaming
+  const handleSend = useCallback(() => {
+    if (!input.trim() || streaming || !token) return;
 
-  // ── Session list ──
-  if (!activeSession) {
+    const userMsg: Message = { role: "user", content: input };
+    setMessages((prev) => [...prev, userMsg]);
+    setInput("");
+    setStreaming(true);
+    setStreamText("");
+    setActiveTools([]);
+
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(
+      `${protocol}//${window.location.host}/api/chat/stream?token=${token}`
+    );
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({
+        message: userMsg.content,
+        agent: scope || undefined,
+      }));
+    };
+
+    let accumulated = "";
+
+    ws.onmessage = (e) => {
+      try {
+        const event: StreamEvent = JSON.parse(e.data);
+
+        switch (event.type) {
+          case "TextDelta":
+            accumulated += event.text || event.delta || "";
+            setStreamText(accumulated);
+            break;
+
+          case "ToolCall":
+          case "ToolStart":
+            setActiveTools((prev) => [...prev, event.name || event.tool_name || "tool"]);
+            break;
+
+          case "ToolResult":
+          case "ToolComplete":
+            setActiveTools((prev) => prev.slice(1));
+            break;
+
+          case "Status":
+            // Status messages (task started, etc.)
+            break;
+
+          case "Complete":
+            // Finalize the assistant message
+            if (accumulated) {
+              setMessages((prev) => [...prev, { role: "assistant", content: accumulated }]);
+            }
+            setStreamText("");
+            setStreaming(false);
+            setActiveTools([]);
+            ws.close();
+            break;
+
+          case "Error":
+            setMessages((prev) => [...prev, {
+              role: "system",
+              content: `Error: ${event.message || "Unknown error"}`,
+            }]);
+            setStreaming(false);
+            ws.close();
+            break;
+
+          default:
+            // TaskCompleted, TaskFailed, Progress, etc.
+            if (event.event_type === "TaskCompleted" || event.event_type === "TaskFailed") {
+              if (accumulated) {
+                setMessages((prev) => [...prev, { role: "assistant", content: accumulated }]);
+              }
+              setStreamText("");
+              setStreaming(false);
+              ws.close();
+            }
+            break;
+        }
+      } catch {
+        // ignore malformed
+      }
+    };
+
+    ws.onerror = () => {
+      setStreaming(false);
+    };
+
+    ws.onclose = () => {
+      if (streaming) {
+        // Unexpected close — save whatever we have
+        if (accumulated) {
+          setMessages((prev) => [...prev, { role: "assistant", content: accumulated }]);
+          setStreamText("");
+        }
+        setStreaming(false);
+      }
+    };
+  }, [input, streaming, token, scope]);
+
+  // No agent selected — show overview
+  if (!scope) {
     return (
       <div className="sessions-page">
-        <div className="sessions-header">
-          <h2 className="sessions-title">Sessions</h2>
-          <p className="sessions-meta">
-            {sessions.length} session{sessions.length !== 1 ? "s" : ""}
-            {scope ? ` · ${scope}` : ""}
-          </p>
-        </div>
-
-        <div className="sessions-list">
-          {sessions.map((s) => (
-            <div
-              key={s.id}
-              className="session-row"
-              onClick={() => setActiveSession(s.id)}
-            >
-              <div className="session-row-main">
-                <span className="session-row-status">{statusDot(s.status)}</span>
-                <span className="session-row-subject">{s.subject}</span>
-              </div>
-              <div className="session-row-meta">
-                <span className="session-row-agent">{s.agent}</span>
-                {s.skill && <span className="session-row-skill">{s.skill}</span>}
-                {s.created_at && <span className="session-row-time">{timeAgo(s.created_at)}</span>}
-              </div>
-            </div>
-          ))}
-
-          {sessions.length === 0 && (
-            <div className="sessions-empty">No sessions{scope ? ` for ${scope}` : ""}</div>
-          )}
+        <div className="sessions-empty">
+          Select an agent to start a session
         </div>
       </div>
     );
   }
 
-  // ── Session detail ──
-  const session = sessions.find((s) => s.id === activeSession);
-
   return (
-    <div className="session-detail">
-      <div className="session-detail-header">
-        <button className="session-back" onClick={() => setActiveSession(null)}>←</button>
-        <div className="session-detail-info">
-          <span className="session-detail-subject">{session?.subject || activeSession}</span>
-          <span className="session-detail-meta">
-            {session?.agent} · {session?.status} {session?.skill ? `· ${session.skill}` : ""}
-          </span>
-        </div>
+    <div className="session-chat">
+      <div className="session-chat-header">
+        <span className="session-chat-name">{scope}</span>
+        <span className="session-chat-status">
+          {streaming ? "streaming" : "ready"}
+        </span>
       </div>
 
       <div className="session-messages">
-        {messages.length === 0 && (
-          <div className="sessions-empty">No transcript available</div>
-        )}
         {messages.map((msg, i) => (
           <div key={i} className={`session-msg session-msg-${msg.role}`}>
             <span className="session-msg-role">{msg.role}</span>
             <pre className="session-msg-content">{msg.content}</pre>
           </div>
         ))}
+
+        {/* Live streaming text */}
+        {streamText && (
+          <div className="session-msg session-msg-assistant session-msg-streaming">
+            <span className="session-msg-role">assistant</span>
+            <pre className="session-msg-content">{streamText}</pre>
+          </div>
+        )}
+
+        {/* Active tool indicators */}
+        {activeTools.length > 0 && (
+          <div className="session-tool-indicator">
+            {activeTools.map((tool, i) => (
+              <span key={i} className="session-tool-name">⟳ {tool}</span>
+            ))}
+          </div>
+        )}
+
         <div ref={messagesEnd} />
       </div>
 
@@ -181,11 +215,11 @@ export default function SessionsPage() {
         <input
           className="session-input"
           type="text"
-          placeholder="Send a message..."
+          placeholder={streaming ? "Agent is responding..." : `Message ${scope}...`}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSend()}
-          disabled={sending}
+          onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
+          disabled={streaming}
         />
       </div>
     </div>

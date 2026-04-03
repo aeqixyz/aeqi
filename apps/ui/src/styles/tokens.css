@@ -2305,6 +2305,59 @@ a:hover {
   opacity: 0.4;
 }
 
+.session-msg-streaming {
+  opacity: 0.8;
+}
+
+.session-msg-streaming .session-msg-content {
+  border-right: 2px solid var(--text-muted);
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  50% { border-color: transparent; }
+}
+
+.session-tool-indicator {
+  display: flex;
+  gap: 8px;
+  padding: 4px 12px;
+}
+
+.session-tool-name {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  animation: spin 1.5s linear infinite;
+}
+
+@keyframes spin {
+  to { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+.session-chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.session-chat-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.session-chat-status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 /* Home */
 .home-page {
   max-width: 700px;
