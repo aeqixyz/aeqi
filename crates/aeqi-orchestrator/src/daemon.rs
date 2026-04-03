@@ -8,7 +8,7 @@ use tracing::{debug, info, warn};
 
 use crate::agent_registry::AgentRegistry;
 use crate::chat_engine::{ChatEngine, ChatMessage, ChatSource};
-use crate::conversation_store::{
+use crate::session_store::{
     agency_chat_id, company_chat_id, department_chat_id, named_channel_chat_id,
 };
 use crate::execution_events::{EventBroadcaster, ExecutionEvent};
@@ -3276,10 +3276,10 @@ impl Daemon {
                             .and_then(|v| v.as_i64())
                             .unwrap_or_else(|| named_channel_chat_id(&agent_hint));
 
-                        let conversation_store = registry.conversation_store.clone();
+                        let session_store = registry.session_store.clone();
 
                         // Record user message to agent's channel.
-                        if let Some(ref cs) = conversation_store {
+                        if let Some(ref cs) = session_store {
                             let _ = cs.ensure_channel(chat_id, "web", &agent_hint).await;
                             let _ = cs
                                 .record_with_source(chat_id, "user", message, Some("web"))
@@ -3287,7 +3287,7 @@ impl Daemon {
                         }
 
                         // Load recent conversation history.
-                        let history = if let Some(ref cs) = conversation_store {
+                        let history = if let Some(ref cs) = session_store {
                             cs.recent(chat_id, 20).await.unwrap_or_default()
                         } else {
                             vec![]
@@ -3324,7 +3324,7 @@ impl Daemon {
                                 Ok(response) => {
                                     let text = response.content.unwrap_or_default();
                                     // Record assistant response.
-                                    if let Some(ref cs) = conversation_store {
+                                    if let Some(ref cs) = session_store {
                                         let _ = cs
                                             .record_with_source(
                                                 chat_id,
@@ -3506,7 +3506,7 @@ mod tests {
         DispatchHealth, EventBuffer, ExecutionEvent, ReadinessContext, readiness_response,
         resolve_web_chat_id,
     };
-    use crate::conversation_store::{
+    use crate::session_store::{
         agency_chat_id, company_chat_id, department_chat_id, named_channel_chat_id,
     };
 

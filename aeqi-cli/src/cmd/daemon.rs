@@ -4,7 +4,7 @@ use aeqi_core::{Identity, SecretStore};
 use aeqi_gates::TelegramChannel;
 use aeqi_orchestrator::tools::build_orchestration_tools;
 use aeqi_orchestrator::{
-    AgentRouter, AuditLog, Company, CompanyRegistry, ConversationStore, Daemon, DispatchBus,
+    AgentRouter, AuditLog, Company, CompanyRegistry, Daemon, DispatchBus, SessionStore,
     ExpertiseLedger, Notes, WorkerPool,
 };
 use anyhow::{Context, Result};
@@ -86,13 +86,13 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 }
                 Err(e) => warn!(error = %e, "failed to initialize notes"),
             }
-            match ConversationStore::open(&data_dir.join("conversations.db")) {
+            match SessionStore::open(&data_dir.join("conversations.db")) {
                 Ok(cs) => {
                     let cs = Arc::new(cs);
-                    registry_inner.conversation_store = Some(cs);
-                    info!("conversation store initialized");
+                    registry_inner.session_store = Some(cs);
+                    info!("session store initialized");
                 }
-                Err(e) => warn!(error = %e, "failed to initialize conversation store"),
+                Err(e) => warn!(error = %e, "failed to initialize session store"),
             }
 
             let registry = Arc::new(registry_inner);
@@ -300,7 +300,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             // Intent classifier (legacy — no longer used for routing).
             let intent_classifier: Option<Arc<aeqi_orchestrator::intent::IntentClassifier>> = None;
 
-            let chat_engine = registry.conversation_store.as_ref().map(|cs| {
+            let chat_engine = registry.session_store.as_ref().map(|cs| {
                 Arc::new(aeqi_orchestrator::ChatEngine {
                     conversations: cs.clone(),
                     registry: registry.clone(),

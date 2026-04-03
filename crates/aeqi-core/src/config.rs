@@ -1020,17 +1020,7 @@ impl AEQIConfig {
                 }
             }
 
-            // Legacy support: check ~/.sigil if ~/.aeqi doesn't exist
-            for name in &config_names {
-                let legacy = home.join(format!(".sigil/{}", name.replace("aeqi", "sigil")));
-                if legacy.exists() {
-                    tracing::warn!(
-                        "Found legacy config at {}. Consider migrating to ~/.aeqi/.",
-                        legacy.display()
-                    );
-                    return Ok((Self::load(&legacy)?, legacy));
-                }
-            }
+
         }
 
         anyhow::bail!("No aeqi.toml found. Run 'aeqi setup' to create one.")

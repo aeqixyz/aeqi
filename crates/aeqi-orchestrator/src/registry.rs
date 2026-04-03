@@ -6,7 +6,7 @@ use tracing::{debug, info, warn};
 
 use crate::audit::AuditLog;
 use crate::company::Company;
-use crate::conversation_store::ConversationStore;
+use crate::session_store::SessionStore;
 use crate::cost_ledger::CostLedger;
 use crate::expertise::ExpertiseLedger;
 use crate::message::DispatchBus;
@@ -32,8 +32,8 @@ pub struct CompanyRegistry {
     pub expertise_ledger: Option<Arc<ExpertiseLedger>>,
     /// Inter-agent notes for shared knowledge (Phase 3).
     pub notes: Option<Arc<Notes>>,
-    /// Unified conversation store for all chat channels.
-    pub conversation_store: Option<Arc<ConversationStore>>,
+    /// Unified session store for all chat channels.
+    pub session_store: Option<Arc<SessionStore>>,
     /// Names from [[projects]] config (to distinguish from agent entries).
     pub config_project_names: Vec<String>,
     /// Agent registry for global per-agent concurrency enforcement.
@@ -54,7 +54,7 @@ impl CompanyRegistry {
             audit_log: None,
             expertise_ledger: None,
             notes: None,
-            conversation_store: None,
+            session_store: None,
             config_project_names: Vec::new(),
             agent_registry: RwLock::new(None),
         }
@@ -100,12 +100,12 @@ impl CompanyRegistry {
             .insert(name, Arc::new(Mutex::new(pool)));
     }
 
-    /// Wire agent registry, trigger store, and conversation store into all worker pools.
+    /// Wire agent registry, trigger store, and session store into all worker pools.
     pub async fn wire_agent_system(
         &self,
         agent_registry: Arc<crate::agent_registry::AgentRegistry>,
         trigger_store: Arc<crate::trigger::TriggerStore>,
-        conversation_store: Option<Arc<crate::ConversationStore>>,
+        session_store: Option<Arc<crate::SessionStore>>,
     ) {
         // Store registry reference for global concurrency enforcement.
         *self.agent_registry.write().await = Some(agent_registry.clone());
@@ -115,8 +115,8 @@ impl CompanyRegistry {
             let mut s = pool.lock().await;
             s.agent_registry = Some(agent_registry.clone());
             s.trigger_store = Some(trigger_store.clone());
-            if let Some(ref cs) = conversation_store {
-                s.conversation_store = Some(cs.clone());
+            if let Some(ref cs) = session_store {
+                s.session_store = Some(cs.clone());
             }
         }
     }

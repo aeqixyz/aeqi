@@ -1076,12 +1076,12 @@ impl Tool for TriggerManageTool {
 
 /// Tool for agents to search past session transcripts via FTS5.
 pub struct TranscriptSearchTool {
-    conversation_store: Arc<crate::ConversationStore>,
+    session_store: Arc<crate::SessionStore>,
 }
 
 impl TranscriptSearchTool {
-    pub fn new(conversation_store: Arc<crate::ConversationStore>) -> Self {
-        Self { conversation_store }
+    pub fn new(session_store: Arc<crate::SessionStore>) -> Self {
+        Self { session_store }
     }
 }
 
@@ -1095,7 +1095,7 @@ impl Tool for TranscriptSearchTool {
         let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
 
         match self
-            .conversation_store
+            .session_store
             .search_transcripts(query, limit)
             .await
         {

@@ -14,7 +14,7 @@ use anyhow::Result;
 use aeqi_core::traits::{Memory, MemoryQuery, MemoryScope};
 
 use crate::agent_router::AgentRouter;
-use crate::conversation_store::{ChannelInfo, ConversationMessage, ConversationStore, ThreadEvent};
+use crate::session_store::{ChannelInfo, SessionMessage, SessionStore, ThreadEvent};
 use crate::registry::CompanyRegistry;
 
 const CHAT_COUNCIL_HOLD_REASON: &str = "awaiting_council";
@@ -190,7 +190,7 @@ pub enum CompletionStatus {
 
 /// The unified chat engine.
 pub struct ChatEngine {
-    pub conversations: Arc<ConversationStore>,
+    pub conversations: Arc<SessionStore>,
     pub registry: Arc<CompanyRegistry>,
     pub agent_router: Arc<Mutex<AgentRouter>>,
     pub council_advisors: Arc<Vec<aeqi_core::config::PeerAgentConfig>>,
@@ -854,7 +854,7 @@ impl ChatEngine {
         chat_id: i64,
         limit: usize,
         offset: usize,
-    ) -> Result<Vec<ConversationMessage>> {
+    ) -> Result<Vec<SessionMessage>> {
         self.conversations
             .recent_with_offset(chat_id, limit, offset)
             .await
@@ -1238,7 +1238,7 @@ impl ChatEngine {
 
     async fn gather_council_input_with(
         registry: Arc<CompanyRegistry>,
-        conversations: Arc<ConversationStore>,
+        conversations: Arc<SessionStore>,
         advisors: &[String],
         clean_text: &str,
         conv_context: &str,
@@ -1356,7 +1356,7 @@ impl ChatEngine {
 
     async fn finish_council_enrichment(
         registry: Arc<CompanyRegistry>,
-        conversations: Arc<ConversationStore>,
+        conversations: Arc<SessionStore>,
         agent_router: Arc<Mutex<AgentRouter>>,
         council_advisors: Arc<Vec<aeqi_core::config::PeerAgentConfig>>,
         task_id: String,
@@ -1529,7 +1529,7 @@ mod tests {
 
         let conv_dir = TempDir::new().unwrap();
         let conv_path = conv_dir.path().join("conv.db");
-        let conversations = Arc::new(ConversationStore::open(&conv_path).unwrap());
+        let conversations = Arc::new(SessionStore::open(&conv_path).unwrap());
 
         let engine = ChatEngine {
             conversations,
@@ -1748,7 +1748,7 @@ mod tests {
 
         let conv_dir = TempDir::new().unwrap();
         let conv_path = conv_dir.path().join("conv.db");
-        let conversations = Arc::new(ConversationStore::open(&conv_path).unwrap());
+        let conversations = Arc::new(SessionStore::open(&conv_path).unwrap());
 
         let engine = ChatEngine {
             conversations,
@@ -1877,7 +1877,7 @@ mod tests {
 
         let conv_dir = TempDir::new().unwrap();
         let conv_path = conv_dir.path().join("conv.db");
-        let conversations = Arc::new(ConversationStore::open(&conv_path).unwrap());
+        let conversations = Arc::new(SessionStore::open(&conv_path).unwrap());
 
         let engine = ChatEngine {
             conversations,

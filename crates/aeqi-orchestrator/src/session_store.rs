@@ -1,4 +1,4 @@
-//! Persistent Conversation Store — SQLite-backed conversation history
+//! Persistent Session Store — SQLite-backed conversation history
 //! that survives daemon restarts.
 
 use anyhow::{Context, Result};
@@ -9,9 +9,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::debug;
 
-/// A single conversation message.
+/// A single session message.
 #[derive(Debug, Clone)]
-pub struct ConversationMessage {
+pub struct SessionMessage {
     pub chat_id: i64,
     pub role: String,
     pub content: String,
@@ -32,15 +32,15 @@ pub struct ThreadEvent {
     pub metadata: Option<serde_json::Value>,
 }
 
-/// Persistent conversation store backed by SQLite.
-pub struct ConversationStore {
+/// Persistent session store backed by SQLite.
+pub struct SessionStore {
     db: Arc<Mutex<rusqlite::Connection>>,
     /// Max messages per chat before auto-summarization kicks in.
     pub max_messages_per_chat: usize,
 }
 
-impl ConversationStore {
-    /// Open or create a conversation store at the given path.
+impl SessionStore {
+    /// Open or create a session store at the given path.
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -78,6 +78,7 @@ impl ConversationStore {
 
              CREATE INDEX IF NOT EXISTS idx_summ_chat ON conversation_summaries(chat_id);
 
+             -- NOTE: `channels` conceptually represents sessions; not renamed to avoid data migration risk.
              CREATE TABLE IF NOT EXISTS channels (
                  chat_id INTEGER PRIMARY KEY,
                  channel_type TEXT NOT NULL,
@@ -116,7 +117,7 @@ impl ConversationStore {
         let _ =
             conn.execute_batch("ALTER TABLE conversations ADD COLUMN metadata TEXT DEFAULT NULL;");
 
-        debug!(path = %path.display(), "conversation store opened");
+        debug!(path = %path.display(), "session store opened");
 
         Ok(Self {
             db: Arc::new(Mutex::new(conn)),
@@ -164,7 +165,7 @@ impl ConversationStore {
     }
 
     /// Get recent messages for a chat (most recent `limit` messages, with optional offset for pagination).
-    pub async fn recent(&self, chat_id: i64, limit: usize) -> Result<Vec<ConversationMessage>> {
+    pub async fn recent(&self, chat_id: i64, limit: usize) -> Result<Vec<SessionMessage>> {
         self.recent_with_offset(chat_id, limit, 0).await
     }
 
@@ -175,7 +176,7 @@ impl ConversationStore {
         chat_id: i64,
         limit: usize,
         offset: usize,
-    ) -> Result<Vec<ConversationMessage>> {
+    ) -> Result<Vec<SessionMessage>> {
         let db = self.db.lock().await;
         let mut stmt = db.prepare(
             "SELECT chat_id, role, content, timestamp, source FROM conversations \
@@ -185,7 +186,7 @@ impl ConversationStore {
 
         let rows = stmt
             .query_map(params![chat_id, limit as i64, offset as i64], |row| {
-                Ok(ConversationMessage {
+                Ok(SessionMessage {
                     chat_id: row.get(0)?,
                     role: row.get(1)?,
                     content: row.get(2)?,
@@ -242,7 +243,7 @@ impl ConversationStore {
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<ConversationMessage>> {
+    ) -> Result<Vec<SessionMessage>> {
         let db = self.db.lock().await;
 
         // Search via FTS5 on transcript channels only.
@@ -260,7 +261,7 @@ impl ConversationStore {
 
         let messages = stmt
             .query_map(params![query, limit as i64], |row| {
-                Ok(ConversationMessage {
+                Ok(SessionMessage {
                     chat_id: row.get(0)?,
                     role: row.get(1)?,
                     content: row.get(2)?,
@@ -383,7 +384,7 @@ impl ConversationStore {
         &self,
         task_id: &str,
         limit: usize,
-    ) -> Result<Vec<ConversationMessage>> {
+    ) -> Result<Vec<SessionMessage>> {
         let channel_name = format!("transcript:task:{}", task_id);
         let chat_id = named_channel_chat_id(&channel_name);
         self.recent(chat_id, limit).await
@@ -482,7 +483,7 @@ mod tests {
     #[tokio::test]
     async fn test_record_and_recent() {
         let dir = TempDir::new().unwrap();
-        let store = ConversationStore::open(&dir.path().join("conv.db")).unwrap();
+        let store = SessionStore::open(&dir.path().join("conv.db")).unwrap();
 
         store.record(123, "User", "hello").await.unwrap();
         store.record(123, "Assistant", "hi there").await.unwrap();
@@ -498,7 +499,7 @@ mod tests {
     #[tokio::test]
     async fn test_recent_limit() {
         let dir = TempDir::new().unwrap();
-        let store = ConversationStore::open(&dir.path().join("conv.db")).unwrap();
+        let store = SessionStore::open(&dir.path().join("conv.db")).unwrap();
 
         for i in 0..10 {
             store.record(1, "User", &format!("msg {i}")).await.unwrap();
@@ -513,7 +514,7 @@ mod tests {
     #[tokio::test]
     async fn test_context_string() {
         let dir = TempDir::new().unwrap();
-        let store = ConversationStore::open(&dir.path().join("conv.db")).unwrap();
+        let store = SessionStore::open(&dir.path().join("conv.db")).unwrap();
 
         store.record(42, "User", "hello").await.unwrap();
         store.record(42, "Assistant", "world").await.unwrap();
@@ -527,7 +528,7 @@ mod tests {
     #[tokio::test]
     async fn test_context_string_empty() {
         let dir = TempDir::new().unwrap();
-        let store = ConversationStore::open(&dir.path().join("conv.db")).unwrap();
+        let store = SessionStore::open(&dir.path().join("conv.db")).unwrap();
 
         let ctx = store.context_string(999, 10).await.unwrap();
         assert!(ctx.is_empty());
@@ -536,7 +537,7 @@ mod tests {
     #[tokio::test]
     async fn test_save_summary() {
         let dir = TempDir::new().unwrap();
-        let store = ConversationStore::open(&dir.path().join("conv.db")).unwrap();
+        let store = SessionStore::open(&dir.path().join("conv.db")).unwrap();
 
         for i in 0..10 {
             store.record(1, "User", &format!("msg {i}")).await.unwrap();
@@ -559,7 +560,7 @@ mod tests {
     #[tokio::test]
     async fn test_message_count() {
         let dir = TempDir::new().unwrap();
-        let store = ConversationStore::open(&dir.path().join("conv.db")).unwrap();
+        let store = SessionStore::open(&dir.path().join("conv.db")).unwrap();
 
         store.record(1, "User", "a").await.unwrap();
         store.record(1, "User", "b").await.unwrap();
@@ -573,7 +574,7 @@ mod tests {
     #[tokio::test]
     async fn test_chat_isolation() {
         let dir = TempDir::new().unwrap();
-        let store = ConversationStore::open(&dir.path().join("conv.db")).unwrap();
+        let store = SessionStore::open(&dir.path().join("conv.db")).unwrap();
 
         store.record(1, "User", "chat1").await.unwrap();
         store.record(2, "User", "chat2").await.unwrap();
@@ -590,7 +591,7 @@ mod tests {
     #[tokio::test]
     async fn test_timeline_records_typed_events() {
         let dir = TempDir::new().unwrap();
-        let store = ConversationStore::open(&dir.path().join("conv.db")).unwrap();
+        let store = SessionStore::open(&dir.path().join("conv.db")).unwrap();
 
         store.record(7, "User", "hello").await.unwrap();
         store
@@ -628,7 +629,7 @@ mod tests {
     #[tokio::test]
     async fn test_ensure_channel_and_list() {
         let dir = TempDir::new().unwrap();
-        let store = ConversationStore::open(&dir.path().join("conv.db")).unwrap();
+        let store = SessionStore::open(&dir.path().join("conv.db")).unwrap();
 
         store
             .ensure_channel(100, "company", "myproject")
@@ -647,7 +648,7 @@ mod tests {
     #[tokio::test]
     async fn test_ensure_channel_idempotent() {
         let dir = TempDir::new().unwrap();
-        let store = ConversationStore::open(&dir.path().join("conv.db")).unwrap();
+        let store = SessionStore::open(&dir.path().join("conv.db")).unwrap();
 
         store.ensure_channel(100, "company", "proj").await.unwrap();
         store.ensure_channel(100, "company", "proj").await.unwrap();
@@ -659,7 +660,7 @@ mod tests {
     #[tokio::test]
     async fn test_channel_with_messages() {
         let dir = TempDir::new().unwrap();
-        let store = ConversationStore::open(&dir.path().join("conv.db")).unwrap();
+        let store = SessionStore::open(&dir.path().join("conv.db")).unwrap();
 
         store.ensure_channel(100, "company", "proj").await.unwrap();
         store.record(100, "User", "hello company").await.unwrap();

@@ -31,18 +31,17 @@ pub fn api_routes() -> Router<AppState> {
         .route("/triggers", get(triggers))
         .route("/audit", get(audit))
         .route("/notes", get(notes).post(post_note_entry))
-        .route("/blackboard", get(notes).post(post_note_entry))
         .route("/expertise", get(expertise))
         .route("/cost", get(cost))
         .route("/dashboard", get(dashboard))
         .route("/worker/events", get(worker_events))
-        .route("/chat", post(chat))
-        .route("/chat/full", post(chat_full))
+        .route("/chat", post(chat)) // Deprecated: use /session/send
+        .route("/chat/full", post(chat_full)) // Deprecated: use /session/send
         .route("/session/send", post(session_send))
-        .route("/chat/poll/{task_id}", get(chat_poll))
-        .route("/chat/history", get(chat_history))
-        .route("/chat/timeline", get(chat_timeline))
-        .route("/chat/channels", get(chat_channels))
+        .route("/chat/poll/{task_id}", get(chat_poll)) // Deprecated: use /session/send polling
+        .route("/chat/history", get(chat_history)) // Deprecated: kept for backwards compat
+        .route("/chat/timeline", get(chat_timeline)) // Deprecated: kept for backwards compat
+        .route("/chat/channels", get(chat_channels)) // Deprecated: kept for backwards compat
         .route("/brief", get(brief))
         .route("/crons", get(crons))
         .route("/memories", get(memories))

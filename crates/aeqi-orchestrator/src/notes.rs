@@ -85,18 +85,30 @@ impl Notes {
     ) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).with_context(|| {
-                format!("failed to create blackboard dir: {}", parent.display())
+                format!("failed to create notes dir: {}", parent.display())
             })?;
         }
 
         let conn = Connection::open(path)
-            .with_context(|| format!("failed to open blackboard DB: {}", path.display()))?;
+            .with_context(|| format!("failed to open notes DB: {}", path.display()))?;
+
+        // Migrate legacy table name if it exists.
+        let has_old_table: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='aeqi_blackboard'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+        if has_old_table {
+            conn.execute_batch("ALTER TABLE aeqi_blackboard RENAME TO aeqi_notes;")?;
+        }
 
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
              PRAGMA synchronous=NORMAL;
 
-             CREATE TABLE IF NOT EXISTS aeqi_blackboard (
+             CREATE TABLE IF NOT EXISTS aeqi_notes (
                  id TEXT PRIMARY KEY,
                  key TEXT NOT NULL,
                  content TEXT NOT NULL,
@@ -109,11 +121,11 @@ impl Notes {
              );
 
              CREATE INDEX IF NOT EXISTS idx_bb_project
-                 ON aeqi_blackboard(project);
+                 ON aeqi_notes(project);
              CREATE INDEX IF NOT EXISTS idx_bb_key
-                 ON aeqi_blackboard(project, key);
+                 ON aeqi_notes(project, key);
              CREATE INDEX IF NOT EXISTS idx_bb_expires
-                 ON aeqi_blackboard(expires_at);",
+                 ON aeqi_notes(expires_at);",
         )?;
 
         Ok(Self {
@@ -124,7 +136,7 @@ impl Notes {
         })
     }
 
-    /// Post a new entry to the blackboard.
+    /// Post a new entry to notes.
     pub fn post(
         &self,
         key: &str,
@@ -166,7 +178,7 @@ impl Notes {
             .to_string();
 
         conn.execute(
-            "INSERT OR REPLACE INTO aeqi_blackboard (id, key, content, agent, project, tags_json, durability, created_at, expires_at)
+            "INSERT OR REPLACE INTO aeqi_notes (id, key, content, agent, project, tags_json, durability, created_at, expires_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             rusqlite::params![
                 entry.id, entry.key, entry.content, entry.agent, entry.company,
@@ -200,7 +212,7 @@ impl Notes {
         // Check for existing live claim
         let existing: Option<(String, String)> = conn
             .prepare(
-                "SELECT agent, content FROM aeqi_blackboard
+                "SELECT agent, content FROM aeqi_notes
                  WHERE project = ?1 AND key = ?2 AND expires_at > ?3
                  ORDER BY created_at DESC LIMIT 1",
             )?
@@ -221,11 +233,11 @@ impl Notes {
                 let tags_json = serde_json::to_string(&vec!["claim"])?;
 
                 conn.execute(
-                    "DELETE FROM aeqi_blackboard WHERE project = ?1 AND key = ?2",
+                    "DELETE FROM aeqi_notes WHERE project = ?1 AND key = ?2",
                     rusqlite::params![project, &claim_key],
                 )?;
                 conn.execute(
-                    "INSERT INTO aeqi_blackboard (id, key, content, agent, project, tags_json, durability, created_at, expires_at)
+                    "INSERT INTO aeqi_notes (id, key, content, agent, project, tags_json, durability, created_at, expires_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                     rusqlite::params![
                         id, &claim_key, content, agent, project,
@@ -241,7 +253,7 @@ impl Notes {
                 let tags_json = serde_json::to_string(&vec!["claim"])?;
 
                 conn.execute(
-                    "INSERT INTO aeqi_blackboard (id, key, content, agent, project, tags_json, durability, created_at, expires_at)
+                    "INSERT INTO aeqi_notes (id, key, content, agent, project, tags_json, durability, created_at, expires_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                     rusqlite::params![
                         id, &claim_key, content, agent, project,
@@ -263,12 +275,12 @@ impl Notes {
 
         let deleted = if force {
             conn.execute(
-                "DELETE FROM aeqi_blackboard WHERE project = ?1 AND key = ?2",
+                "DELETE FROM aeqi_notes WHERE project = ?1 AND key = ?2",
                 rusqlite::params![project, &claim_key],
             )?
         } else {
             conn.execute(
-                "DELETE FROM aeqi_blackboard WHERE project = ?1 AND key = ?2 AND agent = ?3",
+                "DELETE FROM aeqi_notes WHERE project = ?1 AND key = ?2 AND agent = ?3",
                 rusqlite::params![project, &claim_key, agent],
             )?
         };
@@ -283,7 +295,7 @@ impl Notes {
             .lock()
             .map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
         let deleted = conn.execute(
-            "DELETE FROM aeqi_blackboard WHERE project = ?1 AND key = ?2",
+            "DELETE FROM aeqi_notes WHERE project = ?1 AND key = ?2",
             rusqlite::params![project, key],
         )?;
         Ok(deleted > 0)
@@ -386,7 +398,7 @@ impl Notes {
             let since_str = since_dt.to_rfc3339();
             let mut stmt = conn.prepare(
                 "SELECT id, key, content, agent, project, tags_json, durability, created_at, expires_at
-                 FROM aeqi_blackboard WHERE expires_at > ?1 AND created_at > ?2
+                 FROM aeqi_notes WHERE expires_at > ?1 AND created_at > ?2
                  ORDER BY created_at DESC LIMIT ?3",
             )?;
             stmt.query_map(
@@ -398,7 +410,7 @@ impl Notes {
         } else {
             let mut stmt = conn.prepare(
                 "SELECT id, key, content, agent, project, tags_json, durability, created_at, expires_at
-                 FROM aeqi_blackboard WHERE expires_at > ?1
+                 FROM aeqi_notes WHERE expires_at > ?1
                  ORDER BY created_at DESC LIMIT ?2",
             )?;
             stmt.query_map(rusqlite::params![now, 1000u32], Self::row_to_entry)?
@@ -431,7 +443,7 @@ impl Notes {
 
         let result: Option<(String, String)> = conn
             .prepare(
-                "SELECT agent, content FROM aeqi_blackboard
+                "SELECT agent, content FROM aeqi_notes
                  WHERE project = ?1 AND key = ?2 AND expires_at > ?3
                  ORDER BY created_at DESC LIMIT 1",
             )?
@@ -453,7 +465,7 @@ impl Notes {
 
         let mut stmt = conn.prepare(
             "SELECT id, key, content, agent, project, tags_json, durability, created_at, expires_at
-             FROM aeqi_blackboard WHERE project = ?1 AND key = ?2 AND expires_at > ?3
+             FROM aeqi_notes WHERE project = ?1 AND key = ?2 AND expires_at > ?3
              ORDER BY created_at DESC LIMIT 1",
         )?;
 
@@ -472,7 +484,7 @@ impl Notes {
             .map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
         let now = Utc::now().to_rfc3339();
         let count = conn.execute(
-            "DELETE FROM aeqi_blackboard WHERE expires_at <= ?1",
+            "DELETE FROM aeqi_notes WHERE expires_at <= ?1",
             rusqlite::params![now],
         )?;
         Ok(count as u64)
@@ -500,7 +512,7 @@ impl Notes {
             let since_str = since_dt.to_rfc3339();
             let mut stmt = conn.prepare(
                 "SELECT id, key, content, agent, project, tags_json, durability, created_at, expires_at
-                 FROM aeqi_blackboard WHERE project = ?1 AND expires_at > ?2 AND created_at > ?3
+                 FROM aeqi_notes WHERE project = ?1 AND expires_at > ?2 AND created_at > ?3
                  ORDER BY created_at DESC LIMIT ?4",
             )?;
             stmt.query_map(
@@ -512,7 +524,7 @@ impl Notes {
         } else {
             let mut stmt = conn.prepare(
                 "SELECT id, key, content, agent, project, tags_json, durability, created_at, expires_at
-                 FROM aeqi_blackboard WHERE project = ?1 AND expires_at > ?2
+                 FROM aeqi_notes WHERE project = ?1 AND expires_at > ?2
                  ORDER BY created_at DESC LIMIT ?3",
             )?;
             stmt.query_map(rusqlite::params![project, now, limit], Self::row_to_entry)?
@@ -558,7 +570,7 @@ impl Notes {
     }
 }
 
-/// Check whether a blackboard key is visible to the given agent scope.
+/// Check whether a notes key is visible to the given agent scope.
 fn entry_visible(key: &str, vis: &AgentVisibility) -> bool {
     if key.starts_with("system:") || key.starts_with("session:") {
         return true;
@@ -668,7 +680,7 @@ mod tests {
             let conn = bb.conn.lock().unwrap();
             let expired = (Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
             conn.execute(
-                "UPDATE aeqi_blackboard SET expires_at = ?1",
+                "UPDATE aeqi_notes SET expires_at = ?1",
                 rusqlite::params![expired],
             )
             .unwrap();
@@ -923,7 +935,7 @@ mod tests {
             let conn = bb.conn.lock().unwrap();
             let expired = (Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
             conn.execute(
-                "UPDATE aeqi_blackboard SET expires_at = ?1 WHERE key = 'claim:src/main.rs'",
+                "UPDATE aeqi_notes SET expires_at = ?1 WHERE key = 'claim:src/main.rs'",
                 rusqlite::params![expired],
             )
             .unwrap();

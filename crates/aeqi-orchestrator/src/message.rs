@@ -266,18 +266,6 @@ impl DispatchBus {
         let conn = Connection::open(path)
             .with_context(|| format!("failed to open dispatch DB: {}", path.display()))?;
 
-        // Migrate legacy table name (SQLite doesn't support ALTER TABLE IF EXISTS).
-        let has_whispers: bool = conn
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='whispers'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(false);
-        if has_whispers {
-            conn.execute_batch("ALTER TABLE whispers RENAME TO dispatches;")?;
-        }
-
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
              PRAGMA synchronous=NORMAL;

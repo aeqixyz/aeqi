@@ -122,7 +122,7 @@ pub struct WorkerPool {
     /// Trigger store — when set, agents with manage_triggers capability get the tool.
     pub trigger_store: Option<Arc<crate::trigger::TriggerStore>>,
     /// Conversation store — for transcript search tool and org context.
-    pub conversation_store: Option<Arc<crate::ConversationStore>>,
+    pub session_store: Option<Arc<crate::SessionStore>>,
     /// Project primer from config — injected into every worker's context.
     pub project_primer: Option<String>,
     /// Shared primer from top-level config — injected into ALL workers.
@@ -185,7 +185,7 @@ impl WorkerPool {
             execution_mode: aeqi_core::ExecutionMode::default(),
             agent_registry: None,
             trigger_store: None,
-            conversation_store: None,
+            session_store: None,
             project_primer: None,
             shared_primer: None,
         }
@@ -411,7 +411,7 @@ impl WorkerPool {
                 worker.execution
         {
             // transcript_search for cross-session recall.
-            if let Some(convs) = &self.conversation_store {
+            if let Some(convs) = &self.session_store {
                 tools.push(Arc::new(crate::tools::TranscriptSearchTool::new(
                     convs.clone(),
                 )));
@@ -1020,7 +1020,7 @@ impl WorkerPool {
             let verification_model = self.preflight_model.clone();
             let verification_repo = self.repo.clone();
             let task_description = task.description.clone();
-            let conversation_store = self.conversation_store.clone();
+            let session_store = self.session_store.clone();
             let escalation_tracker = self.escalation_tracker.clone();
             let handle = tokio::spawn(async move {
                 let start = std::time::Instant::now();
@@ -1132,12 +1132,12 @@ impl WorkerPool {
                                         );
                                     }
                                     "department" => {
-                                        // Post to department channel via ConversationStore.
-                                        if let Some(ref cs) = conversation_store {
+                                        // Post to department channel via SessionStore.
+                                        if let Some(ref cs) = session_store {
                                             let channel_name =
                                                 format!("dept:{}", outcome_recipient);
                                             let chat_id =
-                                                crate::conversation_store::named_channel_chat_id(
+                                                crate::session_store::named_channel_chat_id(
                                                     &channel_name,
                                                 );
                                             let _ = cs
@@ -1410,8 +1410,8 @@ impl WorkerPool {
                             TaskOutcome::Handoff { .. } => {}
                         }
 
-                        // Save full session transcript to ConversationStore.
-                        if let (Some(cs), Some(repo)) = (&conversation_store, &verification_repo) {
+                        // Save full session transcript to SessionStore.
+                        if let (Some(cs), Some(repo)) = (&session_store, &verification_repo) {
                             let session_path = repo
                                 .join(".aeqi")
                                 .join("sessions")
@@ -1421,7 +1421,7 @@ impl WorkerPool {
                                     serde_json::from_str::<aeqi_core::SessionState>(&content)
                             {
                                 // Per-agent transcript channel (backwards compat).
-                                let chat_id = crate::conversation_store::named_channel_chat_id(
+                                let chat_id = crate::session_store::named_channel_chat_id(
                                     &format!("transcript:{}", agent_name_for_records),
                                 );
                                 let _ = cs
@@ -1445,7 +1445,7 @@ impl WorkerPool {
                                 // Per-task transcript channel (findable by task_id).
                                 let task_channel_name =
                                     format!("transcript:task:{}", task_id_clone);
-                                let task_chat_id = crate::conversation_store::named_channel_chat_id(
+                                let task_chat_id = crate::session_store::named_channel_chat_id(
                                     &task_channel_name,
                                 );
                                 let _ = cs

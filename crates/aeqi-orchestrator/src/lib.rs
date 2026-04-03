@@ -4,7 +4,7 @@
 //! Coordinates worker execution ([`AgentWorker`]), worker pool patrol ([`WorkerPool`]),
 //! router classification ([`AgentRouter`]), company registry ([`CompanyRegistry`]),
 //! dispatch bus ([`DispatchBus`]), cost ledger ([`CostLedger`]), Prometheus metrics
-//! ([`AEQIMetrics`]), and conversation storage.
+//! ([`AEQIMetrics`]), and session storage.
 //!
 //! Workers run through AEQI's native agent loop. The worker pool enforces budgets
 //! and escalation chains (worker → project leader → system leader → human).
@@ -18,7 +18,7 @@ pub mod checkpoint;
 pub mod claude_code;
 pub mod company;
 pub mod context_budget;
-pub mod conversation_store;
+pub mod session_store;
 pub mod cost_ledger;
 pub mod council;
 pub mod daemon;
@@ -54,7 +54,7 @@ pub use chat_engine::ChatEngine;
 pub use checkpoint::AgentCheckpoint;
 pub use company::Company;
 pub use context_budget::ContextBudget;
-pub use conversation_store::ConversationStore;
+pub use session_store::SessionStore;
 pub use cost_ledger::CostLedger;
 pub use council::Council;
 pub use daemon::Daemon;
