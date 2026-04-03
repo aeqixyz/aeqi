@@ -59,7 +59,7 @@ auth_secret = "${AEQI_WEB_SECRET}"
 
 [providers.openrouter]
 api_key = "${OPENROUTER_API_KEY}"
-default_model = "stepfun/step-3.5-flash:free"
+default_model = "google/gemini-2.0-flash-001"
 embedding_model = "openai/text-embedding-3-small"
 
 [security]

@@ -208,7 +208,7 @@ export default function SessionsPage() {
             ws.close();
             break;
           case "Error":
-            setMessages((prev) => [...prev, { role: "system", content: `Error: ${event.message}` }]);
+            setMessages((prev) => [...prev, { role: "error", content: event.message || "Unknown error" }]);
             setStreaming(false);
             ws.close();
             break;

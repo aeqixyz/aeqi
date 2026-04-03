@@ -5,6 +5,11 @@
   --bg-elevated: #27272a;   /* hover states, nav bar, inputs */
   --bg-overlay: #3f3f46;    /* tooltips, dropdowns */
 
+  /* Legacy aliases — map old names to depth system */
+  --bg-hover: var(--bg-elevated);
+  --bg-secondary: var(--bg-surface);
+  --bg-primary: var(--bg-base);
+
   /* Text — 3 levels only */
   --text-primary: #fafafa;
   --text-secondary: #a1a1aa;
@@ -37,14 +42,18 @@
   --font-mono: "JetBrains Mono", monospace;
   --font-sans: "Inter", sans-serif;
   --font-brand: "Inter", sans-serif;
-  --font-size-xs: 0.75rem;
-  --font-size-sm: 0.8125rem;
-  --font-size-base: 0.875rem;
-  --font-size-lg: 1rem;
-  --font-size-xl: 1.25rem;
-  --font-size-2xl: 1.5rem;
+  --font-size-3xs: 0.5625rem;  /* 9px */
+  --font-size-2xs: 0.625rem;   /* 10px */
+  --font-size-micro: 0.6875rem; /* 11px */
+  --font-size-xs: 0.75rem;     /* 12px */
+  --font-size-sm: 0.8125rem;   /* 13px */
+  --font-size-base: 0.875rem;  /* 14px */
+  --font-size-lg: 1rem;        /* 16px */
+  --font-size-xl: 1.25rem;     /* 20px */
+  --font-size-2xl: 1.5rem;     /* 24px */
 
   /* Spacing */
+  --space-0: 2px;
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
@@ -54,9 +63,13 @@
   --space-8: 2rem;
 
   /* Radius */
+  --radius-xs: 3px;
   --radius-sm: 4px;
   --radius-md: 6px;
-  --radius-lg: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-2xl: 20px;
+  --radius-full: 999px;
 
   /* Shadows — minimal */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
@@ -67,6 +80,7 @@
 
   /* Transitions */
   --transition-fast: 150ms ease;
+  --transition-normal: all 0.15s ease;
   --transition-smooth: 250ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -113,7 +127,7 @@ a:hover {
 }
 ::-webkit-scrollbar-thumb {
   background: var(--border-hover);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
@@ -127,30 +141,6 @@ a:hover {
   background: var(--bg-base);
 }
 
-/* Legacy compat — keep old class names working */
-.app-shell {
-  height: 100vh;
-  overflow: hidden;
-}
-
-.app-layout {
-  display: flex;
-  height: 100%;
-  overflow: hidden;
-}
-
-.main-content {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: var(--space-8);
-}
-
-.main-content-chat {
-  padding: 0;
-  overflow: hidden;
-}
 
 /* ── Project Rail (60px icon bar) ── */
 .rail {
@@ -165,7 +155,7 @@ a:hover {
 
 .rail-inner {
   background: var(--bg-surface);
-  border-radius: 14px;
+  border-radius: var(--radius-xl);
   padding: 6px;
   display: flex;
   flex-direction: column;
@@ -177,15 +167,15 @@ a:hover {
 .rail-icon {
   width: 40px;
   height: 40px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: var(--font-size-base);
   font-weight: 500;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: var(--transition-normal);
   position: relative;
 }
 
@@ -197,7 +187,7 @@ a:hover {
 .rail-icon.active {
   background: var(--text-primary);
   color: var(--bg-base);
-  border-radius: 14px;
+  border-radius: var(--radius-xl);
 }
 
 .rail-home {
@@ -221,7 +211,7 @@ a:hover {
 .rail-add {
   width: 40px;
   height: 40px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--bg-elevated);
   border: 1px dashed rgba(255, 255, 255, 0.08);
   display: flex;
@@ -230,7 +220,7 @@ a:hover {
   color: var(--text-muted);
   cursor: pointer;
   font-size: 16px;
-  transition: all 0.15s ease;
+  transition: var(--transition-normal);
 }
 
 .rail-add:hover {
@@ -344,14 +334,14 @@ a:hover {
   justify-content: center;
   width: 40px;
   height: 40px;
-  border-radius: 20px;
+  border-radius: var(--radius-2xl);
   overflow: hidden;
   transition: border-radius 150ms ease;
 }
 
 .project-icon:hover,
 .project-icon-selected {
-  border-radius: 14px;
+  border-radius: var(--radius-xl);
 }
 
 .project-icon-pattern {
@@ -371,7 +361,7 @@ a:hover {
 .project-icon-initial {
   position: relative;
   z-index: 1;
-  font-size: 14px;
+  font-size: var(--font-size-base);
   font-weight: 600;
   color: white;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
@@ -392,7 +382,7 @@ a:hover {
 
 .agent-nav-bar {
   background: var(--bg-surface);
-  border-radius: 14px;
+  border-radius: var(--radius-xl);
   height: 52px;
   display: flex;
   align-items: center;
@@ -407,9 +397,9 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: var(--transition-fast);
 }
 
 .scope-header-btn:hover {
@@ -426,7 +416,7 @@ a:hover {
 
 .scope-header-text {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: 0.06em;
@@ -443,7 +433,7 @@ a:hover {
 
 .agent-nav-panel-title {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   font-weight: 700;
   color: var(--text-primary);
   text-align: center;
@@ -453,7 +443,7 @@ a:hover {
 
 .agent-nav-panel-add {
   height: 36px;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: var(--bg-elevated);
   border: 1px dashed rgba(255, 255, 255, 0.08);
   display: flex;
@@ -462,7 +452,7 @@ a:hover {
   font-size: 16px;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: var(--transition-normal);
 }
 
 .agent-nav-panel-add:hover {
@@ -479,15 +469,15 @@ a:hover {
 .agent-row {
   height: 40px;
   padding: 0 14px;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: var(--transition-normal);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  border-radius: 20px;
+  border-radius: var(--radius-2xl);
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -502,13 +492,13 @@ a:hover {
 .agent-row.active {
   color: var(--bg-base);
   background: var(--text-primary);
-  border-radius: 14px;
+  border-radius: var(--radius-xl);
 }
 
 .agent-row.scope-header {
   justify-content: center;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -519,7 +509,7 @@ a:hover {
 /* Department groups — bento inlay */
 .dept-group {
   background: var(--bg-surface);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 2px;
   display: flex;
   flex-direction: column;
@@ -529,14 +519,14 @@ a:hover {
 .dept-name {
   height: 40px;
   padding: 0 12px;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
   display: flex;
   align-items: center;
   justify-content: space-between;
   cursor: pointer;
-  border-radius: 12px;
-  transition: all 0.15s ease;
+  border-radius: var(--radius-lg);
+  transition: var(--transition-normal);
 }
 
 .dept-name-label {
@@ -584,7 +574,7 @@ a:hover {
 }
 
 .dept-detail-meta {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-muted);
   margin-bottom: 24px;
 }
@@ -601,17 +591,17 @@ a:hover {
   align-items: center;
   justify-content: space-between;
   padding: 0 12px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--bg-surface);
 }
 
 .dept-detail-member-name {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
 }
 
 .dept-detail-member-status {
-  font-size: 11px;
+  font-size: var(--font-size-micro);
   color: var(--text-muted);
   text-transform: lowercase;
 }
@@ -619,12 +609,12 @@ a:hover {
 .agent-row.dept-agent {
   justify-content: flex-end;
   padding: 0 10px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .agent-nav-add {
   height: 40px;
-  border-radius: 14px;
+  border-radius: var(--radius-xl);
   background: var(--bg-surface);
   border: none;
   display: flex;
@@ -633,7 +623,7 @@ a:hover {
   font-size: 18px;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: var(--transition-normal);
 }
 
 .agent-nav-add:hover {
@@ -648,11 +638,11 @@ a:hover {
   justify-content: center;
   width: 100%;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--font-size-micro);
   color: var(--border);
   cursor: pointer;
-  border-radius: 14px;
-  transition: all 0.12s ease;
+  border-radius: var(--radius-xl);
+  transition: var(--transition-fast);
 }
 
 .agent-nav-text-btn:hover {
@@ -666,10 +656,10 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 14px;
+  border-radius: var(--radius-xl);
   color: var(--border);
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: var(--transition-fast);
 }
 
 .rail-settings:hover {
@@ -687,7 +677,7 @@ a:hover {
 
 .agent-nav-footer {
   padding: 10px 12px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
   cursor: pointer;
   transition: color 0.1s ease;
@@ -716,7 +706,7 @@ a:hover {
   justify-content: space-between;
   height: 52px;
   background: var(--bg-base);
-  border-radius: 14px;
+  border-radius: var(--radius-xl);
   padding: 0 6px;
   gap: 2px;
   margin-bottom: 16px;
@@ -737,13 +727,13 @@ a:hover {
 
 .floating-nav-item {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
   height: 40px;
   padding: 0 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: var(--transition-fast);
   text-decoration: none;
   letter-spacing: 0.02em;
   display: flex;
@@ -767,9 +757,9 @@ a:hover {
   align-items: center;
   justify-content: center;
   color: var(--text-muted);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: var(--transition-fast);
   flex-shrink: 0;
 }
 
@@ -787,7 +777,7 @@ a:hover {
   outline: none;
   color: var(--text-primary);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   padding: 0 12px;
   letter-spacing: 0.01em;
 }
@@ -809,150 +799,6 @@ a:hover {
   flex-direction: column;
 }
 
-/* ── Legacy layout compat (kept for pages that still reference these) ── */
-.sidebar {
-  width: 200px;
-  background: var(--bg-secondary);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-}
-
-.sidebar-spacer { flex: 1; }
-
-.main-wrapper {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-}
-
-.sidebar-collapsed-nav {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-2) 0;
-  flex: 1;
-}
-
-.sidebar-collapsed-item {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-md);
-  color: var(--text-muted);
-  text-decoration: none;
-  transition: all var(--transition-fast);
-}
-
-.sidebar-collapsed-item:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.sidebar-collapsed-item-active {
-  background: var(--accent-bg);
-  color: var(--accent);
-  box-shadow: 0 0 12px rgba(255, 255, 255, 0.03);
-}
-
-.sidebar-channels {
-  padding: var(--space-2) var(--space-3);
-  overflow-y: auto;
-}
-
-.channel-item {
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: all var(--transition-smooth);
-}
-
-.channel-item:hover {
-  background: var(--bg-hover);
-}
-
-.channel-item-active {
-  background: var(--accent-bg);
-  box-shadow: 0 0 12px rgba(255, 255, 255, 0.02);
-}
-
-.channel-item-active .channel-name {
-  color: var(--accent);
-}
-
-.channel-link {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-1) var(--space-2);
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-  text-decoration: none;
-}
-
-.channel-link:hover {
-  color: var(--text-primary);
-}
-
-.channel-hash {
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.channel-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.channel-count {
-  font-size: 10px;
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.channel-agents {
-  font-size: 10px;
-  color: var(--text-muted);
-}
-
-.channel-item-dept {
-  margin-left: var(--space-4);
-}
-
-.channel-item-dept .channel-link {
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  padding: 3px var(--space-2);
-}
-
-.channel-item-dept .channel-link::before {
-  content: "└";
-  color: var(--border-hover);
-  font-size: 10px;
-}
-
-/* Legacy sidebar-nav (kept for pages that may still use .nav-icon) */
-.sidebar-nav {
-  flex: 1;
-  padding: var(--space-2) var(--space-3);
-  overflow-y: auto;
-  border-top: 1px solid var(--border);
-}
-
-.nav-icon {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-}
 
 /* Tree explorer */
 .tree-link {
@@ -986,7 +832,7 @@ a:hover {
 
 .tree-chevron {
   width: 14px;
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   flex-shrink: 0;
   text-align: center;
@@ -1012,11 +858,11 @@ a:hover {
 }
 
 .tree-count {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--accent);
   background: var(--accent-bg);
   padding: 0 5px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   flex-shrink: 0;
   font-weight: 600;
 }
@@ -1035,7 +881,7 @@ a:hover {
 /* Sidebar context label */
 .sidebar-context-label {
   font-family: var(--font-brand);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--text-primary);
@@ -1050,7 +896,7 @@ a:hover {
 }
 
 .sidebar-section-header {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -1058,49 +904,6 @@ a:hover {
   padding: var(--space-1) var(--space-3);
 }
 
-/* Legacy breadcrumbs — kept for pages that still use them */
-.breadcrumbs {
-  height: 40px;
-  display: flex;
-  align-items: center;
-  gap: 0;
-  padding: 0 var(--space-6);
-  font-size: var(--font-size-xs);
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-secondary);
-  flex-shrink: 0;
-}
-
-.breadcrumb-item {
-  color: var(--text-muted);
-  text-decoration: none;
-  transition: color var(--transition-fast);
-}
-
-.breadcrumb-item:hover {
-  color: var(--accent);
-}
-
-.breadcrumb-sep {
-  color: var(--border-hover);
-  margin: 0 var(--space-2);
-}
-
-.breadcrumb-current {
-  color: var(--text-secondary);
-}
-
-.breadcrumb-segment {
-  display: flex;
-  align-items: center;
-}
-
-.breadcrumb-right {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
 
 /* Header */
 .page-header {
@@ -1194,7 +997,7 @@ a:hover {
   display: inline-flex;
   align-items: center;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   font-size: var(--font-size-xs);
   font-weight: 500;
   text-transform: uppercase;
@@ -1365,7 +1168,7 @@ a:hover {
 .progress-bar-bg {
   height: 6px;
   background: var(--bg-hover);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   overflow: hidden;
 }
 
@@ -1399,7 +1202,7 @@ a:hover {
 .project-stat-failed { color: var(--error); }
 
 .project-stat-label {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -1512,7 +1315,7 @@ a:hover {
 
 .agent-stat-label {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -1632,7 +1435,7 @@ a:hover {
 }
 
 .task-label {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   padding: 0 5px;
   border-radius: var(--radius-sm);
   background: var(--bg-hover);
@@ -1780,7 +1583,7 @@ a:hover {
 }
 
 .audit-timestamp-compact {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
 }
 
@@ -1812,7 +1615,7 @@ a:hover {
 }
 
 .audit-type-badge {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   font-weight: 500;
   padding: 1px 6px;
   border-radius: var(--radius-sm);
@@ -2184,7 +1987,7 @@ a:hover {
 
 .sessions-list-title {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   font-weight: 700;
   color: var(--text-primary);
   text-align: center;
@@ -2194,7 +1997,7 @@ a:hover {
 
 .sessions-list-header {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text-muted);
@@ -2207,10 +2010,10 @@ a:hover {
   gap: 8px;
   height: 36px;
   padding: 0 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   cursor: pointer;
-  transition: all 0.12s ease;
-  font-size: 12px;
+  transition: var(--transition-fast);
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
 }
 
@@ -2246,7 +2049,7 @@ a:hover {
 
 .session-list-time {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   flex-shrink: 0;
 }
@@ -2257,7 +2060,7 @@ a:hover {
 
 .session-list-add {
   height: 36px;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: var(--bg-elevated);
   border: 1px dashed rgba(255, 255, 255, 0.08);
   display: flex;
@@ -2266,7 +2069,7 @@ a:hover {
   font-size: 16px;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: var(--transition-normal);
 }
 
 .session-list-add:hover {
@@ -2282,7 +2085,7 @@ a:hover {
   min-width: 0;
   padding: 16px;
   background: var(--bg-elevated);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
 }
 
 .sessions-page {
@@ -2304,7 +2107,7 @@ a:hover {
 }
 
 .sessions-meta {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-family: var(--font-mono);
   color: var(--text-muted);
 }
@@ -2321,10 +2124,10 @@ a:hover {
   justify-content: space-between;
   height: 44px;
   padding: 0 14px;
-  border-radius: 14px;
+  border-radius: var(--radius-xl);
   background: var(--bg-surface);
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: var(--transition-fast);
 }
 
 .session-row:hover {
@@ -2340,13 +2143,13 @@ a:hover {
 }
 
 .session-row-status {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   flex-shrink: 0;
   color: var(--text-muted);
 }
 
 .session-row-subject {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2359,7 +2162,7 @@ a:hover {
   gap: 10px;
   flex-shrink: 0;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--font-size-micro);
 }
 
 .session-row-agent {
@@ -2379,7 +2182,7 @@ a:hover {
 .sessions-empty {
   padding: 40px 0;
   text-align: center;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--border);
 }
 
@@ -2405,7 +2208,7 @@ a:hover {
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--font-size-base);
   padding: 4px 8px;
   border-radius: 6px;
   transition: all 0.1s ease;
@@ -2425,7 +2228,7 @@ a:hover {
 }
 
 .session-detail-subject {
-  font-size: 14px;
+  font-size: var(--font-size-base);
   font-weight: 500;
   color: var(--text-primary);
   overflow: hidden;
@@ -2435,7 +2238,7 @@ a:hover {
 
 .session-detail-meta {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--font-size-micro);
   color: var(--text-muted);
 }
 
@@ -2497,9 +2300,27 @@ a:hover {
   text-align: center;
 }
 
+.session-msg-error {
+  align-self: stretch;
+}
+
+.session-msg-error .session-msg-role {
+  color: var(--error);
+}
+
+.session-msg-error .session-msg-content {
+  background: rgba(248, 113, 113, 0.06);
+  border: 1px solid rgba(248, 113, 113, 0.12);
+  border-radius: 10px;
+  color: var(--error);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 10px 14px;
+}
+
 .session-msg-role {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -2507,7 +2328,7 @@ a:hover {
 }
 
 .session-msg-content {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
@@ -2525,9 +2346,9 @@ a:hover {
   height: 44px;
   background: var(--bg-base);
   border: 2px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-xl);
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: var(--font-size-base);
   padding: 0 18px;
   font-family: var(--font-sans);
   outline: none;
@@ -2583,7 +2404,7 @@ a:hover {
 
 .session-activity-text {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
 }
 
@@ -2608,7 +2429,7 @@ a:hover {
 
 .session-tool-name {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--font-size-micro);
   color: var(--text-muted);
   animation: spin 1.5s linear infinite;
 }
@@ -2629,14 +2450,14 @@ a:hover {
 }
 
 .session-chat-name {
-  font-size: 14px;
+  font-size: var(--font-size-base);
   font-weight: 500;
   color: var(--text-primary);
 }
 
 .session-chat-status {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--font-size-micro);
   color: var(--text-muted);
 }
 
@@ -2657,7 +2478,7 @@ a:hover {
 }
 
 .home-meta {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-muted);
   font-family: var(--font-mono);
 }
@@ -2671,7 +2492,7 @@ a:hover {
 
 .home-stat {
   background: var(--bg-surface);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -2686,7 +2507,7 @@ a:hover {
 }
 
 .home-stat-label {
-  font-size: 11px;
+  font-size: var(--font-size-micro);
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -2697,7 +2518,7 @@ a:hover {
 }
 
 .home-section-title {
-  font-size: 11px;
+  font-size: var(--font-size-micro);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text-muted);
@@ -2718,13 +2539,13 @@ a:hover {
   padding: 0 12px;
   border-radius: 8px;
   background: var(--bg-surface);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .home-activity-type {
   font-family: var(--font-mono);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--font-size-micro);
   flex-shrink: 0;
   width: 120px;
 }
@@ -2739,7 +2560,7 @@ a:hover {
 
 .home-activity-time {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--font-size-micro);
   color: var(--border);
   flex-shrink: 0;
 }
@@ -2756,19 +2577,19 @@ a:hover {
   gap: 12px;
   height: 40px;
   padding: 0 12px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--bg-surface);
 }
 
 .home-task-id {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--font-size-micro);
   color: var(--text-muted);
   flex-shrink: 0;
 }
 
 .home-task-subject {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2792,7 +2613,7 @@ a:hover {
 }
 
 .finance-meta {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-muted);
 }
 
@@ -2816,7 +2637,7 @@ a:hover {
 }
 
 .finance-stat-label {
-  font-size: 11px;
+  font-size: var(--font-size-micro);
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -2846,14 +2667,14 @@ a:hover {
 
 .finance-bar-pct {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--font-size-micro);
   color: var(--text-muted);
   width: 32px;
   text-align: right;
 }
 
 .finance-section-title {
-  font-size: 11px;
+  font-size: var(--font-size-micro);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text-muted);
@@ -2872,18 +2693,18 @@ a:hover {
   align-items: center;
   justify-content: space-between;
   padding: 0 12px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--bg-surface);
 }
 
 .finance-project-name {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
 }
 
 .finance-project-spent {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
 }
 
@@ -3085,7 +2906,7 @@ a:hover {
 }
 
 .hero-stat-label {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -3131,7 +2952,7 @@ a:hover {
   position: relative;
   height: 6px;
   background: var(--bg-hover);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   overflow: hidden;
   margin-bottom: var(--space-2);
 }
@@ -3139,7 +2960,7 @@ a:hover {
 .dash-budget-fill {
   height: 100%;
   background: linear-gradient(90deg, var(--accent), #d4a96a);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   transition: width 0.8s cubic-bezier(0.16, 1, 0.3, 1);
   box-shadow: 0 0 8px rgba(255, 255, 255, 0.12), 0 0 2px rgba(255, 255, 255, 0.20);
 }
@@ -3253,11 +3074,11 @@ a:hover {
 }
 
 .dash-project-badge {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--success);
   background: rgba(34, 197, 94, 0.1);
   padding: 1px 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -3321,7 +3142,7 @@ a:hover {
   gap: var(--space-2);
   padding: 4px 10px 4px 4px;
   background: var(--bg-hover);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   font-size: var(--font-size-xs);
   color: var(--text-secondary);
   transition: background var(--transition-fast);
@@ -3341,7 +3162,7 @@ a:hover {
   align-items: center;
   justify-content: center;
   font-weight: 600;
-  font-size: 11px;
+  font-size: var(--font-size-micro);
 }
 
 .dash-agent-name {
@@ -3411,7 +3232,7 @@ a:hover {
 }
 
 .feed-item-time {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
@@ -3428,7 +3249,7 @@ a:hover {
 .feed-item-meta {
   display: flex;
   gap: var(--space-2);
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .feed-item-project {
@@ -3471,7 +3292,7 @@ a:hover {
 }
 
 .dispatch-label {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -3509,7 +3330,7 @@ a:hover {
 }
 
 .chat-channels-label {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -3569,15 +3390,15 @@ a:hover {
 }
 
 .chat-channel-badge {
-  font-size: 9px;
+  font-size: var(--font-size-3xs);
   color: var(--text-muted);
   background: var(--bg-hover);
   padding: 1px 5px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
 }
 
 .chat-channel-count {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--accent);
   font-weight: 600;
 }
@@ -3590,14 +3411,14 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   font-weight: 600;
   color: var(--text-muted);
   flex-shrink: 0;
 }
 
 .chat-channel-role {
-  font-size: 9px;
+  font-size: var(--font-size-3xs);
   color: var(--text-muted);
 }
 
@@ -3611,7 +3432,7 @@ a:hover {
   content: "└";
   color: var(--border-hover);
   margin-right: var(--space-1);
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .chat-header-channel {
@@ -3640,7 +3461,7 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   font-weight: 600;
   color: var(--text-muted);
   margin-left: -6px;
@@ -3651,7 +3472,7 @@ a:hover {
 }
 
 .chat-header-agent-count {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   margin-left: var(--space-2);
   white-space: nowrap;
@@ -3804,7 +3625,7 @@ a:hover {
 
 .chat-msg-time {
   display: block;
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   margin-top: var(--space-1);
 }
@@ -3827,9 +3648,9 @@ a:hover {
   align-items: center;
   gap: var(--space-1);
   padding: 3px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--bg-hover);
-  font-size: 11px;
+  font-size: var(--font-size-micro);
 }
 
 .chat-pill-name {
@@ -3974,9 +3795,9 @@ a:hover {
 }
 
 .ops-card-status {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   font-weight: 500;
@@ -4037,7 +3858,7 @@ a:hover {
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .ops-card-message {
@@ -4119,7 +3940,7 @@ a:hover {
 }
 
 .memory-category {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -4129,7 +3950,7 @@ a:hover {
 }
 
 .memory-scope {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   padding: 1px 6px;
   border-radius: var(--radius-sm);
@@ -4181,11 +4002,11 @@ a:hover {
 }
 
 .knowledge-sidebar-count {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--accent);
   background: var(--accent-bg);
   padding: 0 5px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   font-weight: 600;
 }
 
@@ -4248,11 +4069,11 @@ a:hover {
 }
 
 .knowledge-item-source {
-  font-size: 9px;
+  font-size: var(--font-size-3xs);
   font-weight: 700;
   width: 14px;
   height: 14px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: var(--bg-hover);
   display: flex;
   align-items: center;
@@ -4272,7 +4093,7 @@ a:hover {
 }
 
 .knowledge-item-cat {
-  font-size: 9px;
+  font-size: var(--font-size-3xs);
   text-transform: uppercase;
   letter-spacing: 0.03em;
   flex-shrink: 0;
@@ -4386,7 +4207,7 @@ a:hover {
   color: var(--text-muted);
   cursor: pointer;
   padding: 2px 8px;
-  font-size: 11px;
+  font-size: var(--font-size-micro);
   font-family: var(--font-mono);
   transition: all var(--transition-fast);
 }
@@ -4465,7 +4286,7 @@ a:hover {
 }
 
 .palette-section {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -4554,7 +4375,7 @@ a:hover {
 }
 
 .ctx-section-title {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   font-weight: 500;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -4565,7 +4386,7 @@ a:hover {
 }
 
 .ctx-link {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--accent);
   text-decoration: none;
 }
@@ -4609,7 +4430,7 @@ a:hover {
 }
 
 .ctx-budget-label {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -4635,7 +4456,7 @@ a:hover {
 
 .ctx-task-id {
   color: var(--accent);
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   flex-shrink: 0;
 }
 
@@ -4649,7 +4470,7 @@ a:hover {
 }
 
 .ctx-task-status {
-  font-size: 9px;
+  font-size: var(--font-size-3xs);
   text-transform: uppercase;
   font-weight: 500;
   flex-shrink: 0;
@@ -4669,7 +4490,7 @@ a:hover {
 
 .ctx-event-type {
   display: block;
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   text-transform: capitalize;
 }
@@ -4734,7 +4555,7 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   font-weight: 600;
   color: var(--text-muted);
 }
@@ -4777,7 +4598,7 @@ a:hover {
 }
 
 .ctx-knowledge-source {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
   flex-shrink: 0;
   margin-top: 1px;
@@ -4798,7 +4619,7 @@ a:hover {
 }
 
 .ctx-knowledge-preview {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   line-height: 1.3;
   overflow: hidden;
@@ -4885,7 +4706,7 @@ a:hover {
 }
 
 .ctx-directive-task {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--accent);
   flex-shrink: 0;
 }
@@ -4918,7 +4739,7 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 9px;
+  font-size: var(--font-size-3xs);
   font-weight: 600;
   color: var(--text-muted);
   margin-left: -4px;
@@ -4927,7 +4748,7 @@ a:hover {
 .c-header-avatar:first-child { margin-left: 0; }
 
 .c-header-count {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   margin-left: var(--space-2);
 }
@@ -4978,7 +4799,7 @@ a:hover {
 .c-bubble {
   max-width: 72%;
   padding: var(--space-2) var(--space-3);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   position: relative;
   line-height: 1.5;
 }
@@ -5018,7 +4839,7 @@ a:hover {
 }
 
 .c-meta-cost {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--accent);
   margin-top: var(--space-1);
   font-family: var(--font-mono);
@@ -5032,7 +4853,7 @@ a:hover {
 }
 
 .c-time {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
 }
 
@@ -5041,7 +4862,7 @@ a:hover {
 }
 
 .c-status {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
 }
 
@@ -5085,7 +4906,7 @@ a:hover {
 .c-notice {
   width: min(100%, 720px);
   padding: var(--space-3) var(--space-4);
-  border-radius: 14px;
+  border-radius: var(--radius-xl);
   border: 1px solid var(--border);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.015), rgba(255, 255, 255, 0)),
@@ -5101,14 +4922,14 @@ a:hover {
 }
 
 .c-notice-title {
-  font-size: 11px;
+  font-size: var(--font-size-micro);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .c-notice-time {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   flex-shrink: 0;
 }
@@ -5124,7 +4945,7 @@ a:hover {
 .c-notice-meta {
   margin-top: var(--space-2);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
 }
 
@@ -5284,7 +5105,7 @@ a:hover {
   color: var(--text-secondary);
   padding: var(--space-1) var(--space-3);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   cursor: pointer;
   transition: all var(--transition-smooth);
 }
@@ -5337,7 +5158,7 @@ a:hover {
 
 .c-error-banner-label {
   color: var(--error);
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -5356,7 +5177,7 @@ a:hover {
   gap: var(--space-2);
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-xl);
   padding: var(--space-2) var(--space-3);
   transition: all var(--transition-smooth);
 }
@@ -5400,7 +5221,7 @@ a:hover {
 }
 
 .c-composer-hint {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   opacity: 0;
   transition: opacity var(--transition-fast);
@@ -5412,10 +5233,10 @@ a:hover {
 
 .c-composer-hint kbd {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--font-size-3xs);
   padding: 1px 4px;
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: var(--bg-hover);
 }
 
@@ -5498,7 +5319,7 @@ a:hover {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-3);
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   background: var(--bg-surface);
   border: 1px solid var(--border);
@@ -5541,7 +5362,7 @@ a:hover {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 9px;
+  font-size: var(--font-size-3xs);
   color: var(--success);
   font-weight: 500;
   text-transform: uppercase;
