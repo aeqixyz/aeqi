@@ -89,18 +89,24 @@ export default function SessionsPage() {
 
   // Load messages for selected session
   useEffect(() => {
-    if (activeSessionId === "perpetual") {
+    if (activeSessionId === "perpetual" && scope) {
+      // Load this agent's transcript channel (channel name = lowercase internal name)
+      api.getChatHistory({ channel_name: scope.toLowerCase(), limit: 50 })
+        .then((d: any) => setMessages(d.messages || []))
+        .catch(() => setMessages([]));
+    } else if (activeSessionId === "perpetual") {
       api.getChatHistory({ limit: 50 })
         .then((d: any) => setMessages(d.messages || []))
         .catch(() => setMessages([]));
     } else if (activeSessionId.startsWith("new-")) {
-      // Fresh session — empty
       setMessages([]);
     } else {
-      // Existing task — try to load transcript
-      setMessages([]);
+      // Task transcript
+      api.getChatHistory({ channel_name: `transcript:task:${activeSessionId}`, limit: 50 })
+        .then((d: any) => setMessages(d.messages || []))
+        .catch(() => setMessages([]));
     }
-  }, [activeSessionId]);
+  }, [activeSessionId, scope]);
 
   useEffect(() => {
     messagesEnd.current?.scrollIntoView({ behavior: "smooth" });
