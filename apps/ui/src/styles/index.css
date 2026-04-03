@@ -1,0 +1,14 @@
+/* AEQI Design System
+   Split into layers for maintainability:
+   1. tokens    — CSS variables, resets, scrollbar
+   2. layout    — Shell, sidebar, rail, nav, content area
+   3. components — Reusable: cards, badges, buttons, tables, forms
+   4. pages     — Page-specific: login, sessions, dashboard, ops, etc.
+   5. chat      — Chat conversation surface, composer, worker events
+*/
+
+@import "./tokens.css";
+@import "./layout.css";
+@import "./components.css";
+@import "./pages.css";
+@import "./chat.css";
