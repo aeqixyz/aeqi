@@ -2338,48 +2338,71 @@ a:hover {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding-bottom: 12px;
+  gap: 16px;
+  padding: 8px 0 16px;
 }
 
 .session-msg {
-  padding: 8px 12px;
-  border-radius: 10px;
-  max-width: 85%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 90%;
 }
 
 .session-msg-user {
-  background: var(--bg-elevated);
   align-self: flex-end;
 }
 
+.session-msg-user .session-msg-content {
+  background: var(--text-primary);
+  color: var(--bg-base);
+  border-radius: 16px 16px 4px 16px;
+  padding: 10px 14px;
+}
+
+.session-msg-user .session-msg-role {
+  text-align: right;
+}
+
 .session-msg-assistant {
-  background: var(--bg-surface);
   align-self: flex-start;
+}
+
+.session-msg-assistant .session-msg-content {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border-radius: 16px 16px 16px 4px;
+  padding: 10px 14px;
 }
 
 .session-msg-system,
 .session-msg-tool {
-  background: var(--bg-surface);
-  align-self: flex-start;
-  opacity: 0.6;
-  font-size: 12px;
+  align-self: center;
+  max-width: 100%;
+}
+
+.session-msg-system .session-msg-content,
+.session-msg-tool .session-msg-content {
+  background: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  padding: 4px 0;
+  text-align: center;
 }
 
 .session-msg-role {
-  display: block;
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  margin-bottom: 4px;
+  padding: 0 4px;
 }
 
 .session-msg-content {
   font-size: 13px;
-  color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--font-sans);
@@ -2388,30 +2411,29 @@ a:hover {
 
 .session-input-wrap {
   flex-shrink: 0;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  padding-top: 8px;
 }
 
 .session-input {
   width: 100%;
-  height: 40px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
+  height: 44px;
+  background: var(--bg-base);
+  border: 2px solid var(--border);
   border-radius: 14px;
   color: var(--text-primary);
-  font-size: 13px;
-  padding: 0 16px;
+  font-size: 14px;
+  padding: 0 18px;
   font-family: var(--font-sans);
   outline: none;
   transition: border-color 0.15s ease;
 }
 
 .session-input:focus {
-  border-color: var(--border-hover);
+  border-color: var(--border-accent);
 }
 
 .session-input::placeholder {
-  color: var(--border);
+  color: var(--text-muted);
 }
 
 .session-input:disabled {
