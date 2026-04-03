@@ -4,23 +4,31 @@ import { api } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
 import { useAuthStore } from "@/store/auth";
 
-const SPINNER_VERBS = [
-  "Architecting", "Brewing", "Cascading", "Cogitating", "Composing",
-  "Computing", "Conjuring", "Contemplating", "Crafting", "Crystallizing",
-  "Deciphering", "Deliberating", "Distilling", "Forging", "Generating",
-  "Harmonizing", "Hatching", "Ideating", "Inferring", "Manifesting",
-  "Mulling", "Orchestrating", "Percolating", "Pondering", "Processing",
-  "Reasoning", "Ruminating", "Sculpting", "Synthesizing", "Weaving",
-];
+function ActivityFeed({ tools, events }: { tools: string[]; events: string[] }) {
+  const allActivity = [
+    ...events,
+    ...(tools.length > 0 ? tools.map((t) => `executing: ${t}`) : []),
+  ];
 
-function ThinkingIndicator({ tools }: { tools: string[] }) {
-  const [verb] = useState(() => SPINNER_VERBS[Math.floor(Math.random() * SPINNER_VERBS.length)]);
-  const label = tools.length > 0 ? tools[tools.length - 1] : verb;
+  if (allActivity.length === 0) {
+    return (
+      <div className="session-activity">
+        <div className="session-activity-line">
+          <span className="session-activity-dot" />
+          <span className="session-activity-text">processing</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="session-thinking">
-      <span className="session-thinking-dot" />
-      <span className="session-thinking-word">{label}</span>
+    <div className="session-activity">
+      {allActivity.map((line, i) => (
+        <div key={i} className="session-activity-line">
+          <span className={`session-activity-dot${i === allActivity.length - 1 ? " active" : ""}`} />
+          <span className="session-activity-text">{line}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -66,6 +74,7 @@ export default function SessionsPage() {
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
   const [activeTools, setActiveTools] = useState<string[]>([]);
+  const [activityEvents, setActivityEvents] = useState<string[]>([]);
   const messagesEnd = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -143,6 +152,7 @@ export default function SessionsPage() {
     setStreaming(true);
     setStreamText("");
     setActiveTools([]);
+    setActivityEvents([]);
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(
@@ -170,10 +180,23 @@ export default function SessionsPage() {
           case "ToolCall":
           case "ToolStart":
             setActiveTools((prev) => [...prev, event.name || event.tool_name || "tool"]);
+            setActivityEvents((prev) => [...prev, `executing: ${event.name || event.tool_name || "tool"}`]);
             break;
           case "ToolResult":
           case "ToolComplete":
             setActiveTools((prev) => prev.slice(1));
+            break;
+          case "Status":
+            if (event.message) setActivityEvents((prev) => [...prev, event.message]);
+            break;
+          case "MemoryActivity":
+            setActivityEvents((prev) => [...prev, `${event.action || "memory"}: ${event.key || ""}`]);
+            break;
+          case "DelegateStart":
+            setActivityEvents((prev) => [...prev, `delegating to ${event.worker_name || "agent"}`]);
+            break;
+          case "DelegateComplete":
+            setActivityEvents((prev) => [...prev, `delegation complete: ${event.worker_name || "agent"}`]);
             break;
           case "Complete":
             if (accumulated) {
@@ -304,8 +327,8 @@ export default function SessionsPage() {
             </div>
           ))}
 
-          {/* Thinking indicator — shows when streaming but no text yet */}
-          {streaming && !streamText && <ThinkingIndicator tools={activeTools} />}
+          {/* Activity feed — shows real events while agent works */}
+          {streaming && !streamText && <ActivityFeed tools={activeTools} events={activityEvents} />}
 
           {/* Streaming text */}
           {streamText && (

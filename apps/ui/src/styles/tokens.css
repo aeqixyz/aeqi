@@ -2546,38 +2546,45 @@ a:hover {
   opacity: 0.4;
 }
 
-.session-thinking {
+.session-activity {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 14px;
   align-self: flex-start;
 }
 
-.session-thinking-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--text-muted);
-  animation: thinking-pulse 1.5s ease-in-out infinite;
+.session-activity-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
 }
 
-@keyframes thinking-pulse {
-  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+.session-activity-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+  opacity: 0.4;
+}
+
+.session-activity-dot.active {
+  background: var(--text-secondary);
+  opacity: 1;
+  animation: activity-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes activity-pulse {
+  0%, 100% { opacity: 0.5; transform: scale(0.8); }
   50% { opacity: 1; transform: scale(1); }
 }
 
-.session-thinking-word {
+.session-activity-text {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-muted);
-  font-style: italic;
-  animation: thinking-fade 2s ease-in-out infinite;
-}
-
-@keyframes thinking-fade {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 0.8; }
 }
 
 .session-msg-streaming {
