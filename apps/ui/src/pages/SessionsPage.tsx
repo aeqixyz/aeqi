@@ -331,6 +331,18 @@ export default function SessionsPage() {
                   <span>{msg.content}</span>
                 )}
               </div>
+              {msg.role === "assistant" && (
+                <button
+                  className="session-msg-copy"
+                  onClick={() => navigator.clipboard.writeText(msg.content)}
+                  title="Copy"
+                >
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="5" y="5" width="9" height="9" rx="2" />
+                    <path d="M5 11H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h5a2 2 0 0 1 2 2v1" />
+                  </svg>
+                </button>
+              )}
             </div>
           ))}
 

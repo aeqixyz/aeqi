@@ -2293,6 +2293,27 @@ a:hover {
   padding: 2px 0;
 }
 
+.session-msg-copy {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  transition: all 0.12s ease;
+  align-self: flex-start;
+  opacity: 0;
+}
+
+.session-msg:hover .session-msg-copy {
+  opacity: 1;
+}
+
+.session-msg-copy:hover {
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+}
+
 .session-msg-system,
 .session-msg-tool {
   align-self: center;
