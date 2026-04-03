@@ -65,19 +65,19 @@ export default function AgentDetailPage() {
       />
 
       {/* Hero */}
-      <div className="hero-stats" style={{ marginBottom: "var(--space-6)" }}>
+      <div className="hero-stats">
         <div className="hero-stat">
           <div className="hero-stat-value">{tasks.length}</div>
           <div className="hero-stat-label">Total Tasks</div>
         </div>
         <div className="hero-stat-divider" />
         <div className="hero-stat">
-          <div className="hero-stat-value" style={{ color: "var(--success)" }}>{completedTasks}</div>
+          <div className="hero-stat-value success">{completedTasks}</div>
           <div className="hero-stat-label">Completed</div>
         </div>
         <div className="hero-stat-divider" />
         <div className="hero-stat">
-          <div className="hero-stat-value" style={{ color: "var(--error)" }}>{failedTasks}</div>
+          <div className="hero-stat-value error">{failedTasks}</div>
           <div className="hero-stat-label">Failed</div>
         </div>
         <div className="hero-stat-divider" />
@@ -109,12 +109,12 @@ export default function AgentDetailPage() {
           {/* Expertise Panel */}
           <div className="detail-panel">
             <div className="detail-panel-title">Expertise</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-1)" }}>
+            <div className="flex-wrap-tags">
               {(agent.expertise || []).map((e: string) => (
                 <span key={e} className="expertise-tag">{e}</span>
               ))}
               {(!agent.expertise || agent.expertise.length === 0) && (
-                <span style={{ fontSize: "var(--font-size-xs)", color: "var(--text-muted)" }}>No expertise tags</span>
+                <span className="text-hint">No expertise tags</span>
               )}
             </div>
             {agent.expertise_scores && agent.expertise_scores.length > 0 && (
@@ -144,8 +144,7 @@ export default function AgentDetailPage() {
                 <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
                   {activeFile && !editing && (
                     <button
-                      className="btn"
-                      style={{ padding: "2px 10px", fontSize: "var(--font-size-xs)" }}
+                      className="btn btn-xs"
                       onClick={() => { setEditing(true); setEditContent(identity[activeFile]); }}
                     >
                       Edit
@@ -154,8 +153,7 @@ export default function AgentDetailPage() {
                   {editing && (
                     <>
                       <button
-                        className="btn btn-primary"
-                        style={{ padding: "2px 10px", fontSize: "var(--font-size-xs)" }}
+                        className="btn btn-primary btn-xs"
                         disabled={saving}
                         onClick={async () => {
                           if (!name || !activeFile) return;
@@ -171,8 +169,7 @@ export default function AgentDetailPage() {
                         {saving ? "Saving..." : "Save"}
                       </button>
                       <button
-                        className="btn"
-                        style={{ padding: "2px 10px", fontSize: "var(--font-size-xs)" }}
+                        className="btn btn-xs"
                         onClick={() => setEditing(false)}
                       >
                         Cancel
@@ -182,21 +179,11 @@ export default function AgentDetailPage() {
                 </div>
               </div>
               {/* File tabs */}
-              <div style={{ display: "flex", borderBottom: "1px solid var(--border)", overflow: "auto" }}>
+              <div className="file-tabs">
                 {Object.keys(identity).map((filename) => (
                   <button
                     key={filename}
-                    style={{
-                      padding: "var(--space-2) var(--space-4)",
-                      fontSize: "var(--font-size-xs)",
-                      color: activeFile === filename ? "var(--accent)" : "var(--text-muted)",
-                      background: activeFile === filename ? "var(--bg-hover)" : "transparent",
-                      border: "none",
-                      borderBottom: activeFile === filename ? "2px solid var(--accent)" : "2px solid transparent",
-                      cursor: "pointer",
-                      fontFamily: "var(--font-mono)",
-                      whiteSpace: "nowrap",
-                    }}
+                    className={`file-tab${activeFile === filename ? " active" : ""}`}
                     onClick={() => { setActiveFile(filename); setEditing(false); }}
                   >
                     {filename}
@@ -208,36 +195,12 @@ export default function AgentDetailPage() {
                 <div style={{ position: "relative" }}>
                   {editing ? (
                     <textarea
+                      className="code-editor"
                       value={editContent}
                       onChange={(e) => setEditContent(e.target.value)}
-                      style={{
-                        width: "100%",
-                        minHeight: "400px",
-                        padding: "var(--space-4)",
-                        fontFamily: "var(--font-mono)",
-                        fontSize: "var(--font-size-sm)",
-                        color: "var(--text-primary)",
-                        background: "var(--bg-primary)",
-                        border: "none",
-                        outline: "none",
-                        lineHeight: "1.6",
-                        resize: "vertical",
-                        boxSizing: "border-box",
-                      }}
                     />
                   ) : (
-                    <pre style={{
-                      padding: "var(--space-4)",
-                      fontFamily: "var(--font-mono)",
-                      fontSize: "var(--font-size-sm)",
-                      color: "var(--text-secondary)",
-                      lineHeight: "1.6",
-                      whiteSpace: "pre-wrap",
-                      wordWrap: "break-word",
-                      margin: 0,
-                      maxHeight: "500px",
-                      overflowY: "auto",
-                    }}>
+                    <pre className="code-viewer">
                       {identity[activeFile]}
                     </pre>
                   )}
@@ -251,7 +214,7 @@ export default function AgentDetailPage() {
             <div className="dash-panel">
               <div className="dash-panel-header">
                 <span className="dash-panel-title">Active Work</span>
-                <span style={{ fontSize: "var(--font-size-xs)", color: "var(--text-muted)" }}>{activeTasks.length} tasks</span>
+                <span className="text-hint">{activeTasks.length} tasks</span>
               </div>
               <div className="task-table">
                 {activeTasks.map((task: any) => (
@@ -273,7 +236,7 @@ export default function AgentDetailPage() {
           <div className="dash-panel">
             <div className="dash-panel-header">
               <span className="dash-panel-title">Recent Activity</span>
-              <span style={{ fontSize: "var(--font-size-xs)", color: "var(--text-muted)" }}>{audit.length} events</span>
+              <span className="text-hint">{audit.length} events</span>
             </div>
             <div className="column-section-body">
               {audit.length === 0 ? (

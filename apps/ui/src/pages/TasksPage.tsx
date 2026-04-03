@@ -65,8 +65,8 @@ export default function TasksPage() {
       />
 
       {showForm && (
-        <form className="dash-panel" style={{ marginBottom: "var(--space-6)", padding: "var(--space-5)" }} onSubmit={handleCreate}>
-          <div style={{ display: "flex", gap: "var(--space-3)", marginBottom: "var(--space-3)" }}>
+        <form className="dash-panel form-panel" onSubmit={handleCreate}>
+          <div className="form-row">
             <select
               className="filter-select"
               value={newTask.company}
@@ -79,8 +79,7 @@ export default function TasksPage() {
               ))}
             </select>
             <input
-              className="filter-input"
-              style={{ flex: 1 }}
+              className="filter-input flex-1"
               placeholder="Task subject..."
               value={newTask.subject}
               onChange={(e) => setNewTask({ ...newTask, subject: e.target.value })}
@@ -88,8 +87,7 @@ export default function TasksPage() {
             />
           </div>
           <textarea
-            className="filter-input"
-            style={{ width: "100%", minHeight: "60px", marginBottom: "var(--space-3)", resize: "vertical" }}
+            className="filter-input form-textarea"
             placeholder="Description (optional)..."
             value={newTask.description}
             onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
@@ -123,7 +121,7 @@ export default function TasksPage() {
             <option key={p.name} value={p.name}>{p.name}</option>
           ))}
         </select>
-        <span style={{ fontSize: "var(--font-size-xs)", color: "var(--text-muted)", alignSelf: "center" }}>
+        <span className="filter-count">
           {tasks.length} tasks
         </span>
       </div>
@@ -145,18 +143,10 @@ export default function TasksPage() {
                   style={{ backgroundColor: PRIORITY_COLORS[task.priority] || "var(--text-primary)" }}
                 />
                 <code className="task-id">{task.id}</code>
-                <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" }}>
+                <div className="task-row-detail">
                   <span className="task-subject">{task.subject}</span>
                   {(label || detail) && (
-                    <span
-                      style={{
-                        fontSize: "var(--font-size-xs)",
-                        color: "var(--text-muted)",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
+                    <span className="task-runtime">
                       {[label, detail].filter(Boolean).join(" • ")}
                     </span>
                   )}
@@ -167,8 +157,7 @@ export default function TasksPage() {
                   <span>{task.company}</span>
                   {task.status !== "done" && task.status !== "cancelled" && (
                     <button
-                      className="btn"
-                      style={{ padding: "1px 8px", fontSize: "var(--font-size-xs)" }}
+                      className="btn btn-2xs"
                       onClick={() => handleClose(task.id)}
                     >
                       close

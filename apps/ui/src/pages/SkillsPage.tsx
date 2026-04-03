@@ -23,7 +23,7 @@ export default function SkillsPage() {
     <>
       <Header title="Skills & Pipelines" />
 
-      <div style={{ display: "flex", gap: "var(--space-1)", marginBottom: "var(--space-4)" }}>
+      <div className="tab-bar">
         <button className={`btn ${tab === "skills" ? "btn-primary" : ""}`} onClick={() => { setTab("skills"); setActiveItem(null); }}>
           Skills ({skills.length})
         </button>
@@ -56,7 +56,7 @@ export default function SkillsPage() {
                   </span>
                   <span className="tree-label">{item.name}{item.kind === "doc" ? ".md" : ".toml"}</span>
                   {item.source && item.source !== "shared" && (
-                    <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>{item.source}</span>
+                    <span className="text-hint">{item.source}</span>
                   )}
                 </div>
               ))}

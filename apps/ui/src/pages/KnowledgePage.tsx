@@ -97,11 +97,10 @@ export default function KnowledgePage() {
 
       {/* Create form */}
       {showCreate && selectedCompany && (
-        <form className="dash-panel" style={{ marginBottom: "var(--space-4)", padding: "var(--space-4)" }} onSubmit={handleCreate}>
-          <div style={{ display: "flex", gap: "var(--space-3)", marginBottom: "var(--space-3)" }}>
+        <form className="dash-panel form-panel" onSubmit={handleCreate}>
+          <div className="form-row">
             <input
-              className="filter-input"
-              style={{ flex: 1 }}
+              className="filter-input flex-1"
               placeholder="Key (e.g., signal-latency-target)"
               value={newEntry.key}
               onChange={(e) => setNewEntry({ ...newEntry, key: e.target.value })}
@@ -120,8 +119,7 @@ export default function KnowledgePage() {
             </select>
           </div>
           <textarea
-            className="filter-input"
-            style={{ width: "100%", minHeight: "60px", marginBottom: "var(--space-3)", resize: "vertical" }}
+            className="filter-input form-textarea"
             placeholder="Content..."
             value={newEntry.content}
             onChange={(e) => setNewEntry({ ...newEntry, content: e.target.value })}
@@ -157,13 +155,12 @@ export default function KnowledgePage() {
           <option value="notes">Notes ({notesCount})</option>
         </select>
         <input
-          className="filter-input"
-          style={{ flex: 1 }}
+          className="filter-input flex-1"
           placeholder="Search knowledge..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <span style={{ fontSize: "var(--font-size-xs)", color: "var(--text-muted)", alignSelf: "center" }}>
+        <span className="filter-count">
           {items.length} entries
         </span>
       </div>
@@ -185,21 +182,7 @@ export default function KnowledgePage() {
             >
               <div className="memory-header">
                 <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flex: 1, minWidth: 0 }}>
-                  <span
-                    style={{
-                      fontSize: "9px",
-                      fontWeight: 700,
-                      width: "16px",
-                      height: "16px",
-                      borderRadius: "3px",
-                      background: "var(--bg-hover)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flexShrink: 0,
-                      color: item.source === "memory" ? "var(--info)" : "var(--accent)",
-                    }}
-                  >
+                  <span className={`knowledge-source-icon ${item.source === "memory" ? "memory" : "notes"}`}>
                     {item.source === "memory" ? "M" : "B"}
                   </span>
                   <code className="memory-key">{item.key}</code>
@@ -222,8 +205,8 @@ export default function KnowledgePage() {
                     <span>{new Date(item.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
                     {item.source === "memory" && (
                       <button
-                        className="btn"
-                        style={{ padding: "1px 8px", fontSize: "10px", color: "var(--error)" }}
+                        className="btn btn-2xs"
+                        style={{ color: "var(--error)" }}
                         onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
                       >
                         Delete
@@ -232,7 +215,7 @@ export default function KnowledgePage() {
                   </div>
                 </>
               ) : (
-                <div style={{ fontSize: "var(--font-size-xs)", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <div className="knowledge-preview">
                   {item.content.slice(0, 120)}{item.content.length > 120 ? "..." : ""}
                 </div>
               )}

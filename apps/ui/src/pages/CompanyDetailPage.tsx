@@ -54,24 +54,24 @@ export default function CompanyDetailPage() {
       />
 
       {/* Hero Stats */}
-      <div className="hero-stats" style={{ marginBottom: "var(--space-6)" }}>
+      <div className="hero-stats">
         <div className="hero-stat">
           <div className="hero-stat-value">{total}</div>
           <div className="hero-stat-label">Total Tasks</div>
         </div>
         <div className="hero-stat-divider" />
         <div className="hero-stat">
-          <div className="hero-stat-value" style={{ color: "var(--text-muted)" }}>{pendingTasks.length}</div>
+          <div className="hero-stat-value muted">{pendingTasks.length}</div>
           <div className="hero-stat-label">Pending</div>
         </div>
         <div className="hero-stat-divider" />
         <div className="hero-stat">
-          <div className="hero-stat-value" style={{ color: "var(--info)" }}>{activeTasks.length}</div>
+          <div className="hero-stat-value info">{activeTasks.length}</div>
           <div className="hero-stat-label">In Progress</div>
         </div>
         <div className="hero-stat-divider" />
         <div className="hero-stat">
-          <div className="hero-stat-value" style={{ color: "var(--success)" }}>{doneTasks.length}</div>
+          <div className="hero-stat-value success">{doneTasks.length}</div>
           <div className="hero-stat-label">Done</div>
         </div>
         <div className="hero-stat-divider" />
@@ -99,7 +99,7 @@ export default function CompanyDetailPage() {
                 </div>
                 <div className="detail-field">
                   <div className="detail-field-label">Team</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-1)" }}>
+                  <div className="flex-wrap-tags">
                     {(company.team.agents || []).map((a: string) => (
                       <span key={a} className="expertise-tag">{a}</span>
                     ))}
@@ -112,7 +112,7 @@ export default function CompanyDetailPage() {
               <div className="progress-bar-bg" style={{ marginTop: "var(--space-1)" }}>
                 <div className="progress-bar-fill" style={{ width: `${donePct}%` }} />
               </div>
-              <div style={{ fontSize: "var(--font-size-xs)", color: "var(--text-muted)", marginTop: "4px" }}>
+              <div className="text-hint" style={{ marginTop: "4px" }}>
                 {donePct.toFixed(0)}% complete
               </div>
             </div>
@@ -122,7 +122,7 @@ export default function CompanyDetailPage() {
         {/* Main Content */}
         <div className="detail-main">
           {/* Tabs */}
-          <div style={{ display: "flex", gap: "var(--space-1)", marginBottom: "var(--space-4)" }}>
+          <div className="tab-bar">
             {(["tasks", "missions", "audit"] as const).map((t) => (
               <button
                 key={t}
@@ -151,18 +151,10 @@ export default function CompanyDetailPage() {
                             style={{ backgroundColor: PRIORITY_COLORS[task.priority] || "var(--text-primary)" }}
                           />
                           <code className="task-id">{task.id}</code>
-                          <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" }}>
+                          <div className="task-row-detail">
                             <span className="task-subject">{task.subject}</span>
                             {(label || detail) && (
-                              <span
-                                style={{
-                                  fontSize: "var(--font-size-xs)",
-                                  color: "var(--text-muted)",
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
+                              <span className="task-runtime">
                                 {[label, detail].filter(Boolean).join(" • ")}
                               </span>
                             )}

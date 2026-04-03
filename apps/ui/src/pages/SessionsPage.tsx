@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
+import Markdown from "react-markdown";
 import { api } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
 import { useAuthStore } from "@/store/auth";
@@ -323,7 +324,13 @@ export default function SessionsPage() {
           {messages.map((msg, i) => (
             <div key={i} className={`session-msg session-msg-${msg.role}`}>
               <span className="session-msg-role">{msg.role}</span>
-              <pre className="session-msg-content">{msg.content}</pre>
+              <div className="session-msg-content">
+                {msg.role === "assistant" ? (
+                  <Markdown>{msg.content}</Markdown>
+                ) : (
+                  <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontFamily: "inherit" }}>{msg.content}</pre>
+                )}
+              </div>
             </div>
           ))}
 
@@ -334,7 +341,9 @@ export default function SessionsPage() {
           {streamText && (
             <div className="session-msg session-msg-assistant session-msg-streaming">
               <span className="session-msg-role">assistant</span>
-              <pre className="session-msg-content">{streamText}</pre>
+              <div className="session-msg-content">
+                <Markdown>{streamText}</Markdown>
+              </div>
             </div>
           )}
 
