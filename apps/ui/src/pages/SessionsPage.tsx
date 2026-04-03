@@ -39,6 +39,7 @@ export default function SessionsPage() {
 
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>("perpetual");
+  const [sessionCounter, setSessionCounter] = useState(0);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -86,14 +87,15 @@ export default function SessionsPage() {
   // Load messages for selected session
   useEffect(() => {
     if (activeSessionId === "perpetual") {
-      // Load perpetual session history
       api.getChatHistory({ limit: 50 })
         .then((d: any) => setMessages(d.messages || []))
         .catch(() => setMessages([]));
+    } else if (activeSessionId.startsWith("new-")) {
+      // Fresh session — empty
+      setMessages([]);
     } else {
-      // Load task transcript
-      // For now use chat history — task transcripts use transcript:task:{id} channels
-      setMessages([{ role: "system", content: `Session ${activeSessionId}` }]);
+      // Existing task — try to load transcript
+      setMessages([]);
     }
   }, [activeSessionId]);
 
@@ -225,7 +227,24 @@ export default function SessionsPage() {
           </div>
         )}
 
-        <div className="session-list-add" onClick={() => {}}>+</div>
+        <div className="session-list-add" onClick={() => {
+          const id = `new-${Date.now()}`;
+          const num = sessionCounter + 1;
+          setSessionCounter(num);
+          setSessions((prev) => [
+            ...prev.filter((s) => s.type !== "history"),
+            {
+              id,
+              name: `session ${num}`,
+              type: "active" as const,
+              status: "new",
+            },
+            ...prev.filter((s) => s.type === "history"),
+          ]);
+          setActiveSessionId(id);
+          setMessages([]);
+          setStreamText("");
+        }}>+</div>
 
         {historySessions.length > 0 && (
           <div className="sessions-list-section">
