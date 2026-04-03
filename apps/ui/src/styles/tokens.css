@@ -383,7 +383,7 @@ a:hover {
   padding: 10px 6px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 16px;
   overflow-y: auto;
   flex-shrink: 0;
   font-family: var(--font-mono);
@@ -2170,7 +2170,7 @@ a:hover {
   padding: 4px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
 
 .sessions-list-section {
