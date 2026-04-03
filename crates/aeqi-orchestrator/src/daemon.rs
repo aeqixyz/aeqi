@@ -3286,43 +3286,92 @@ impl Daemon {
                                 .await;
                         }
 
-                        // Load recent conversation history.
+                        // Load recent conversation history for context.
                         let history = if let Some(ref cs) = session_store {
                             cs.recent(chat_id, 20).await.unwrap_or_default()
                         } else {
                             vec![]
                         };
 
-                        // Build messages for the LLM.
-                        let mut messages = vec![aeqi_core::traits::Message {
-                            role: aeqi_core::traits::Role::System,
-                            content: aeqi_core::traits::MessageContent::text(
-                                "You are an AI assistant.",
-                            ),
-                        }];
-                        for msg in &history {
-                            let role = match msg.role.as_str() {
-                                "user" | "User" => aeqi_core::traits::Role::User,
-                                _ => aeqi_core::traits::Role::Assistant,
-                            };
-                            messages.push(aeqi_core::traits::Message {
-                                role,
-                                content: aeqi_core::traits::MessageContent::text(&msg.content),
-                            });
-                        }
-
-                        // Call provider directly.
                         if let Some(ref provider) = default_provider {
-                            let chat_req = aeqi_core::traits::ChatRequest {
-                                model: default_model.clone(),
-                                messages,
-                                tools: vec![],
-                                max_tokens: 4096,
-                                temperature: 0.7,
+                            // Resolve agent system prompt from registry, fall back to default.
+                            let agent_system_prompt = if let Some(ref ar) = agent_registry {
+                                match ar.get_active_by_name(&agent_hint).await {
+                                    Ok(Some(agent)) if !agent.system_prompt.is_empty() => {
+                                        agent.system_prompt.clone()
+                                    }
+                                    _ => "You are a helpful AI agent.".to_string(),
+                                }
+                            } else {
+                                "You are a helpful AI agent.".to_string()
                             };
-                            match provider.chat(&chat_req).await {
-                                Ok(response) => {
-                                    let text = response.content.unwrap_or_default();
+
+                            // Build identity from the agent's system prompt.
+                            let identity = aeqi_core::Identity {
+                                persona: Some(agent_system_prompt),
+                                ..Default::default()
+                            };
+
+                            // Build prompt with conversation history + new message.
+                            let mut prompt_parts: Vec<String> = Vec::new();
+                            if !history.is_empty() {
+                                prompt_parts.push("Recent conversation history:".to_string());
+                                for msg in &history {
+                                    // Skip the current message (already recorded above).
+                                    let role_label = match msg.role.as_str() {
+                                        "user" | "User" => "User",
+                                        _ => "Assistant",
+                                    };
+                                    prompt_parts.push(
+                                        format!("[{}]: {}", role_label, msg.content),
+                                    );
+                                }
+                                prompt_parts.push(String::new()); // blank separator
+                                prompt_parts.push(
+                                    "Continue the conversation. The latest user message is the last [User] entry above.".to_string(),
+                                );
+                            } else {
+                                prompt_parts.push(message.to_string());
+                            }
+                            let prompt = prompt_parts.join("\n");
+
+                            // Build basic tools.
+                            let workdir = std::env::current_dir()
+                                .unwrap_or_else(|_| PathBuf::from("/tmp"));
+                            let tools: Vec<Arc<dyn aeqi_core::traits::Tool>> = vec![
+                                Arc::new(aeqi_tools::ShellTool::new(workdir.clone())),
+                                Arc::new(aeqi_tools::FileReadTool::new(workdir.clone())),
+                                Arc::new(aeqi_tools::FileWriteTool::new(workdir.clone())),
+                                Arc::new(aeqi_tools::FileEditTool::new(workdir.clone())),
+                                Arc::new(aeqi_tools::GrepTool::new(workdir.clone())),
+                                Arc::new(aeqi_tools::GlobTool::new(workdir)),
+                            ];
+
+                            // Build agent config.
+                            let context_window =
+                                aeqi_providers::context_window_for_model(&default_model);
+                            let agent_config = aeqi_core::AgentConfig {
+                                model: default_model.clone(),
+                                max_iterations: 25,
+                                name: agent_hint.clone(),
+                                context_window,
+                                ..Default::default()
+                            };
+
+                            let observer: Arc<dyn aeqi_core::traits::Observer> =
+                                Arc::new(aeqi_core::traits::LogObserver);
+
+                            let agent = aeqi_core::Agent::new(
+                                agent_config,
+                                provider.clone(),
+                                tools,
+                                observer,
+                                identity,
+                            );
+
+                            match agent.run(&prompt).await {
+                                Ok(result) => {
+                                    let text = result.text.clone();
                                     // Record assistant response.
                                     if let Some(ref cs) = session_store {
                                         let _ = cs
@@ -3334,7 +3383,15 @@ impl Daemon {
                                             )
                                             .await;
                                     }
-                                    serde_json::json!({"ok": true, "text": text, "chat_id": chat_id})
+                                    serde_json::json!({
+                                        "ok": true,
+                                        "text": text,
+                                        "chat_id": chat_id,
+                                        "iterations": result.iterations,
+                                        "prompt_tokens": result.total_prompt_tokens,
+                                        "completion_tokens": result.total_completion_tokens,
+                                        "model": result.model,
+                                    })
                                 }
                                 Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
                             }
