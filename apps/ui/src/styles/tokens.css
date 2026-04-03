@@ -381,6 +381,15 @@ a:hover {
   font-family: var(--font-mono);
 }
 
+.agent-nav-shelf {
+  background: var(--bg-elevated);
+  border-radius: 0 0 12px 0;
+  padding: 6px;
+  margin-top: -10px;
+  padding-top: 16px;
+  flex-shrink: 0;
+}
+
 .agent-nav-panel {
   flex: 1;
   display: flex;

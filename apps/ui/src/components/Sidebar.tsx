@@ -179,15 +179,17 @@ export default function AgentNav() {
 
   return (
     <nav className="agent-nav">
-      {/* Company scope — on dark base */}
-      <div
-        className={`agent-row scope-header${!selectedAgent ? " active" : ""}`}
-        onClick={() => { setSelectedAgent(null); navigate(currentPath()); }}
-      >
-        {scopeName}
+      {/* Company scope — elevated, connects to rail */}
+      <div className="agent-nav-shelf">
+        <div
+          className={`agent-row scope-header${!selectedAgent ? " active" : ""}`}
+          onClick={() => { setSelectedAgent(null); navigate(currentPath()); }}
+        >
+          {scopeName}
+        </div>
       </div>
 
-      {/* Agents panel — elevated inlay */}
+      {/* Agents list — dark base */}
       <div className="agent-nav-panel">
         <div className="agent-nav-panel-title">Agents</div>
         <div className="agent-nav-panel-add" onClick={() => navigate("/agents")}>+</div>
