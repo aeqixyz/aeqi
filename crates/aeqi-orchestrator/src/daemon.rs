@@ -3207,19 +3207,23 @@ impl Daemon {
 
                 "session_send" => {
                     let message = request_field(&request, "message").unwrap_or("");
+                    let agent_hint = request_field(&request, "agent")
+                        .map(|s| s.to_lowercase())
+                        .unwrap_or_else(|| "assistant".to_string());
                     if message.is_empty() {
                         serde_json::json!({"ok": false, "error": "message is required"})
                     } else {
+                        // Use agent name as channel — matches transcript:{agent} pattern
                         let chat_id = request
                             .get("chat_id")
                             .and_then(|v| v.as_i64())
-                            .unwrap_or_else(|| named_channel_chat_id("web:default"));
+                            .unwrap_or_else(|| named_channel_chat_id(&agent_hint));
 
                         let conversation_store = registry.conversation_store.clone();
 
-                        // Record user message.
+                        // Record user message to agent's channel.
                         if let Some(ref cs) = conversation_store {
-                            let _ = cs.ensure_channel(chat_id, "web", "session").await;
+                            let _ = cs.ensure_channel(chat_id, "web", &agent_hint).await;
                             let _ = cs
                                 .record_with_source(chat_id, "user", message, Some("web"))
                                 .await;
