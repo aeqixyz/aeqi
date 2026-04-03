@@ -225,15 +225,7 @@ export default function SessionsPage() {
           </div>
         )}
 
-        <div
-          className="session-list-item session-list-new"
-          onClick={() => {
-            // TODO: spawn new async session via API
-          }}
-        >
-          <span className="session-list-dot dim">+</span>
-          <span className="session-list-name">new session</span>
-        </div>
+        <div className="session-list-add" onClick={() => {}}>+</div>
 
         {historySessions.length > 0 && (
           <div className="sessions-list-section">
