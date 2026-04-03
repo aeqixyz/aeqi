@@ -6,13 +6,13 @@ use tracing::{debug, info, warn};
 
 use crate::audit::AuditLog;
 use crate::company::Company;
-use crate::session_store::SessionStore;
 use crate::cost_ledger::CostLedger;
 use crate::expertise::ExpertiseLedger;
 use crate::message::DispatchBus;
 use crate::metrics::AEQIMetrics;
 use crate::notes::Notes;
 use crate::operation::OperationStore;
+use crate::session_store::SessionStore;
 use crate::worker_pool::WorkerPool;
 
 pub struct CompanyRegistry {

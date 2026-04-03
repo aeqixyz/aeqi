@@ -4,8 +4,8 @@ use aeqi_core::{Identity, SecretStore};
 use aeqi_gates::TelegramChannel;
 use aeqi_orchestrator::tools::build_orchestration_tools;
 use aeqi_orchestrator::{
-    AgentRouter, AuditLog, Company, CompanyRegistry, Daemon, DispatchBus, SessionStore,
-    ExpertiseLedger, Notes, WorkerPool,
+    AgentRouter, AuditLog, Company, CompanyRegistry, Daemon, DispatchBus, ExpertiseLedger, Notes,
+    SessionStore, WorkerPool,
 };
 use anyhow::{Context, Result};
 use std::collections::HashMap;

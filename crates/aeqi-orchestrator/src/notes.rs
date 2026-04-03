@@ -84,9 +84,8 @@ impl Notes {
         claim_ttl_hours: u64,
     ) -> Result<Self> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).with_context(|| {
-                format!("failed to create notes dir: {}", parent.display())
-            })?;
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create notes dir: {}", parent.display()))?;
         }
 
         let conn = Connection::open(path)

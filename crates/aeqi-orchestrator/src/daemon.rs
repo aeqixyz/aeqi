@@ -8,12 +8,12 @@ use tracing::{debug, info, warn};
 
 use crate::agent_registry::AgentRegistry;
 use crate::chat_engine::{ChatEngine, ChatMessage, ChatSource};
-use crate::session_store::{
-    agency_chat_id, company_chat_id, department_chat_id, named_channel_chat_id,
-};
 use crate::execution_events::{EventBroadcaster, ExecutionEvent};
 use crate::message::{Dispatch, DispatchBus, DispatchHealth, DispatchKind};
 use crate::registry::CompanyRegistry;
+use crate::session_store::{
+    agency_chat_id, company_chat_id, department_chat_id, named_channel_chat_id,
+};
 use crate::session_tracker::SessionTracker;
 use crate::trigger::TriggerStore;
 

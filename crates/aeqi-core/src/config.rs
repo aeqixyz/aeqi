@@ -1019,8 +1019,6 @@ impl AEQIConfig {
                     return Ok((Self::load(&candidate)?, candidate));
                 }
             }
-
-
         }
 
         anyhow::bail!("No aeqi.toml found. Run 'aeqi setup' to create one.")

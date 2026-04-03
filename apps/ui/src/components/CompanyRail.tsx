@@ -42,6 +42,8 @@ export default function CompanyRail() {
 
         <div className="rail-separator" />
 
+        <div className="rail-add" title="New company" onClick={() => {}}>+</div>
+
         {companies.map((p) => {
           const isSelected = selectedCompany === p.name;
           const hasActive = (activeCounts[p.name] || 0) > 0;
@@ -64,9 +66,6 @@ export default function CompanyRail() {
             </div>
           );
         })}
-
-        <div className="rail-separator" />
-        <div className="rail-add" title="New company" onClick={() => {}}>+</div>
         <div className="rail-settings" title="Settings">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="8" cy="8" r="2" />

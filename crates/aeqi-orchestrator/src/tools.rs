@@ -1094,11 +1094,7 @@ impl Tool for TranscriptSearchTool {
             .ok_or_else(|| anyhow::anyhow!("'query' is required"))?;
         let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
 
-        match self
-            .session_store
-            .search_transcripts(query, limit)
-            .await
-        {
+        match self.session_store.search_transcripts(query, limit).await {
             Ok(messages) => {
                 if messages.is_empty() {
                     return Ok(ToolResult {

@@ -14,8 +14,8 @@ use anyhow::Result;
 use aeqi_core::traits::{Memory, MemoryQuery, MemoryScope};
 
 use crate::agent_router::AgentRouter;
-use crate::session_store::{ChannelInfo, SessionMessage, SessionStore, ThreadEvent};
 use crate::registry::CompanyRegistry;
+use crate::session_store::{ChannelInfo, SessionMessage, SessionStore, ThreadEvent};
 
 const CHAT_COUNCIL_HOLD_REASON: &str = "awaiting_council";
 

@@ -18,7 +18,6 @@ pub mod checkpoint;
 pub mod claude_code;
 pub mod company;
 pub mod context_budget;
-pub mod session_store;
 pub mod cost_ledger;
 pub mod council;
 pub mod daemon;
@@ -38,6 +37,7 @@ pub mod pipeline;
 pub mod preflight;
 pub mod registry;
 pub mod runtime;
+pub mod session_store;
 pub mod session_tracker;
 pub mod template;
 pub mod tools;
@@ -54,7 +54,6 @@ pub use chat_engine::ChatEngine;
 pub use checkpoint::AgentCheckpoint;
 pub use company::Company;
 pub use context_budget::ContextBudget;
-pub use session_store::SessionStore;
 pub use cost_ledger::CostLedger;
 pub use council::Council;
 pub use daemon::Daemon;
@@ -72,6 +71,7 @@ pub use runtime::{
     Artifact, ArtifactKind, RuntimeExecution, RuntimeOutcome, RuntimeOutcomeStatus, RuntimePhase,
     RuntimeSession, RuntimeSessionStatus, VerificationReport,
 };
+pub use session_store::SessionStore;
 pub use session_tracker::SessionTracker;
 pub use template::Template;
 pub use trigger::{EventPattern, Trigger, TriggerStore, TriggerType};

@@ -1445,9 +1445,8 @@ impl WorkerPool {
                                 // Per-task transcript channel (findable by task_id).
                                 let task_channel_name =
                                     format!("transcript:task:{}", task_id_clone);
-                                let task_chat_id = crate::session_store::named_channel_chat_id(
-                                    &task_channel_name,
-                                );
+                                let task_chat_id =
+                                    crate::session_store::named_channel_chat_id(&task_channel_name);
                                 let _ = cs
                                     .ensure_channel(task_chat_id, "transcript", &task_channel_name)
                                     .await;
