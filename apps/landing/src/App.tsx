@@ -134,7 +134,7 @@ function Footer() {
         className="backdrop-blur-2xl bg-white/[0.03] border border-white/[0.07] rounded-full px-5 py-2 flex items-center gap-4 text-[11px] text-white/25"
         style={{ fontFamily: "'Space Grotesk', sans-serif" }}
       >
-        <span className="tracking-[0.08em]">aeqi.ai</span>
+        <span className="tracking-[0.08em]"><span className="text-[#c0392b]">aeqi</span><span className="text-white/50">.ai</span></span>
         <div className="w-px h-3 bg-white/[0.08]" />
         <a href="https://github.com/0xAEQI/aeqi" className="hover:text-white/50 transition-colors">GitHub</a>
         <a href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md" className="hover:text-white/50 transition-colors">Docs</a>

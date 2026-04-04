@@ -69,7 +69,7 @@ export function Hero() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.8, delay: 1.0, ease: "easeOut" }}
       >
-        Unopinionated agent orchestration.
+        Unopinionated <span className="text-white/90 font-semibold">artificial intelligence</span> orchestration.
       </motion.p>
 
       {/* Scroll indicator */}
