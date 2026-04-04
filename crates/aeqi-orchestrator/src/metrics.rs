@@ -250,7 +250,10 @@ impl AEQIMetrics {
 
     /// Ensure per-project metrics exist and return mutable access.
     pub fn ensure_project(&self, name: &str) {
-        let mut map = self.project_counters.lock().unwrap();
+        let mut map = match self.project_counters.lock() {
+            Ok(m) => m,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         if !map.contains_key(name) {
             map.insert(name.to_string(), ProjectMetrics::new(name));
         }

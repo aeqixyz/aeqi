@@ -12,7 +12,9 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use tracing::warn;
 
-use super::{Middleware, MiddlewareAction, ToolCall, ToolResult, WorkerContext};
+use super::{
+    Middleware, MiddlewareAction, ORDER_LOOP_DETECTION, ToolCall, ToolResult, WorkerContext,
+};
 
 /// Loop detection middleware configuration and state.
 pub struct LoopDetectionMiddleware {
@@ -68,20 +70,26 @@ impl LoopDetectionMiddleware {
     /// Record a tool call and return its current count in the window.
     fn record(&self, call: &ToolCall) -> usize {
         let hash = Self::fingerprint(call);
-        let mut state = self.state.lock().expect("loop detection lock poisoned");
+        let mut state = match self.state.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                // Recover from lock poisoning: take the inner state and continue.
+                // This prevents cascade failure if another thread panicked while holding the lock.
+                warn!("loop detection lock was poisoned, recovering");
+                poisoned.into_inner()
+            }
+        };
 
         // Evict oldest entry if window is full.
         if state.window.len() >= self.window_size
             && let Some(old) = state.window.pop_front()
+            && let Some(entry) = state.counts.get_mut(&old)
         {
-            let entry = state
-                .counts
-                .get_mut(&old)
-                .expect("count tracking invariant");
             *entry -= 1;
             if *entry == 0 {
                 state.counts.remove(&old);
             }
+            // If the entry was missing (shouldn't happen), we just skip — no panic.
         }
 
         // Add new entry.
@@ -105,7 +113,7 @@ impl Middleware for LoopDetectionMiddleware {
     }
 
     fn order(&self) -> u32 {
-        500
+        ORDER_LOOP_DETECTION
     }
 
     async fn after_tool(

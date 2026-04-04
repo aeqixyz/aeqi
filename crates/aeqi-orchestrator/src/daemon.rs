@@ -12,7 +12,7 @@ use crate::message::{Dispatch, DispatchBus, DispatchHealth, DispatchKind};
 use crate::message_router::{IncomingMessage, MessageRouter, MessageSource};
 use crate::progress_tracker::ProgressTracker;
 use crate::registry::CompanyRegistry;
-use crate::session_manager::{RunningSession, SessionManager};
+use crate::session_manager::SessionManager;
 use crate::session_store::{
     agency_chat_id, department_chat_id, named_channel_chat_id, project_chat_id,
 };
@@ -1208,7 +1208,7 @@ impl Daemon {
         default_provider: Option<Arc<dyn aeqi_core::traits::Provider>>,
         default_model: String,
         session_manager: Arc<SessionManager>,
-        event_broadcaster: Arc<EventBroadcaster>,
+        _event_broadcaster: Arc<EventBroadcaster>,
     ) -> Result<()> {
         const MAX_IPC_LINE_BYTES: usize = 10 * 1024 * 1024; // 10 MB
         let (reader, mut writer) = stream.into_split();
@@ -3789,416 +3789,185 @@ impl Daemon {
                                 }
                             }
                         } else if let Some(ref provider) = default_provider {
-                            // No running session — boot a new persistent agent loop.
+                            // No running session — boot a new one via SessionManager.spawn_session().
+                            let agent_id_or_hint =
+                                agent_id_direct.as_deref().unwrap_or(&agent_hint);
 
-                            // Resolve agent identity and company.
-                            // If agent_id_direct is provided, use ar.get() (1 query) instead of
-                            // resolve_by_hint (up to 3 queries).
-                            let (
-                                agent_system_prompt,
-                                agent_uuid,
-                                agent_company,
-                                agent_project_id,
-                                agent_department_id,
-                            ) = if let Some(ref ar) = agent_registry {
-                                let agent_opt = if let Some(ref aid) = agent_id_direct {
-                                    ar.get(aid).await.ok().flatten()
-                                } else {
-                                    ar.resolve_by_hint(&agent_hint).await.ok().flatten()
-                                };
-                                match agent_opt {
-                                    Some(agent) => (
-                                        if agent.system_prompt.is_empty() {
-                                            "You are a helpful AI agent.".to_string()
-                                        } else {
-                                            agent.system_prompt.clone()
-                                        },
-                                        Some(agent.id.clone()),
-                                        agent.project.clone(),
-                                        agent.project_id.clone(),
-                                        agent.department_id.clone(),
-                                    ),
-                                    None => (
-                                        "You are a helpful AI agent.".to_string(),
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                    ),
-                                }
-                            } else {
-                                (
-                                    "You are a helpful AI agent.".to_string(),
-                                    None,
-                                    None,
-                                    None,
-                                    None,
-                                )
-                            };
-
-                            // Build identity with primers.
-                            let mut knowledge_parts: Vec<String> = Vec::new();
-                            if let Some(ref sp) = registry.shared_primer {
-                                knowledge_parts.push(sp.clone());
-                            }
-                            if let Some(ref pp) = registry.project_primer {
-                                knowledge_parts.push(pp.clone());
-                            }
-                            let identity = aeqi_core::Identity {
-                                persona: Some(agent_system_prompt),
-                                knowledge: if knowledge_parts.is_empty() {
-                                    None
-                                } else {
-                                    Some(knowledge_parts.join("\n\n---\n\n"))
-                                },
-                                ..Default::default()
-                            };
-
-                            // Resolve workdir from agent's company repo.
-                            // Falls back to default company, then daemon cwd (root workspace).
-                            let workdir = {
-                                let project_name = agent_company.as_deref().or_else(|| {
-                                    message_router
-                                        .as_ref()
-                                        .map(|e| e.default_project.as_str())
-                                        .filter(|s| !s.is_empty())
-                                });
-                                if let Some(name) = project_name {
-                                    if let Some(company) = registry.get_project(name).await {
-                                        company.repo.clone()
-                                    } else {
-                                        std::env::current_dir()
-                                            .unwrap_or_else(|_| PathBuf::from("/tmp"))
-                                    }
-                                } else {
-                                    std::env::current_dir()
-                                        .unwrap_or_else(|_| PathBuf::from("/tmp"))
-                                }
-                            };
-
-                            // Build tools with company-scoped workdir.
-                            let mut tools: Vec<Arc<dyn aeqi_core::traits::Tool>> = vec![
-                                Arc::new(aeqi_tools::ShellTool::new(workdir.clone())),
-                                Arc::new(aeqi_tools::FileReadTool::new(workdir.clone())),
-                                Arc::new(aeqi_tools::FileWriteTool::new(workdir.clone())),
-                                Arc::new(aeqi_tools::FileEditTool::new(workdir.clone())),
-                                Arc::new(aeqi_tools::GrepTool::new(workdir.clone())),
-                                Arc::new(aeqi_tools::GlobTool::new(workdir)),
-                                Arc::new(aeqi_tools::WebFetchTool),
-                                Arc::new(aeqi_tools::WebSearchTool),
-                            ];
-
-                            // Orchestration tools — memory by company, not agent name.
-                            let empty_channels: Arc<
-                                tokio::sync::RwLock<
-                                    std::collections::HashMap<
-                                        String,
-                                        Arc<dyn aeqi_core::traits::Channel>,
-                                    >,
-                                >,
-                            > = Arc::new(
-                                tokio::sync::RwLock::new(std::collections::HashMap::new()),
-                            );
-                            let memory_for_agent = message_router.as_ref().and_then(|e| {
-                                // Prefer UUID-based lookup.
-                                agent_project_id
-                                    .as_deref()
-                                    .and_then(|id| e.memory_stores_by_id.get(id))
-                                    // Fallback to name-based lookup.
-                                    .or_else(|| {
-                                        agent_company
-                                            .as_deref()
-                                            .and_then(|c| e.memory_stores.get(c))
-                                    })
-                                    .or_else(|| e.memory_stores.get(&agent_hint))
-                                    // Fallback: use the default company's memory (root workspace).
-                                    .or_else(|| {
-                                        if !e.default_project.is_empty() {
-                                            e.memory_stores.get(&e.default_project)
-                                        } else {
-                                            e.memory_stores.values().next()
-                                        }
-                                    })
-                                    .cloned()
-                            });
-                            // Resolve graph DB path from data dir.
-                            // Falls back to default company when agent has no project.
-                            let graph_company = agent_company.as_deref().or_else(|| {
-                                message_router
-                                    .as_ref()
-                                    .map(|e| e.default_project.as_str())
-                                    .filter(|s| !s.is_empty())
-                            });
-                            let graph_db_path = graph_company.and_then(|c| {
-                                let data_dir = std::env::var("HOME")
-                                    .map(|h| PathBuf::from(h).join(".aeqi"))
-                                    .unwrap_or_else(|_| PathBuf::from("/tmp"));
-                                let path = data_dir.join("codegraph").join(format!("{c}.db"));
-                                path.exists().then_some(path)
-                            });
-
-                            // Pass session_id so the delegate tool can propagate parent_session_id.
-                            let delegate_session_id = if resolved_session_id.is_empty() {
-                                None
-                            } else {
-                                Some(resolved_session_id.clone())
-                            };
-                            let orch_tools = crate::tools::build_orchestration_tools(
-                                registry.clone(),
-                                dispatch_bus.clone(),
-                                empty_channels,
-                                None,
-                                memory_for_agent.clone(),
-                                registry.notes.clone(),
-                                Some(event_broadcaster.clone()),
-                                graph_db_path,
-                                delegate_session_id,
-                                Some(provider.clone()),
-                                registry.session_store.clone(),
-                                Some(session_manager.clone()),
-                                default_model.clone(),
-                            );
-                            tools.extend(orch_tools);
-
-                            if let Some(ref ss) = session_store {
-                                tools.push(Arc::new(crate::tools::TranscriptSearchTool::new(
-                                    ss.clone(),
-                                )));
-                            }
-
-                            // Build agent config — PERPETUAL session type.
-                            let context_window =
-                                aeqi_providers::context_window_for_model(&default_model);
-                            let agent_config = aeqi_core::AgentConfig {
-                                model: default_model.clone(),
-                                max_iterations: 200,
-                                name: agent_hint.clone(),
-                                context_window,
-                                entity_id: agent_uuid.clone(),
-                                department_id: agent_department_id.clone(),
-                                project_id: agent_project_id.clone(),
-                                session_type: aeqi_core::SessionType::Perpetual,
-                                ..Default::default()
-                            };
-
-                            let observer: Arc<dyn aeqi_core::traits::Observer> =
-                                Arc::new(aeqi_core::traits::LogObserver);
-
-                            let mut agent = aeqi_core::Agent::new(
-                                agent_config,
-                                provider.clone(),
-                                tools,
-                                observer,
-                                identity,
-                            );
-
-                            // Attach memory.
-                            if let Some(ref mem) = memory_for_agent {
-                                agent = agent.with_memory(mem.clone());
-                            }
-
-                            // Attach chat stream for broadcast.
-                            let (stream_sender, _initial_rx) =
-                                aeqi_core::chat_stream::ChatStreamSender::new(256);
-                            agent = agent.with_chat_stream(stream_sender.clone());
-
-                            // Create perpetual input channel.
-                            let (agent, input_tx) = agent.with_perpetual_input();
-                            let cancel_token = agent.cancel_token();
-
-                            // Create or reuse session_id in DB via session_store.
-                            let session_id = if !resolved_session_id.is_empty() {
-                                resolved_session_id.clone()
-                            } else if let Some(ref ss) = session_store {
-                                let aid = agent_uuid.as_deref().unwrap_or("");
-                                ss.create_session(
-                                    aid,
-                                    agent_project_id.as_deref(),
-                                    agent_department_id.as_deref(),
-                                    "perpetual",
-                                    &agent_hint,
-                                    None,
+                            match session_manager
+                                .spawn_session(
+                                    agent_id_or_hint,
+                                    message,
+                                    crate::session_manager::SpawnType::Interactive,
+                                    provider.clone(),
                                     None,
                                 )
                                 .await
-                                .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string())
-                            } else {
-                                uuid::Uuid::new_v4().to_string()
-                            };
+                            {
+                                Ok(spawned) => {
+                                    let session_id = spawned.session_id.clone();
 
-                            // Spawn the agent loop as a background task.
-                            let initial_prompt = message.to_string();
-                            let join_handle =
-                                tokio::spawn(async move { agent.run(&initial_prompt).await });
+                                    // Subscribe and stream events (same as existing-session path).
+                                    let mut rx = spawned.stream_sender.subscribe();
+                                    let mut text = String::new();
+                                    let mut iterations = 0u32;
+                                    let mut prompt_tokens = 0u32;
+                                    let mut completion_tokens = 0u32;
 
-                            // Register in session manager.
-                            let running_session = RunningSession {
-                                session_id: session_id.clone(),
-                                agent_id: agent_uuid.unwrap_or_default(),
-                                agent_name: agent_hint.clone(),
-                                input_tx,
-                                stream_sender: stream_sender.clone(),
-                                cancel_token,
-                                join_handle,
-                                chat_id,
-                            };
-                            session_manager.register(running_session).await;
-
-                            // Wait for response — stream events or collect.
-                            let mut rx = stream_sender.subscribe();
-                            let mut text = String::new();
-                            let mut iterations = 0u32;
-                            let mut prompt_tokens = 0u32;
-                            let mut completion_tokens = 0u32;
-
-                            loop {
-                                match tokio::time::timeout(
-                                    std::time::Duration::from_secs(300),
-                                    rx.recv(),
-                                )
-                                .await
-                                {
-                                    Ok(Ok(event)) => {
-                                        // Forward ALL events to IPC (they serialize with #[serde(tag = "type")])
-                                        if stream_mode
-                                            && let Ok(ev_bytes) = serde_json::to_vec(&event)
+                                    loop {
+                                        match tokio::time::timeout(
+                                            std::time::Duration::from_secs(300),
+                                            rx.recv(),
+                                        )
+                                        .await
                                         {
-                                            let mut bytes = ev_bytes;
-                                            bytes.push(b'\n');
-                                            let _ = writer.write_all(&bytes).await;
-                                        }
-
-                                        // Track text accumulation and completion for recording
-                                        match &event {
-                                            aeqi_core::ChatStreamEvent::TextDelta {
-                                                text: delta,
-                                            } => {
-                                                text.push_str(delta);
-                                            }
-                                            aeqi_core::ChatStreamEvent::ToolComplete {
-                                                tool_use_id: _,
-                                                tool_name,
-                                                success,
-                                                input_preview,
-                                                output_preview,
-                                                duration_ms,
-                                            } => {
-                                                // Persist tool completion for reload
-                                                if let (Some(cs), Some(usid)) =
-                                                    (&session_store, &store_session_id)
+                                            Ok(Ok(event)) => {
+                                                if stream_mode
+                                                    && let Ok(ev_bytes) = serde_json::to_vec(&event)
                                                 {
-                                                    let meta = serde_json::json!({
-                                                        "tool_name": tool_name,
-                                                        "success": success,
-                                                        "input_preview": input_preview,
-                                                        "output_preview": output_preview,
-                                                        "duration_ms": duration_ms,
-                                                    });
-                                                    let _ = cs
-                                                        .record_event_by_session(
-                                                            usid,
-                                                            "tool_complete",
-                                                            "system",
-                                                            tool_name,
-                                                            Some("session"),
-                                                            Some(&meta),
-                                                        )
-                                                        .await;
+                                                    let mut bytes = ev_bytes;
+                                                    bytes.push(b'\n');
+                                                    let _ = writer.write_all(&bytes).await;
+                                                }
+
+                                                match &event {
+                                                    aeqi_core::ChatStreamEvent::TextDelta {
+                                                        text: delta,
+                                                    } => {
+                                                        text.push_str(delta);
+                                                    }
+                                                    aeqi_core::ChatStreamEvent::ToolComplete {
+                                                        tool_use_id: _,
+                                                        tool_name,
+                                                        success,
+                                                        input_preview,
+                                                        output_preview,
+                                                        duration_ms,
+                                                    } => {
+                                                        if let (Some(cs), Some(usid)) =
+                                                            (&session_store, &store_session_id)
+                                                        {
+                                                            let meta = serde_json::json!({
+                                                                "tool_name": tool_name,
+                                                                "success": success,
+                                                                "input_preview": input_preview,
+                                                                "output_preview": output_preview,
+                                                                "duration_ms": duration_ms,
+                                                            });
+                                                            let _ = cs
+                                                                .record_event_by_session(
+                                                                    usid,
+                                                                    "tool_complete",
+                                                                    "system",
+                                                                    tool_name,
+                                                                    Some("session"),
+                                                                    Some(&meta),
+                                                                )
+                                                                .await;
+                                                        }
+                                                    }
+                                                    aeqi_core::ChatStreamEvent::Complete {
+                                                        total_prompt_tokens: pt,
+                                                        total_completion_tokens: ct,
+                                                        iterations: it,
+                                                        ..
+                                                    } => {
+                                                        prompt_tokens = *pt;
+                                                        completion_tokens = *ct;
+                                                        iterations = *it;
+                                                        break;
+                                                    }
+                                                    _ => {}
                                                 }
                                             }
-                                            aeqi_core::ChatStreamEvent::Complete {
-                                                total_prompt_tokens: pt,
-                                                total_completion_tokens: ct,
-                                                iterations: it,
-                                                ..
-                                            } => {
-                                                prompt_tokens = *pt;
-                                                completion_tokens = *ct;
-                                                iterations = *it;
+                                            Ok(Err(_)) => break,
+                                            Err(_) => {
+                                                text = "Session response timed out".to_string();
                                                 break;
                                             }
-                                            _ => {}
                                         }
                                     }
-                                    Ok(Err(_)) => break,
-                                    Err(_) => {
-                                        text = "Session response timed out".to_string();
-                                        break;
+
+                                    // Record assistant response via session or legacy.
+                                    if let Some(ref cs) = session_store {
+                                        if let Some(ref usid) = store_session_id {
+                                            let _ = cs
+                                                .record_by_session(
+                                                    usid,
+                                                    "assistant",
+                                                    &text,
+                                                    Some("web"),
+                                                )
+                                                .await;
+                                        } else {
+                                            let _ = cs
+                                                .record_with_source(
+                                                    chat_id,
+                                                    "assistant",
+                                                    &text,
+                                                    Some("web"),
+                                                )
+                                                .await;
+                                        }
+                                    }
+
+                                    // Track cost in ledger.
+                                    let cost_usd = aeqi_providers::estimate_cost(
+                                        &default_model,
+                                        prompt_tokens,
+                                        completion_tokens,
+                                    );
+                                    let _ = registry.cost_ledger.record(
+                                        crate::cost_ledger::CostEntry {
+                                            project: "session".to_string(),
+                                            task_id: session_id.clone(),
+                                            worker: agent_hint.clone(),
+                                            cost_usd,
+                                            turns: iterations,
+                                            timestamp: Utc::now(),
+                                            source: "session".to_string(),
+                                            tokens: (prompt_tokens + completion_tokens) as u64,
+                                            input_tokens: prompt_tokens as u64,
+                                            output_tokens: completion_tokens as u64,
+                                            cached_tokens: 0,
+                                            model: default_model.clone(),
+                                            provider: String::new(),
+                                        },
+                                    );
+
+                                    if stream_mode {
+                                        let done = serde_json::json!({
+                                            "done": true,
+                                            "type": "Complete",
+                                            "session_id": session_id,
+                                            "store_session_id": store_session_id,
+                                            "iterations": iterations,
+                                            "prompt_tokens": prompt_tokens,
+                                            "completion_tokens": completion_tokens,
+                                            "cost_usd": cost_usd,
+                                        });
+                                        let mut bytes =
+                                            serde_json::to_vec(&done).unwrap_or_default();
+                                        bytes.push(b'\n');
+                                        let _ = writer.write_all(&bytes).await;
+                                        serde_json::Value::Null
+                                    } else {
+                                        serde_json::json!({
+                                            "ok": true,
+                                            "text": text,
+                                            "chat_id": chat_id,
+                                            "session_id": session_id,
+                                            "store_session_id": store_session_id,
+                                            "iterations": iterations,
+                                            "prompt_tokens": prompt_tokens,
+                                            "completion_tokens": completion_tokens,
+                                            "model": default_model,
+                                            "cost_usd": cost_usd,
+                                        })
                                     }
                                 }
-                            }
-
-                            // Record assistant response via session or legacy.
-                            if let Some(ref cs) = session_store {
-                                if let Some(ref usid) = store_session_id {
-                                    let _ = cs
-                                        .record_by_session(usid, "assistant", &text, Some("web"))
-                                        .await;
-                                } else {
-                                    let _ = cs
-                                        .record_with_source(
-                                            chat_id,
-                                            "assistant",
-                                            &text,
-                                            Some("web"),
-                                        )
-                                        .await;
+                                Err(e) => {
+                                    serde_json::json!({"ok": false, "error": e.to_string()})
                                 }
-                            }
-
-                            // Track cost in ledger.
-                            let cost_usd = aeqi_providers::estimate_cost(
-                                &default_model,
-                                prompt_tokens,
-                                completion_tokens,
-                            );
-                            let _ = registry.cost_ledger.record(crate::cost_ledger::CostEntry {
-                                project: agent_company
-                                    .clone()
-                                    .unwrap_or_else(|| "session".to_string()),
-                                task_id: session_id.clone(),
-                                worker: agent_hint.clone(),
-                                cost_usd,
-                                turns: iterations,
-                                timestamp: Utc::now(),
-                                source: "session".to_string(),
-                                tokens: (prompt_tokens + completion_tokens) as u64,
-                                input_tokens: prompt_tokens as u64,
-                                output_tokens: completion_tokens as u64,
-                                cached_tokens: 0,
-                                model: default_model.clone(),
-                                provider: String::new(),
-                            });
-
-                            if stream_mode {
-                                // Final streaming event — write done line, return null.
-                                let done = serde_json::json!({
-                                    "done": true,
-                                    "type": "Complete",
-                                    "session_id": session_id,
-                                    "store_session_id": store_session_id,
-                                    "iterations": iterations,
-                                    "prompt_tokens": prompt_tokens,
-                                    "completion_tokens": completion_tokens,
-                                    "cost_usd": cost_usd,
-                                });
-                                let mut bytes = serde_json::to_vec(&done).unwrap_or_default();
-                                bytes.push(b'\n');
-                                let _ = writer.write_all(&bytes).await;
-                                serde_json::Value::Null
-                            } else {
-                                serde_json::json!({
-                                    "ok": true,
-                                    "text": text,
-                                    "chat_id": chat_id,
-                                    "session_id": session_id,
-                                    "store_session_id": store_session_id,
-                                    "iterations": iterations,
-                                    "prompt_tokens": prompt_tokens,
-                                    "completion_tokens": completion_tokens,
-                                    "model": default_model,
-                                    "cost_usd": cost_usd,
-                                })
                             }
                         } else {
                             serde_json::json!({"ok": false, "error": "no provider available"})

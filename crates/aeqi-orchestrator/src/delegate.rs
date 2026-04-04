@@ -211,168 +211,48 @@ impl DelegateTool {
         self.fallback_target.clone()
     }
 
-    /// Spawn a child session directly via `tokio::spawn` — no dispatch bus or patrol.
+    /// Spawn a child session via SessionManager.spawn_session() — the universal executor.
     ///
-    /// Resolves the target agent from the registry, builds a minimal `Agent`,
-    /// creates a DB session record, and spawns the agent loop as a background task.
-    /// The session auto-closes when the agent finishes.
+    /// Resolves the target agent, delegates all session building to SessionManager,
+    /// and returns the session ID. The session auto-closes when the agent finishes.
     async fn spawn_session(&self, prompt: &str) -> Result<ToolResult> {
+        let sm = self
+            .session_manager
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no session manager for direct session spawn"))?;
         let provider = self
             .provider
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("no provider configured for direct session spawn"))?;
-        let session_manager = self
-            .session_manager
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("no session manager for direct session spawn"))?;
 
-        // Resolve target agent — same logic as resolve_subagent_target but also
-        // extracts system_prompt, agent_id, project, department for identity.
-        let (agent_name, system_prompt, agent_id, project_name, dept_id) =
-            if let Some(ref company_reg) = self.registry {
-                let agent_reg = company_reg.agent_registry.read().await;
-                if let Some(ref agent_reg) = *agent_reg {
-                    // Try project-default agent.
-                    let agent_opt = if let Some(ref project) = self.project_name {
-                        agent_reg
-                            .default_for_project(Some(project))
-                            .await
-                            .ok()
-                            .flatten()
-                    } else {
-                        None
-                    };
-                    // Fallback to any active agent.
-                    let agent_opt = match agent_opt {
-                        Some(a) => Some(a),
-                        None => agent_reg.default_for_project(None).await.ok().flatten(),
-                    };
-                    match agent_opt {
-                        Some(agent) => (
-                            agent.name.clone(),
-                            agent.system_prompt.clone(),
-                            Some(agent.id.clone()),
-                            agent.project.clone(),
-                            agent.department_id.clone(),
-                        ),
-                        None => (
-                            self.agent_name.clone(),
-                            "You are a helpful AI agent.".to_string(),
-                            None,
-                            self.project_name.clone(),
-                            None,
-                        ),
-                    }
-                } else {
-                    (
-                        self.agent_name.clone(),
-                        "You are a helpful AI agent.".to_string(),
-                        None,
-                        self.project_name.clone(),
-                        None,
-                    )
-                }
-            } else {
-                (
-                    self.agent_name.clone(),
-                    "You are a helpful AI agent.".to_string(),
-                    None,
-                    self.project_name.clone(),
-                    None,
-                )
-            };
-
-        // Build identity.
-        let identity = aeqi_core::Identity {
-            persona: Some(system_prompt),
-            ..Default::default()
-        };
-
-        // Build minimal config — Async session (runs to completion, not perpetual).
-        let context_window = aeqi_providers::context_window_for_model(&self.default_model);
-        let config = aeqi_core::AgentConfig {
-            model: self.default_model.clone(),
-            max_iterations: 50,
-            name: agent_name.clone(),
-            context_window,
-            entity_id: agent_id.clone(),
-            session_type: aeqi_core::SessionType::Async,
-            ..Default::default()
-        };
-
-        // Create stream sender for event broadcasting.
-        let (stream_sender, _rx) = aeqi_core::chat_stream::ChatStreamSender::new(256);
-
-        // Build agent with minimal tools — the agent can still reason without them.
-        // TODO: share parent's tools or build from project config.
-        let observer: Arc<dyn aeqi_core::traits::Observer> =
-            Arc::new(aeqi_core::traits::LogObserver);
-        let agent = aeqi_core::Agent::new(config, provider.clone(), vec![], observer, identity)
-            .with_chat_stream(stream_sender.clone());
-
-        // Create session in DB.
-        let session_id = if let Some(ref ss) = self.session_store {
-            ss.create_session(
-                agent_id.as_deref().unwrap_or(""),
-                project_name.as_deref(),
-                dept_id.as_deref(),
-                "delegation",
-                &format!("Delegation from {}", self.agent_name),
-                self.session_id.as_deref(),
-                None,
-            )
+        // Resolve target agent name/id.
+        let agent_id = self
+            .resolve_subagent_target()
             .await
-            .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string())
-        } else {
-            uuid::Uuid::new_v4().to_string()
-        };
+            .unwrap_or_else(|| self.agent_name.clone());
 
-        // Record the prompt as "user" message.
-        if let Some(ref ss) = self.session_store {
-            let _ = ss
-                .record_by_session(&session_id, "user", prompt, Some("delegation"))
-                .await;
-        }
-
-        // Spawn the agent.
-        let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let prompt_owned = prompt.to_string();
-        let ss_clone = self.session_store.clone();
-        let sid_clone = session_id.clone();
-        let join_handle = tokio::spawn(async move {
-            let result = agent.run(&prompt_owned).await;
-            // Record result and close session.
-            if let (Some(ss), Ok(r)) = (&ss_clone, &result) {
-                let _ = ss
-                    .record_by_session(&sid_clone, "assistant", &r.text, Some("delegation"))
-                    .await;
-                let _ = ss.close_session(&sid_clone).await;
-            }
-            result
-        });
-
-        // Register in session manager.
-        let running = crate::session_manager::RunningSession {
-            session_id: session_id.clone(),
-            agent_id: agent_id.unwrap_or_default(),
-            agent_name: agent_name.clone(),
-            input_tx: tokio::sync::mpsc::unbounded_channel().0,
-            stream_sender,
-            cancel_token,
-            join_handle,
-            chat_id: 0,
-        };
-        session_manager.register(running).await;
+        let spawned = sm
+            .spawn_session(
+                &agent_id,
+                prompt,
+                crate::session_manager::SpawnType::Delegation {
+                    parent_id: self.session_id.clone().unwrap_or_default(),
+                },
+                provider.clone(),
+                self.project_name.as_deref(),
+            )
+            .await?;
 
         info!(
-            session_id = %session_id,
-            agent = %agent_name,
+            session_id = %spawned.session_id,
+            target = %agent_id,
             parent = ?self.session_id,
-            "spawned child session directly"
+            "spawned child session via SessionManager"
         );
 
         Ok(ToolResult::success(format!(
-            "Session {session_id} spawned for '{agent_name}'. Running asynchronously — result will be recorded when complete."
+            "Session {} spawned for '{}'. Running asynchronously — result will be recorded when complete.",
+            spawned.session_id, agent_id
         )))
     }
 

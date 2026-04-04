@@ -8,7 +8,7 @@
 use async_trait::async_trait;
 use tracing::debug;
 
-use super::{Middleware, MiddlewareAction, WorkerContext};
+use super::{Middleware, MiddlewareAction, ORDER_CONTEXT_BUDGET, WorkerContext};
 
 /// Context budget middleware — enforces a maximum line count on the messages buffer.
 pub struct ContextBudgetMiddleware {
@@ -67,7 +67,7 @@ impl Middleware for ContextBudgetMiddleware {
     }
 
     fn order(&self) -> u32 {
-        100
+        ORDER_CONTEXT_BUDGET
     }
 
     async fn on_start(&self, ctx: &mut WorkerContext) -> MiddlewareAction {

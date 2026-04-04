@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use tracing::{debug, info, warn};
 
-use super::{Middleware, MiddlewareAction, WorkerContext};
+use super::{Middleware, MiddlewareAction, ORDER_CONTEXT_COMPRESSION, WorkerContext};
 
 /// Maximum number of context tier step-downs before halting.
 const MAX_TIER_STEPDOWNS: u32 = 3;
@@ -194,7 +194,7 @@ impl Middleware for ContextCompressionMiddleware {
     }
 
     fn order(&self) -> u32 {
-        15
+        ORDER_CONTEXT_COMPRESSION
     }
 
     async fn before_model(&self, ctx: &mut WorkerContext) -> MiddlewareAction {

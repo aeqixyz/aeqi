@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use std::path::PathBuf;
 use tracing::debug;
 
-use super::{Middleware, MiddlewareAction, ToolCall, WorkerContext};
+use super::{Middleware, MiddlewareAction, ORDER_GRAPH_GUARDRAILS, ToolCall, WorkerContext};
 
 /// Graph-aware guardrails: checks code graph impact before allowing edits.
 /// Injects warnings when changes affect symbols with many callers.
@@ -100,7 +100,7 @@ impl Middleware for GraphGuardrailsMiddleware {
     }
 
     fn order(&self) -> u32 {
-        195 // Just before regular guardrails (200)
+        ORDER_GRAPH_GUARDRAILS
     }
 
     async fn before_tool(&self, ctx: &mut WorkerContext, call: &ToolCall) -> MiddlewareAction {

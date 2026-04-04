@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
-use super::{Middleware, MiddlewareAction, ToolCall, WorkerContext};
+use super::{Middleware, MiddlewareAction, ORDER_CLARIFICATION, ToolCall, WorkerContext};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -103,7 +103,7 @@ impl Middleware for ClarificationMiddleware {
     }
 
     fn order(&self) -> u32 {
-        99
+        ORDER_CLARIFICATION
     }
 
     async fn before_tool(&self, ctx: &mut WorkerContext, call: &ToolCall) -> MiddlewareAction {

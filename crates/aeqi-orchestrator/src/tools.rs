@@ -192,10 +192,7 @@ impl Tool for MemoryStoreTool {
             Some("evergreen") => MemoryCategory::Evergreen,
             _ => MemoryCategory::Fact,
         };
-        let entity_id = args
-            .get("entity_id")
-            .and_then(|v| v.as_str())
-            .or_else(|| args.get("companion_id").and_then(|v| v.as_str()));
+        let entity_id = args.get("entity_id").and_then(|v| v.as_str());
 
         match self
             .memory
@@ -261,11 +258,7 @@ impl Tool for MemoryRecallTool {
                 _ => MemoryScope::Domain,
             });
         }
-        if let Some(eid) = args
-            .get("entity_id")
-            .and_then(|v| v.as_str())
-            .or_else(|| args.get("companion_id").and_then(|v| v.as_str()))
-        {
+        if let Some(eid) = args.get("entity_id").and_then(|v| v.as_str()) {
             query = query.with_entity(eid);
         }
 

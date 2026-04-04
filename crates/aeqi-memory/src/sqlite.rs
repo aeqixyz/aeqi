@@ -579,7 +579,10 @@ impl SqliteMemory {
 
     /// Store a memory edge (upsert on conflict).
     pub fn store_edge(&self, edge: &MemoryEdge) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("memory lock poisoned in store_edge: {e}"))?;
         let relation_str = serde_json::to_value(edge.relation)?
             .as_str()
             .unwrap_or("related_to")
@@ -609,7 +612,10 @@ impl SqliteMemory {
 
     /// Fetch all edges where this memory is source or target.
     pub fn fetch_edges(&self, memory_id: &str) -> Result<Vec<MemoryEdge>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("memory lock poisoned in fetch_edges: {e}"))?;
         let mut stmt = conn.prepare(
             "SELECT source_id, target_id, relation, strength, created_at
              FROM memory_edges

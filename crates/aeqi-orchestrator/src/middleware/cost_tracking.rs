@@ -8,7 +8,9 @@
 use async_trait::async_trait;
 use tracing::{info, warn};
 
-use super::{Middleware, MiddlewareAction, Outcome, ToolCall, ToolResult, WorkerContext};
+use super::{
+    Middleware, MiddlewareAction, ORDER_COST_TRACKING, Outcome, ToolCall, ToolResult, WorkerContext,
+};
 
 /// Cost tracking middleware with a configurable budget ceiling.
 pub struct CostTrackingMiddleware {
@@ -47,7 +49,7 @@ impl Middleware for CostTrackingMiddleware {
     }
 
     fn order(&self) -> u32 {
-        600
+        ORDER_COST_TRACKING
     }
 
     async fn before_model(&self, ctx: &mut WorkerContext) -> MiddlewareAction {

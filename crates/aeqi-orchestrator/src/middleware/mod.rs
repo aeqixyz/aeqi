@@ -31,7 +31,32 @@ pub use safety_net::SafetyNetMiddleware;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::debug;
+use tracing::{debug, warn};
+
+// ---------------------------------------------------------------------------
+// Middleware ordering constants — lower values run earlier in the chain.
+// ---------------------------------------------------------------------------
+// Use these constants instead of magic numbers in each middleware's order().
+// Sorted by intended execution order with gaps for future insertion.
+
+/// Context compression: compress context before model calls (earliest).
+pub const ORDER_CONTEXT_COMPRESSION: u32 = 15;
+/// Clarification: request clarification before heavy processing.
+pub const ORDER_CLARIFICATION: u32 = 99;
+/// Context budget: enforce token budget limits.
+pub const ORDER_CONTEXT_BUDGET: u32 = 100;
+/// Graph guardrails: graph-aware permission checks (just before regular guardrails).
+pub const ORDER_GRAPH_GUARDRAILS: u32 = 195;
+/// Guardrails: tiered tool permission system (allow/ask/deny).
+pub const ORDER_GUARDRAILS: u32 = 200;
+/// Loop detection: detect and halt repetitive tool call patterns.
+pub const ORDER_LOOP_DETECTION: u32 = 500;
+/// Cost tracking: enforce per-task budget ceilings.
+pub const ORDER_COST_TRACKING: u32 = 600;
+/// Memory refresh: periodic memory re-search during long executions.
+pub const ORDER_MEMORY_REFRESH: u32 = 700;
+/// Safety net: preserve partial work on failure (runs late).
+pub const ORDER_SAFETY_NET: u32 = 900;
 
 use crate::runtime::RuntimeOutcome;
 
@@ -302,8 +327,22 @@ pub struct MiddlewareChain {
 
 impl MiddlewareChain {
     /// Create a new chain, sorted by middleware order (ascending).
+    /// Warns on duplicate order values — they cause non-deterministic execution order.
     pub fn new(mut layers: Vec<Box<dyn Middleware>>) -> Self {
         layers.sort_by_key(|m| m.order());
+
+        // Validate: no duplicate order values.
+        for window in layers.windows(2) {
+            if window[0].order() == window[1].order() {
+                warn!(
+                    a = window[0].name(),
+                    b = window[1].name(),
+                    order = window[0].order(),
+                    "middleware order collision — execution order between these is non-deterministic"
+                );
+            }
+        }
+
         Self { layers }
     }
 

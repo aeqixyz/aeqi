@@ -312,6 +312,15 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 }
             }
 
+            // Clone memory stores for SessionManager (MessageRouter consumes the originals).
+            let sm_memory_stores = chat_memory_stores.clone();
+            let sm_memory_stores_by_id = memory_stores_by_id.clone();
+            let sm_default_project = config
+                .companies
+                .first()
+                .map(|c| c.name.clone())
+                .unwrap_or_default();
+
             // Build the unified MessageRouter.
             let council_advisors: Arc<Vec<aeqi_core::config::PeerAgentConfig>> =
                 Arc::new(config.advisor_agents().into_iter().cloned().collect());
@@ -327,11 +336,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     council_advisors: council_advisors.clone(),
                     auto_council_enabled,
                     leader_name: leader_name.clone(),
-                    default_project: config
-                        .companies
-                        .first()
-                        .map(|c| c.name.clone())
-                        .unwrap_or_default(),
+                    default_project: sm_default_project.clone(),
                     pending_tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                     task_notify: fa_task_notify.clone(),
                     memory_stores: chat_memory_stores,
@@ -627,7 +632,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     daemon
                         .registry
                         .wire_agent_system(
-                            agent_reg,
+                            agent_reg.clone(),
                             trigger_store,
                             daemon
                                 .message_router
@@ -635,6 +640,25 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                                 .map(|ce| ce.conversations.clone()),
                         )
                         .await;
+
+                    // Configure SessionManager with all dependencies for spawn_session().
+                    if let Some(ref ss) = daemon.registry.session_store
+                        && let Some(sm) = Arc::get_mut(&mut daemon.session_manager)
+                    {
+                        sm.configure(
+                            agent_reg,
+                            ss.clone(),
+                            daemon.registry.clone(),
+                            daemon.default_model.clone(),
+                            Some(daemon.event_broadcaster.clone()),
+                            daemon.registry.dispatch_bus.clone(),
+                            daemon.registry.notes.clone(),
+                            sm_memory_stores,
+                            sm_memory_stores_by_id,
+                            sm_default_project,
+                        );
+                        info!("session manager configured for spawn_session");
+                    }
                 }
                 Err(e) => {
                     warn!(error = %e, "failed to open agent registry for triggers");

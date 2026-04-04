@@ -13,7 +13,7 @@
 use async_trait::async_trait;
 use tracing::{debug, warn};
 
-use super::{Middleware, MiddlewareAction, ToolCall, WorkerContext};
+use super::{Middleware, MiddlewareAction, ORDER_GUARDRAILS, ToolCall, WorkerContext};
 
 /// Permission tier for a tool call.
 #[derive(Debug, Clone, PartialEq)]
@@ -190,7 +190,7 @@ impl Middleware for GuardrailsMiddleware {
     }
 
     fn order(&self) -> u32 {
-        200
+        ORDER_GUARDRAILS
     }
 
     async fn before_tool(&self, _ctx: &mut WorkerContext, call: &ToolCall) -> MiddlewareAction {

@@ -10,7 +10,9 @@
 use async_trait::async_trait;
 use tracing::{info, warn};
 
-use super::{Middleware, MiddlewareAction, Outcome, OutcomeStatus, WorkerContext};
+use super::{
+    Middleware, MiddlewareAction, ORDER_SAFETY_NET, Outcome, OutcomeStatus, WorkerContext,
+};
 
 /// Safety net middleware that detects and preserves partial work on failure.
 pub struct SafetyNetMiddleware;
@@ -83,7 +85,7 @@ impl Middleware for SafetyNetMiddleware {
     }
 
     fn order(&self) -> u32 {
-        900 // Run late — after most other middleware.
+        ORDER_SAFETY_NET
     }
 
     async fn on_complete(&self, ctx: &mut WorkerContext, outcome: &Outcome) -> MiddlewareAction {

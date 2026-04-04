@@ -198,8 +198,13 @@ pub struct DispatchBus {
 }
 
 impl DispatchBus {
-    /// Check if a dispatch with this idempotency key already exists.
-    async fn has_idempotency_key(&self, key: &str) -> bool {
+    /// Atomically check if a dispatch with this idempotency key already exists
+    /// and insert a placeholder if not. Returns true if the key was already present
+    /// (i.e. the dispatch should be dropped), false if it was freshly claimed.
+    ///
+    /// For the Sqlite backend this is a single INSERT OR IGNORE + check, eliminating
+    /// the TOCTOU race of a separate check-then-insert.
+    async fn claim_idempotency_key(&self, key: &str) -> bool {
         match &self.backend {
             BusBackend::Memory { queues } => {
                 let queues = queues.lock().await;
@@ -208,16 +213,30 @@ impl DispatchBus {
                     .any(|q| q.iter().any(|d| d.idempotency_key.as_deref() == Some(key)))
             }
             BusBackend::Sqlite { conn } => {
-                let Ok(conn) = conn.lock() else {
-                    return false;
+                let conn = match conn.lock() {
+                    Ok(c) => c,
+                    Err(poisoned) => {
+                        warn!("dispatch bus lock poisoned, recovering");
+                        poisoned.into_inner()
+                    }
                 };
-                conn.query_row(
-                    "SELECT COUNT(*) FROM dispatches WHERE idempotency_key = ?1",
-                    rusqlite::params![key],
-                    |row| row.get::<_, u32>(0),
-                )
-                .unwrap_or(0)
-                    > 0
+                // Atomic check-and-claim: if the key already exists the INSERT is
+                // silently skipped and changes() returns 0.
+                let inserted = conn
+                    .execute(
+                        "INSERT OR IGNORE INTO dispatches (
+                            from_agent, to_agent, kind_json, timestamp, dispatch_id,
+                            first_sent_at, idempotency_key
+                         ) SELECT '__idempotency_placeholder', '__idempotency_placeholder',
+                                  '{}', datetime('now'), '', datetime('now'), ?1
+                         WHERE NOT EXISTS (
+                            SELECT 1 FROM dispatches WHERE idempotency_key = ?1
+                         )",
+                        rusqlite::params![key],
+                    )
+                    .unwrap_or(0);
+                // If we inserted 0 rows, the key already existed → duplicate.
+                inserted == 0
             }
         }
     }
@@ -312,7 +331,7 @@ impl DispatchBus {
                 [],
                 |row| row.get(0),
             )
-            .unwrap_or(false);
+            .context("failed to check dispatch_id column existence")?;
         if !has_dispatch_id {
             let _ = conn.execute_batch(
                 "ALTER TABLE dispatches ADD COLUMN dispatch_id TEXT DEFAULT '';
@@ -331,9 +350,9 @@ impl DispatchBus {
     }
 
     pub async fn send(&self, dispatch: Dispatch) {
-        // Idempotency check: if a key is set, drop duplicate dispatches.
+        // Atomic idempotency check-and-claim: if the key already exists, drop.
         if let Some(ref key) = dispatch.idempotency_key
-            && self.has_idempotency_key(key).await
+            && self.claim_idempotency_key(key).await
         {
             debug!(key = %key, to = %dispatch.to, "dispatch dropped (idempotency key already exists)");
             return;
@@ -358,7 +377,13 @@ impl DispatchBus {
                 queue.push_back(dispatch);
             }
             BusBackend::Sqlite { conn } => {
-                let Ok(conn) = conn.lock() else { return };
+                let conn = match conn.lock() {
+                    Ok(c) => c,
+                    Err(poisoned) => {
+                        warn!("dispatch bus lock poisoned in send(), recovering");
+                        poisoned.into_inner()
+                    }
+                };
 
                 let cutoff =
                     (Utc::now() - chrono::Duration::seconds(self.ttl_secs as i64)).to_rfc3339();
@@ -445,8 +470,12 @@ impl DispatchBus {
                 result
             }
             BusBackend::Sqlite { conn } => {
-                let Ok(conn) = conn.lock() else {
-                    return Vec::new();
+                let conn = match conn.lock() {
+                    Ok(c) => c,
+                    Err(poisoned) => {
+                        warn!("dispatch bus lock poisoned in read(), recovering");
+                        poisoned.into_inner()
+                    }
                 };
                 let mut result = Vec::new();
 
@@ -553,8 +582,12 @@ impl DispatchBus {
                 queues.values().flat_map(|q| q.iter().cloned()).collect()
             }
             BusBackend::Sqlite { conn } => {
-                let Ok(conn) = conn.lock() else {
-                    return Vec::new();
+                let conn = match conn.lock() {
+                    Ok(c) => c,
+                    Err(poisoned) => {
+                        warn!("dispatch bus lock poisoned in all(), recovering");
+                        poisoned.into_inner()
+                    }
                 };
                 Self::query_dispatches(
                     &conn,
@@ -577,7 +610,10 @@ impl DispatchBus {
                     .unwrap_or(0)
             }
             BusBackend::Sqlite { conn } => {
-                let Ok(conn) = conn.lock() else { return 0 };
+                let conn = match conn.lock() {
+                    Ok(c) => c,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
                 conn.query_row(
                     "SELECT COUNT(*) FROM dispatches WHERE to_agent = ?1 AND is_read = 0",
                     rusqlite::params![recipient],

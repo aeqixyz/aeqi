@@ -12,7 +12,9 @@
 use async_trait::async_trait;
 use tracing::{debug, info};
 
-use super::{Middleware, MiddlewareAction, ToolCall, ToolResult, WorkerContext};
+use super::{
+    Middleware, MiddlewareAction, ORDER_MEMORY_REFRESH, ToolCall, ToolResult, WorkerContext,
+};
 
 /// Memory refresh middleware configuration.
 pub struct MemoryRefreshMiddleware {
@@ -86,7 +88,7 @@ impl Middleware for MemoryRefreshMiddleware {
     }
 
     fn order(&self) -> u32 {
-        50
+        ORDER_MEMORY_REFRESH
     }
 
     async fn after_tool(

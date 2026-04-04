@@ -86,6 +86,10 @@ const FALLBACK_TRIGGER_COUNT: u32 = 3;
 /// Preview size for persisted tool results (bytes).
 const PERSIST_PREVIEW_SIZE: usize = 2000;
 
+/// Hard cap on message count to prevent unbounded memory growth.
+/// If compaction fails or is exhausted, the loop halts rather than OOM.
+const MAX_MESSAGES_HARD_CAP: usize = 5_000;
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
@@ -683,19 +687,30 @@ impl Agent {
         if let Some(ref session_file) = self.config.session_file
             && let Some(state) = Self::load_session(session_file).await
         {
-            messages = state.messages;
-            iterations = state.iterations;
-            tracker.total_prompt_tokens = state.total_prompt_tokens;
-            tracker.total_completion_tokens = state.total_completion_tokens;
-            tracker.compactions = state.compactions;
-            // Inject a resume prompt so the model knows it's continuing.
-            messages.push(Message {
-                role: Role::User,
-                content: MessageContent::text(
-                    "Session resumed from checkpoint. Continue where you left off. \
-                     Do not repeat completed work.",
-                ),
-            });
+            // Validate checkpoint integrity: reject empty/corrupt states.
+            if state.messages.is_empty() {
+                warn!(
+                    agent = %self.config.name,
+                    "session checkpoint has empty messages, starting fresh"
+                );
+                if let Err(e) = tokio::fs::remove_file(session_file).await {
+                    debug!(agent = %self.config.name, "failed to remove corrupt session file: {e}");
+                }
+            } else {
+                messages = state.messages;
+                iterations = state.iterations;
+                tracker.total_prompt_tokens = state.total_prompt_tokens;
+                tracker.total_completion_tokens = state.total_completion_tokens;
+                tracker.compactions = state.compactions;
+                // Inject a resume prompt so the model knows it's continuing.
+                messages.push(Message {
+                    role: Role::User,
+                    content: MessageContent::text(
+                        "Session resumed from checkpoint. Continue where you left off. \
+                         Do not repeat completed work.",
+                    ),
+                });
+            }
         }
         let mut mid_loop_recalls = 0u32;
         let mut output_recovery_count = 0u32;
@@ -728,6 +743,18 @@ impl Agent {
                 break;
             }
 
+            // Hard cap on message history to prevent unbounded memory growth.
+            if messages.len() > MAX_MESSAGES_HARD_CAP {
+                warn!(
+                    agent = %self.config.name,
+                    messages = messages.len(),
+                    cap = MAX_MESSAGES_HARD_CAP,
+                    "message history exceeded hard cap — halting to prevent OOM"
+                );
+                stop_reason = AgentStopReason::ContextExhausted;
+                break;
+            }
+
             // --- before_model hook ---
             match self.observer.before_model(iterations).await {
                 LoopAction::Halt(reason) => {
@@ -747,82 +774,19 @@ impl Agent {
                 LoopAction::Continue => {}
             }
 
-            // --- Context window management ---
-            let estimated_tokens = if tracker.estimated_context_tokens() > 0 {
-                tracker.estimated_context_tokens()
-            } else {
-                Self::estimate_tokens_from_messages(&messages)
-            };
-
-            let full_threshold =
-                (self.config.context_window as f32 * self.config.compact_threshold) as u32;
-            let snip_threshold = (self.config.context_window as f32
-                * self.config.compact_threshold
-                * SNIP_THRESHOLD_FACTOR) as u32;
-            let protected = self.config.compact_preserve_head + self.config.compact_preserve_tail;
-
-            // --- Stage 0: Snip — remove entire old API rounds (no API call, ~free) ---
-            if estimated_tokens > snip_threshold && messages.len() > protected {
-                let freed = Self::snip_compact(
+            // --- Context window management (3-stage compaction pipeline) ---
+            let (compaction_result, estimated_tokens) = self
+                .run_compaction_pipeline(
                     &mut messages,
-                    self.config.compact_preserve_head,
-                    self.config.compact_preserve_tail,
-                );
-                if freed > 0 {
-                    debug!(
-                        agent = %self.config.name,
-                        tokens_freed = freed,
-                        "snip compaction freed tokens"
-                    );
-                    transition = LoopTransition::SnipCompacted {
-                        tokens_freed: freed,
-                    };
-                }
-            }
-
-            // Re-estimate after snip.
-            let estimated_tokens = if matches!(transition, LoopTransition::SnipCompacted { .. }) {
-                Self::estimate_tokens_from_messages(&messages)
-            } else {
-                estimated_tokens
-            };
-
-            // --- Stage 1: Microcompact — clear old tool results by name + keep recent N ---
-            if estimated_tokens > snip_threshold && messages.len() > protected {
-                Self::microcompact(
-                    &mut messages,
-                    self.config.compact_preserve_tail,
-                    MICROCOMPACT_KEEP_RECENT,
-                );
-            }
-
-            // Re-estimate after microcompact.
-            let estimated_tokens = Self::estimate_tokens_from_messages(&messages);
-
-            // --- Stage 2: Full compaction (LLM summary + restoration) ---
-            if estimated_tokens > full_threshold
-                && tracker.compactions < MAX_COMPACTIONS_PER_RUN
-                && messages.len() > protected
-            {
-                info!(
-                    agent = %self.config.name,
-                    estimated_tokens,
-                    threshold = full_threshold,
-                    compaction = tracker.compactions + 1,
-                    "context approaching limit, compacting"
-                );
-                self.emit(crate::chat_stream::ChatStreamEvent::Status {
-                    message: "Compacting context...".into(),
-                });
-                self.compact_messages(&mut messages, &recent_files).await;
-                tracker.compactions += 1;
-                has_attempted_reactive_compact = false; // Reset after successful compact
-                transition = LoopTransition::ContextCompacted;
-
-                // Save session checkpoint after compaction.
-                if let Some(ref sf) = self.config.session_file {
-                    Self::save_session(&messages, &tracker, iterations, &active_model, sf).await;
-                }
+                    &recent_files,
+                    &mut tracker,
+                    &mut has_attempted_reactive_compact,
+                    iterations,
+                    &active_model,
+                )
+                .await;
+            if let Some(t) = compaction_result {
+                transition = t;
             }
 
             // --- Conversation repair: ensure tool_use/tool_result pairing ---
@@ -859,9 +823,9 @@ impl Agent {
                 active_model.clone()
             };
 
-            // Build request.
+            // Build request — turn_model is consumed here (no extra clone).
             let request = ChatRequest {
-                model: turn_model.clone(),
+                model: turn_model,
                 messages: messages.clone(),
                 tools: tool_specs.clone(),
                 max_tokens: self.config.max_tokens,
@@ -870,14 +834,14 @@ impl Agent {
 
             self.observer
                 .record(Event::LlmRequest {
-                    model: active_model.clone(),
+                    model: request.model.clone(),
                     tokens: estimated_tokens,
                 })
                 .await;
 
             self.emit(crate::chat_stream::ChatStreamEvent::TurnStart {
                 turn: iterations,
-                model: active_model.clone(),
+                model: request.model.clone(),
             });
 
             // --- Call provider (streaming with early tool execution) ---
@@ -1401,7 +1365,7 @@ impl Agent {
                 let original_len = r.output.len();
 
                 // Try disk persistence first — model retains access via file read.
-                if let Some(ref dir) = self.resolve_persist_dir(&mut persist_dir_created) {
+                if let Some(dir) = self.resolve_persist_dir(&mut persist_dir_created) {
                     match Self::persist_tool_result(dir, &r.id, &r.output).await {
                         Ok(persisted_msg) => {
                             debug!(
@@ -1657,6 +1621,107 @@ impl Agent {
     }
 
     // -----------------------------------------------------------------------
+    // Compaction pipeline — extracted from run() for clarity
+    // -----------------------------------------------------------------------
+
+    /// Run the 3-stage context compaction pipeline:
+    ///   Stage 0: Snip — remove entire old API rounds (no API call, ~free)
+    ///   Stage 1: Microcompact — clear old tool results by name, keep recent N
+    ///   Stage 2: Full compact — LLM-based structured summary + restoration
+    ///
+    /// Returns (optional transition, estimated_tokens after compaction).
+    async fn run_compaction_pipeline(
+        &self,
+        messages: &mut Vec<Message>,
+        recent_files: &[RecentFile],
+        tracker: &mut ContextTracker,
+        has_attempted_reactive_compact: &mut bool,
+        iterations: u32,
+        active_model: &str,
+    ) -> (Option<LoopTransition>, u32) {
+        let mut transition: Option<LoopTransition> = None;
+
+        let estimated_tokens = if tracker.estimated_context_tokens() > 0 {
+            tracker.estimated_context_tokens()
+        } else {
+            Self::estimate_tokens_from_messages(messages)
+        };
+
+        let full_threshold =
+            (self.config.context_window as f32 * self.config.compact_threshold) as u32;
+        let snip_threshold = (self.config.context_window as f32
+            * self.config.compact_threshold
+            * SNIP_THRESHOLD_FACTOR) as u32;
+        let protected = self.config.compact_preserve_head + self.config.compact_preserve_tail;
+
+        // --- Stage 0: Snip ---
+        if estimated_tokens > snip_threshold && messages.len() > protected {
+            let freed = Self::snip_compact(
+                messages,
+                self.config.compact_preserve_head,
+                self.config.compact_preserve_tail,
+            );
+            if freed > 0 {
+                debug!(
+                    agent = %self.config.name,
+                    tokens_freed = freed,
+                    "snip compaction freed tokens"
+                );
+                transition = Some(LoopTransition::SnipCompacted {
+                    tokens_freed: freed,
+                });
+            }
+        }
+
+        // Re-estimate after snip.
+        let estimated_tokens = if transition.is_some() {
+            Self::estimate_tokens_from_messages(messages)
+        } else {
+            estimated_tokens
+        };
+
+        // --- Stage 1: Microcompact ---
+        if estimated_tokens > snip_threshold && messages.len() > protected {
+            Self::microcompact(
+                messages,
+                self.config.compact_preserve_tail,
+                MICROCOMPACT_KEEP_RECENT,
+            );
+        }
+
+        // Re-estimate after microcompact.
+        let estimated_tokens = Self::estimate_tokens_from_messages(messages);
+
+        // --- Stage 2: Full compaction ---
+        if estimated_tokens > full_threshold
+            && tracker.compactions < MAX_COMPACTIONS_PER_RUN
+            && messages.len() > protected
+        {
+            info!(
+                agent = %self.config.name,
+                estimated_tokens,
+                threshold = full_threshold,
+                compaction = tracker.compactions + 1,
+                "context approaching limit, compacting"
+            );
+            self.emit(crate::chat_stream::ChatStreamEvent::Status {
+                message: "Compacting context...".into(),
+            });
+            self.compact_messages(messages, recent_files).await;
+            tracker.compactions += 1;
+            *has_attempted_reactive_compact = false;
+            transition = Some(LoopTransition::ContextCompacted);
+
+            // Save session checkpoint after compaction.
+            if let Some(ref sf) = self.config.session_file {
+                Self::save_session(messages, tracker, iterations, active_model, sf).await;
+            }
+        }
+
+        (transition, estimated_tokens)
+    }
+
+    // -----------------------------------------------------------------------
     // Memory
     // -----------------------------------------------------------------------
 
@@ -1872,10 +1937,10 @@ impl Agent {
     // Tool result persistence
     // -----------------------------------------------------------------------
 
-    /// Resolve or create the persist directory.
-    fn resolve_persist_dir(&self, created: &mut Option<PathBuf>) -> Option<PathBuf> {
-        if let Some(ref dir) = *created {
-            return Some(dir.clone());
+    /// Resolve or create the persist directory. Returns a reference to avoid cloning PathBuf.
+    fn resolve_persist_dir<'a>(&self, created: &'a mut Option<PathBuf>) -> Option<&'a Path> {
+        if created.is_some() {
+            return created.as_deref();
         }
         let dir = self.config.persist_dir.clone().unwrap_or_else(|| {
             std::env::temp_dir().join("aeqi-tool-results").join(format!(
@@ -1885,8 +1950,8 @@ impl Agent {
             ))
         });
         if std::fs::create_dir_all(&dir).is_ok() {
-            *created = Some(dir.clone());
-            Some(dir)
+            *created = Some(dir);
+            created.as_deref()
         } else {
             None
         }
