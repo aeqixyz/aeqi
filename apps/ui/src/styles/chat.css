@@ -1193,6 +1193,85 @@
   animation: c-fade-in 0.3s ease-out;
 }
 
+/* Session prompts bar */
+.asv-prompts-bar {
+  padding: 6px 16px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.asv-prompts-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.asv-prompt-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+}
+.asv-prompt-chip-text {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.asv-prompt-chip-x {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+}
+.asv-prompt-chip-x:hover { color: var(--error); }
+.asv-prompt-toggle {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.asv-prompt-toggle:hover { color: var(--text-secondary); }
+.asv-prompt-add {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.asv-prompt-input {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 6px 8px;
+  color: var(--text-primary);
+  resize: none;
+  outline: none;
+}
+.asv-prompt-input:focus { border-color: var(--border-hover); }
+.asv-prompt-add-actions {
+  display: flex;
+  gap: 6px;
+}
+.asv-prompt-add-btn,
+.asv-prompt-cancel-btn {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-base);
+  color: var(--text-secondary);
+}
+.asv-prompt-add-btn { background: var(--text-primary); color: var(--bg-base); border-color: var(--text-primary); }
+.asv-prompt-cancel-btn:hover { background: var(--bg-elevated); }
+
 /* Composer */
 .asv-composer {
   padding: 8px 16px 12px;

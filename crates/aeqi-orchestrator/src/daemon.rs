@@ -3653,12 +3653,21 @@ impl Daemon {
                             let agent_id_or_hint =
                                 agent_id_direct.as_deref().unwrap_or(&agent_hint);
 
+                            // Parse extra prompts from request (if provided by UI).
+                            let extra_prompts: Vec<aeqi_core::PromptEntry> = request
+                                .get("extra_prompts")
+                                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                                .unwrap_or_default();
+
+                            let mut spawn_opts = crate::session_manager::SpawnOptions::interactive();
+                            spawn_opts.extra_prompts = extra_prompts;
+
                             match session_manager
                                 .spawn_session(
                                     agent_id_or_hint,
                                     message,
                                     provider.clone(),
-                                    crate::session_manager::SpawnOptions::interactive(),
+                                    spawn_opts,
                                 )
                                 .await
                             {

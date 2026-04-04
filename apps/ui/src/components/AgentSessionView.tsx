@@ -164,6 +164,9 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
   }, [agentId, navigate]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  const [sessionPrompts, setSessionPrompts] = useState<string[]>([]);
+  const [showPromptInput, setShowPromptInput] = useState(false);
+  const [promptDraft, setPromptDraft] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
   const [liveToolEvents, setLiveToolEvents] = useState<ToolEvent[]>([]);
@@ -332,11 +335,20 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
     wsRef.current = ws;
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({
+      const payload: any = {
         message: messageText,
         agent_id: agentId || undefined,
         session_id: sessionId || undefined,
-      }));
+      };
+      // Include extra prompts only on first message (session creation)
+      if (!activeSessionId && sessionPrompts.length > 0) {
+        payload.extra_prompts = sessionPrompts.map((content) => ({
+          content,
+          position: "append",
+          scope: "self",
+        }));
+      }
+      ws.send(JSON.stringify(payload));
     };
 
     let fullText = "";
@@ -709,6 +721,48 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
 
         <div ref={messagesEnd} />
       </div>
+
+      {/* Session prompts (only visible before first message) */}
+      {!activeSessionId && (
+        <div className="asv-prompts-bar">
+          {sessionPrompts.length > 0 && (
+            <div className="asv-prompts-list">
+              {sessionPrompts.map((p, i) => (
+                <div key={i} className="asv-prompt-chip">
+                  <span className="asv-prompt-chip-text">{p.length > 60 ? p.slice(0, 60) + "..." : p}</span>
+                  <span className="asv-prompt-chip-x" onClick={() => setSessionPrompts((prev) => prev.filter((_, j) => j !== i))}>×</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {showPromptInput ? (
+            <div className="asv-prompt-add">
+              <textarea
+                className="asv-prompt-input"
+                placeholder="Add a prompt for this session..."
+                value={promptDraft}
+                onChange={(e) => setPromptDraft(e.target.value)}
+                rows={2}
+                autoFocus
+              />
+              <div className="asv-prompt-add-actions">
+                <button className="asv-prompt-add-btn" onClick={() => {
+                  if (promptDraft.trim()) {
+                    setSessionPrompts((prev) => [...prev, promptDraft.trim()]);
+                    setPromptDraft("");
+                    setShowPromptInput(false);
+                  }
+                }}>Add</button>
+                <button className="asv-prompt-cancel-btn" onClick={() => { setShowPromptInput(false); setPromptDraft(""); }}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <button className="asv-prompt-toggle" onClick={() => setShowPromptInput(true)}>
+              + add prompt
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Input box */}
       <div className="asv-composer">

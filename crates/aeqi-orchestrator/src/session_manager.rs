@@ -126,8 +126,8 @@ pub struct SpawnOptions {
     pub task_id: Option<String>,
     /// Session prompts to inject (prompt + tool filter). Multiple allowed.
     pub skills: Vec<String>,
-    /// Turn-level prompts. Re-read from disk before each API call.
-    pub turn_prompts: Vec<String>,
+    /// Extra prompt entries injected at session creation time (from UI, delegation, etc).
+    pub extra_prompts: Vec<aeqi_core::PromptEntry>,
     /// Close session automatically when agent.run() completes.
     /// Default: true. Set false for persistent/interactive sessions.
     pub auto_close: bool,
@@ -180,8 +180,8 @@ impl SpawnOptions {
         self
     }
 
-    pub fn with_turn_prompts(mut self, names: Vec<String>) -> Self {
-        self.turn_prompts.extend(names);
+    pub fn with_extra_prompts(mut self, prompts: Vec<aeqi_core::PromptEntry>) -> Self {
+        self.extra_prompts.extend(prompts);
         self
     }
 
@@ -326,16 +326,26 @@ impl SessionManager {
             Vec::new()
         };
 
-        // 2. Build system prompt string — agent's system_prompt + shared/project primers.
-        let mut system_prompt_parts: Vec<String> = Vec::new();
-        system_prompt_parts.push(agent_system_prompt);
-        if let Some(ref sp) = self.shared_primer {
-            system_prompt_parts.push(sp.clone());
-        }
-        if let Some(ref pp) = self.project_primer {
-            system_prompt_parts.push(pp.clone());
-        }
-        let mut system_prompt = system_prompt_parts.join("\n\n---\n\n");
+        // 2. Assemble prompts from ancestor chain + extra session prompts.
+        let mut system_prompt = if let Some(ref id) = agent_uuid {
+            let assembled = crate::prompt_assembly::assemble_prompts(
+                agent_registry,
+                id,
+                &opts.extra_prompts,
+            )
+            .await;
+            assembled.full_system_prompt()
+        } else {
+            // Fallback for unknown agents — use raw system_prompt + primers.
+            let mut parts = vec![agent_system_prompt];
+            if let Some(ref sp) = self.shared_primer {
+                parts.push(sp.clone());
+            }
+            if let Some(ref pp) = self.project_primer {
+                parts.push(pp.clone());
+            }
+            parts.join("\n\n---\n\n")
+        };
 
         // 3. Resolve workdir — use agent registry or fall back to cwd.
         let workdir = {
@@ -458,8 +468,8 @@ impl SessionManager {
             system_prompt = format!("{system_prompt}\n\n---\n\n{skill_context}");
         }
 
-        // 5d. Resolve turn prompts to TurnPromptSpecs.
-        let turn_prompt_names = &opts.turn_prompts;
+        // 5d. Resolve turn prompts from skills.
+        let turn_prompt_names: &[String] = &opts.skills;
         let mut turn_prompt_specs: Vec<aeqi_core::TurnPromptSpec> = Vec::new();
         for name in turn_prompt_names {
             if let Some(skill) = all_skills.iter().find(|s| s.name == *name) {
