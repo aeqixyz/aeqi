@@ -17,7 +17,7 @@ function Nav() {
     >
       <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
         <a href="/" className="text-[16px] font-medium tracking-tight text-black/40">
-          aeqi.ai
+          æqi.ai
         </a>
         <div className="flex items-center gap-5">
           <a
