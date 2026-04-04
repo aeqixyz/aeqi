@@ -33,25 +33,6 @@ function GitHubStars() {
   );
 }
 
-function ToriiGate() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      className="w-[14px] h-[14px]"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M2 6 C2 4.5, 12 3, 12 3 C12 3, 22 4.5, 22 6" />
-      <line x1="4" y1="9" x2="20" y2="9" />
-      <line x1="6" y1="6" x2="6" y2="22" />
-      <line x1="18" y1="6" x2="18" y2="22" />
-    </svg>
-  );
-}
-
 function Nav() {
   return (
     <motion.nav
@@ -70,14 +51,21 @@ function Nav() {
         >
           <span className="text-[#c0392b]">aeqi</span><span className="text-white/50">.ai</span>
         </a>
-        <a
-          href="https://app.aeqi.ai"
-          className="bg-white text-[#06060E] rounded-full px-4 py-1.5 text-[12px] font-semibold hover:bg-white/90 transition-colors flex items-center gap-1.5"
-          style={{ fontFamily: "'Space Grotesk', sans-serif" }}
-        >
-          Enter
-          <ToriiGate />
-        </a>
+        <div className="flex items-center gap-4">
+          <a
+            href="mailto:enterprise@aeqi.ai"
+            className="text-[12px] text-white/35 hover:text-white/60 transition-colors"
+          >
+            Enterprise
+          </a>
+          <a
+            href="https://app.aeqi.ai"
+            className="bg-white text-[#06060E] rounded-full px-4 py-1.5 text-[12px] font-semibold hover:bg-white/90 transition-colors"
+            style={{ fontFamily: "'Space Grotesk', sans-serif" }}
+          >
+            Get Started
+          </a>
+        </div>
       </div>
     </motion.nav>
   );
