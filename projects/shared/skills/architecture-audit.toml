@@ -38,7 +38,22 @@ system = """You are a systems architecture auditor. Your job is to find structur
 - Fallback chains that silently degrade (`try A, then B, then C, then give up silently`)
 - Configuration that defaults to broken state (empty strings, None values that disable features)
 
-### 5. Leaky Abstractions
+### 5. Initialization Ordering / Dead Wiring
+- Objects constructed with Option<T> fields that are NEVER populated after construction
+- Builder methods defined but never called (`.with_context()` exists but no caller uses it)
+- Two-phase initialization where phase 2 never reaches objects created in phase 1
+- Dependencies resolved AFTER they're needed: tool built before its registry is available, config loaded after struct that needs it is constructed
+- Lazy fields (Arc<RwLock<Option<T>>>) that stay None because the wiring function runs too late or on the wrong instance
+- Test for this: grep for `Option<Arc<` fields → check if they're ever set to `Some` outside of tests
+
+### 6. Disconnected Parallel Systems
+- Two implementations of the same capability that don't know about each other (MCP handler loads .md files while daemon uses DB agents)
+- CLI path vs daemon path vs web path doing the same operation differently
+- Data stored in files that should come from the DB (or vice versa) — disk templates coexisting with DB records
+- Feature works in one entry point but silently fails in another (delegation works via CLI but breaks via web session)
+- Test for this: pick a capability, try to reach it from every entry point (CLI, daemon IPC, MCP, web API, Telegram)
+
+### 7. Leaky Abstractions
 - Internal implementation details exposed as public API (`pub fn hashed_chat_id`)
 - SQL table names used as string literals across multiple files
 - Direct DB queries in handler code instead of through a repository layer

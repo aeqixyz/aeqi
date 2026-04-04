@@ -15,9 +15,9 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tracing::info;
 
-use crate::agent_registry::AgentRegistry;
 use crate::execution_events::{EventBroadcaster, ExecutionEvent};
 use crate::message::{Dispatch, DispatchBus, DispatchKind};
+use crate::registry::CompanyRegistry;
 
 // ---------------------------------------------------------------------------
 // UnifiedDelegateTool
@@ -33,8 +33,8 @@ pub struct UnifiedDelegateTool {
     dispatch_bus: Arc<DispatchBus>,
     /// The name of the calling agent (used as the "from" field in dispatches).
     agent_name: String,
-    /// Optional agent registry for looking up project-default agents.
-    agent_registry: Option<Arc<AgentRegistry>>,
+    /// Optional company registry — AgentRegistry is read lazily at call time.
+    registry: Option<Arc<CompanyRegistry>>,
     /// Project name for scoping default-agent lookups.
     project_name: Option<String>,
     /// Fallback target when no project-default agent is found (system escalation target).
@@ -48,7 +48,7 @@ impl UnifiedDelegateTool {
         Self {
             dispatch_bus,
             agent_name,
-            agent_registry: None,
+            registry: None,
             project_name: None,
             fallback_target: None,
             event_broadcaster: None,
@@ -61,16 +61,15 @@ impl UnifiedDelegateTool {
         self
     }
 
-    /// Set the agent registry and project context for subagent routing.
-    pub fn with_agent_context(
-        mut self,
-        registry: Arc<AgentRegistry>,
-        project_name: Option<String>,
-        fallback_target: String,
-    ) -> Self {
-        self.agent_registry = Some(registry);
+    /// Set the company registry for lazy agent registry lookups.
+    pub fn with_registry(mut self, registry: Arc<CompanyRegistry>) -> Self {
+        self.registry = Some(registry);
+        self
+    }
+
+    /// Set the project name for scoping default-agent lookups.
+    pub fn with_project(mut self, project_name: Option<String>) -> Self {
         self.project_name = project_name;
-        self.fallback_target = Some(fallback_target);
         self
     }
 
@@ -131,18 +130,31 @@ impl UnifiedDelegateTool {
     /// Tries the agent registry's project-default first, then falls back
     /// to the configured system escalation target.
     async fn resolve_subagent_target(&self) -> Option<String> {
-        // Try agent registry lookup first.
-        if let Some(ref registry) = self.agent_registry
-            && let Ok(Some(agent)) = registry
-                .default_for_project(self.project_name.as_deref())
-                .await
-        {
-            info!(
-                project = ?self.project_name,
-                agent = %agent.name,
-                "resolved project-default agent for subagent dispatch"
-            );
-            return Some(agent.name);
+        // Read AgentRegistry lazily from CompanyRegistry at call time.
+        if let Some(ref company_reg) = self.registry {
+            let agent_reg = company_reg.agent_registry.read().await;
+            if let Some(ref agent_reg) = *agent_reg {
+                // Try project-default agent.
+                if let Some(ref project) = self.project_name
+                    && let Ok(Some(agent)) = agent_reg.default_for_project(Some(project)).await
+                {
+                    info!(
+                        project = %project,
+                        agent = %agent.name,
+                        "resolved project-default agent for subagent dispatch"
+                    );
+                    return Some(agent.name.clone());
+                }
+
+                // Fallback to any active agent.
+                if let Ok(Some(agent)) = agent_reg.default_for_project(None).await {
+                    info!(
+                        agent = %agent.name,
+                        "resolved fallback active agent for subagent dispatch"
+                    );
+                    return Some(agent.name.clone());
+                }
+            }
         }
 
         // Fall back to system escalation target.

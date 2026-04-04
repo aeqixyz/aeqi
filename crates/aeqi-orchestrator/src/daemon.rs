@@ -3211,6 +3211,38 @@ impl Daemon {
                     }
                 },
 
+                "agent_info" => match &agent_registry {
+                    Some(reg) => {
+                        let name = request.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                        if name.is_empty() {
+                            serde_json::json!({"ok": false, "error": "name is required"})
+                        } else {
+                            match reg.get_active_by_name(name).await {
+                                Ok(Some(agent)) => serde_json::json!({
+                                    "ok": true,
+                                    "id": agent.id,
+                                    "name": agent.name,
+                                    "display_name": agent.display_name,
+                                    "template": agent.template,
+                                    "system_prompt": agent.system_prompt,
+                                    "project": agent.project,
+                                    "department_id": agent.department_id,
+                                    "model": agent.model,
+                                    "capabilities": agent.capabilities,
+                                    "status": agent.status,
+                                }),
+                                Ok(None) => {
+                                    serde_json::json!({"ok": false, "error": format!("agent '{}' not found", name)})
+                                }
+                                Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                            }
+                        }
+                    }
+                    None => {
+                        serde_json::json!({"ok": false, "error": "agent registry not available"})
+                    }
+                },
+
                 // ── Budget Policies ──
                 "budget_policies" => match &agent_registry {
                     Some(reg) => match reg.list_budget_policies().await {

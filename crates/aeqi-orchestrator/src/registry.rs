@@ -38,7 +38,7 @@ pub struct CompanyRegistry {
     /// Names from [[companies]] config (to distinguish from agent entries).
     pub config_project_names: Vec<String>,
     /// Agent registry for global per-agent concurrency enforcement.
-    agent_registry: RwLock<Option<Arc<crate::agent_registry::AgentRegistry>>>,
+    pub agent_registry: RwLock<Option<Arc<crate::agent_registry::AgentRegistry>>>,
     /// Shared primer injected into ALL agents.
     pub shared_primer: Option<String>,
     /// Default project primer (first project in config).

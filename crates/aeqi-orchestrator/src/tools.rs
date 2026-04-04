@@ -775,8 +775,11 @@ pub fn build_orchestration_tools(
         .first()
         .cloned()
         .unwrap_or_else(|| "*".to_string());
+    let project_name = registry.config_project_names.first().cloned();
     let mut delegate_tool =
-        crate::unified_delegate::UnifiedDelegateTool::new(dispatch_bus, leader_name.clone());
+        crate::unified_delegate::UnifiedDelegateTool::new(dispatch_bus, leader_name.clone())
+            .with_registry(registry.clone())
+            .with_project(project_name);
     if let Some(broadcaster) = event_broadcaster {
         delegate_tool = delegate_tool.with_event_broadcaster(broadcaster);
     }

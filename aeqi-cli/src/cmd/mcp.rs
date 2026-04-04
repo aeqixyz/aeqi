@@ -699,21 +699,40 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                         let extra_prompt =
                             args.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
 
-                        // 1. Load agent template
+                        // 1. Load agent template — try DB via IPC first, fall back to .md files
                         let agent_template = {
                             let mut found = String::new();
-                            for dir in &[
-                                base_dir.join("projects").join(project).join("agents"),
-                                base_dir.join("projects/shared/agents"),
-                            ] {
-                                let path = dir.join(format!("{agent_name}.md"));
-                                if path.exists()
-                                    && let Ok(content) = std::fs::read_to_string(&path)
-                                {
-                                    found = content;
-                                    break;
+
+                            // Try DB lookup via IPC (agent_info command)
+                            if let Ok(resp) = ipc_request_sync(
+                                &data_dir,
+                                &serde_json::json!({
+                                    "cmd": "agent_info",
+                                    "name": agent_name,
+                                }),
+                            ) && resp.get("ok").and_then(|v| v.as_bool()).unwrap_or(false)
+                                && let Some(sp) = resp.get("system_prompt").and_then(|v| v.as_str())
+                                && !sp.is_empty()
+                            {
+                                found = sp.to_string();
+                            }
+
+                            // Fall back to .md files on disk
+                            if found.is_empty() {
+                                for dir in &[
+                                    base_dir.join("projects").join(project).join("agents"),
+                                    base_dir.join("projects/shared/agents"),
+                                ] {
+                                    let path = dir.join(format!("{agent_name}.md"));
+                                    if path.exists()
+                                        && let Ok(content) = std::fs::read_to_string(&path)
+                                    {
+                                        found = content;
+                                        break;
+                                    }
                                 }
                             }
+
                             if found.is_empty() {
                                 return Err(anyhow::anyhow!("agent '{agent_name}' not found"));
                             }
