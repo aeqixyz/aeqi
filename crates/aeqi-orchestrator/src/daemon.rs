@@ -1031,7 +1031,7 @@ impl Daemon {
             return;
         };
         for w in &ready {
-            if let Some(mem) = engine.insight_stores.get(&w.project) {
+            if let Some(mem) = engine.insight_store.as_ref() {
                 let category = match w.category.as_str() {
                     "fact" => aeqi_core::traits::InsightCategory::Fact,
                     "procedure" => aeqi_core::traits::InsightCategory::Procedure,
@@ -1056,7 +1056,7 @@ impl Daemon {
                 debug!(
                     project = %w.project,
                     key = %w.key,
-                    "no memory store for project — write dropped"
+                    "no insight store available — write dropped"
                 );
             }
         }
@@ -1511,7 +1511,7 @@ impl Daemon {
                         request.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
 
                     if let Some(ref engine) = message_router {
-                        if let Some(mem) = engine.insight_stores.get(project) {
+                        if let Some(mem) = engine.insight_store.as_ref() {
                             let query_text = request
                                 .get("tags")
                                 .and_then(|v| v.as_array())
@@ -1563,7 +1563,7 @@ impl Daemon {
                     let key = request.get("key").and_then(|v| v.as_str()).unwrap_or("");
 
                     if let Some(ref engine) = message_router {
-                        if let Some(mem) = engine.insight_stores.get(project) {
+                        if let Some(mem) = engine.insight_store.as_ref() {
                             let q = aeqi_core::traits::InsightQuery::new(key, 1);
                             match mem.search(&q).await {
                                 Ok(entries) => {
@@ -1710,14 +1710,14 @@ impl Daemon {
                 }
 
                 "delete_notes" => {
-                    let project = request
+                    let _project = request
                         .get("project")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
                     let key = request.get("key").and_then(|v| v.as_str()).unwrap_or("");
 
                     if let Some(ref engine) = message_router {
-                        if let Some(mem) = engine.insight_stores.get(project) {
+                        if let Some(mem) = engine.insight_store.as_ref() {
                             // Search for the insight by key, then delete by id.
                             let q = aeqi_core::traits::InsightQuery::new(key, 5);
                             match mem.search(&q).await {
@@ -1945,7 +1945,7 @@ impl Daemon {
                     if key.is_empty() || content.is_empty() {
                         serde_json::json!({"ok": false, "error": "key and content are required"})
                     } else if let Some(ref engine) = message_router {
-                        if let Some(mem) = engine.insight_stores.get(project) {
+                        if let Some(mem) = engine.insight_store.as_ref() {
                             match mem
                                 .store(key, content, aeqi_core::traits::InsightCategory::Fact, None)
                                 .await
@@ -2537,7 +2537,7 @@ impl Daemon {
                 }
 
                 "memories" => {
-                    let project = request
+                    let _project = request
                         .get("project")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
@@ -2545,34 +2545,8 @@ impl Daemon {
                     let limit =
                         request.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
 
-                    if project.is_empty() {
-                        // List all projects with memory counts.
-                        let cwd = std::env::current_dir().unwrap_or_default();
-                        let mut project_memories = Vec::new();
-                        for entry in std::fs::read_dir(cwd.join("projects"))
-                            .into_iter()
-                            .flatten()
-                            .flatten()
-                        {
-                            let name = entry.file_name().to_string_lossy().to_string();
-                            let db_path = entry.path().join(".aeqi").join("memory.db");
-                            if db_path.exists() {
-                                let count = rusqlite::Connection::open(&db_path)
-                                    .and_then(|conn| {
-                                        conn.query_row("SELECT COUNT(*) FROM memories", [], |r| {
-                                            r.get::<_, i64>(0)
-                                        })
-                                    })
-                                    .unwrap_or(0);
-                                if count > 0 {
-                                    project_memories
-                                        .push(serde_json::json!({"project": name, "count": count}));
-                                }
-                            }
-                        }
-                        serde_json::json!({"ok": true, "projects": project_memories})
-                    } else if let Some(ref engine) = message_router {
-                        if let Some(mem) = engine.insight_stores.get(project) {
+                    if let Some(ref engine) = message_router {
+                        if let Some(mem) = engine.insight_store.as_ref() {
                             let agent_id_param = request.get("agent_id").and_then(|v| v.as_str());
 
                             let mut mq = aeqi_core::traits::InsightQuery::new(query, limit);
@@ -2609,20 +2583,16 @@ impl Daemon {
                 }
 
                 "memory_profile" => {
-                    let project = request
+                    let _project = request
                         .get("project")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
 
-                    if project.is_empty() {
-                        serde_json::json!({"ok": false, "error": "project parameter required"})
-                    } else {
-                        let cwd = std::env::current_dir().unwrap_or_default();
-                        let db_path = cwd
-                            .join("projects")
-                            .join(project)
-                            .join(".aeqi")
-                            .join("memory.db");
+                    {
+                        let aeqi_data_dir = std::env::var("HOME")
+                            .map(|h| PathBuf::from(h).join(".aeqi"))
+                            .unwrap_or_else(|_| PathBuf::from("/tmp"));
+                        let db_path = aeqi_data_dir.join("insights.db");
                         if !db_path.exists() {
                             serde_json::json!({"ok": true, "profile": {"static": [], "dynamic": []}})
                         } else if let Ok(conn) = rusqlite::Connection::open(&db_path) {
@@ -2634,7 +2604,7 @@ impl Daemon {
                                     categories.iter().map(|c| format!("LOWER('{c}')")).collect();
                                 let sql = format!(
                                     "SELECT id, key, content, category, scope, created_at \
-                                     FROM memories \
+                                     FROM insights \
                                      WHERE LOWER(category) IN ({}) \
                                      ORDER BY created_at DESC \
                                      LIMIT 20",
@@ -2678,28 +2648,24 @@ impl Daemon {
                 }
 
                 "memory_graph" => {
-                    let project = request
+                    let _project = request
                         .get("project")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
                     let limit =
                         request.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
 
-                    if project.is_empty() {
-                        serde_json::json!({"ok": false, "error": "project parameter required"})
-                    } else {
-                        let cwd = std::env::current_dir().unwrap_or_default();
-                        let db_path = cwd
-                            .join("projects")
-                            .join(project)
-                            .join(".aeqi")
-                            .join("memory.db");
+                    {
+                        let aeqi_data_dir = std::env::var("HOME")
+                            .map(|h| PathBuf::from(h).join(".aeqi"))
+                            .unwrap_or_else(|_| PathBuf::from("/tmp"));
+                        let db_path = aeqi_data_dir.join("insights.db");
                         if !db_path.exists() {
                             serde_json::json!({"ok": true, "nodes": [], "edges": []})
                         } else if let Ok(conn) = rusqlite::Connection::open(&db_path) {
                             let sql = format!(
                                 "SELECT id, key, content, category, created_at \
-                                 FROM memories \
+                                 FROM insights \
                                  ORDER BY created_at DESC \
                                  LIMIT {limit}"
                             );
@@ -2925,7 +2891,7 @@ impl Daemon {
 
                         // 1. Search project memories.
                         if let Some(ref engine) = message_router
-                            && let Some(mem) = engine.insight_stores.get(project)
+                            && let Some(mem) = engine.insight_store.as_ref()
                         {
                             let q = if query.is_empty() { project } else { query };
                             let mq = aeqi_core::traits::InsightQuery::new(q, limit);
@@ -2969,7 +2935,7 @@ impl Daemon {
                     if project.is_empty() || key.is_empty() || content.is_empty() {
                         serde_json::json!({"ok": false, "error": "project, key, and content required"})
                     } else if let Some(ref engine) = message_router {
-                        if let Some(mem) = engine.insight_stores.get(project) {
+                        if let Some(mem) = engine.insight_store.as_ref() {
                             let cat = match category {
                                 "procedure" => aeqi_core::traits::InsightCategory::Procedure,
                                 "preference" => aeqi_core::traits::InsightCategory::Preference,
@@ -2983,7 +2949,7 @@ impl Daemon {
                                 Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
                             }
                         } else {
-                            serde_json::json!({"ok": false, "error": format!("no memory store for project: {project}")})
+                            serde_json::json!({"ok": false, "error": format!("no insight store available: {project}")})
                         }
                     } else {
                         serde_json::json!({"ok": false, "error": "chat engine not initialized"})
@@ -3000,13 +2966,13 @@ impl Daemon {
                     if project.is_empty() || id.is_empty() {
                         serde_json::json!({"ok": false, "error": "project and id required"})
                     } else if let Some(ref engine) = message_router {
-                        if let Some(mem) = engine.insight_stores.get(project) {
+                        if let Some(mem) = engine.insight_store.as_ref() {
                             match mem.delete(id).await {
                                 Ok(_) => serde_json::json!({"ok": true}),
                                 Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
                             }
                         } else {
-                            serde_json::json!({"ok": false, "error": "no memory store for project"})
+                            serde_json::json!({"ok": false, "error": "no insight store available"})
                         }
                     } else {
                         serde_json::json!({"ok": false, "error": "chat engine not initialized"})
@@ -4156,13 +4122,13 @@ mod tests {
     #[test]
     fn event_buffer_supports_independent_cursors() {
         let mut buffer = EventBuffer::default();
-        buffer.push(ExecutionEvent::TaskStarted {
+        buffer.push(ExecutionEvent::QuestStarted {
             task_id: "t-1".into(),
             agent: "engineer".into(),
             project: "aeqi".into(),
             runtime_session: None,
         });
-        buffer.push(ExecutionEvent::TaskCompleted {
+        buffer.push(ExecutionEvent::QuestCompleted {
             task_id: "t-1".into(),
             outcome: "done".into(),
             confidence: 1.0,

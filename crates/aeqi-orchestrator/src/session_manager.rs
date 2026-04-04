@@ -208,8 +208,7 @@ pub struct SessionManager {
     event_store: Option<Arc<EventStore>>,
     shared_primer: Option<String>,
     project_primer: Option<String>,
-    insight_stores: HashMap<String, Arc<dyn Insight>>,
-    insight_stores_by_id: HashMap<String, Arc<dyn Insight>>,
+    insight_store: Option<Arc<dyn Insight>>,
     default_project: String,
 }
 
@@ -224,8 +223,7 @@ impl SessionManager {
             event_store: None,
             shared_primer: None,
             project_primer: None,
-            insight_stores: HashMap::new(),
-            insight_stores_by_id: HashMap::new(),
+            insight_store: None,
             default_project: String::new(),
         }
     }
@@ -239,8 +237,7 @@ impl SessionManager {
         default_model: String,
         event_broadcaster: Option<Arc<EventBroadcaster>>,
         event_store: Arc<EventStore>,
-        insight_stores: HashMap<String, Arc<dyn Insight>>,
-        insight_stores_by_id: HashMap<String, Arc<dyn Insight>>,
+        insight_store: Option<Arc<dyn Insight>>,
         default_project: String,
         shared_primer: Option<String>,
         project_primer: Option<String>,
@@ -252,8 +249,7 @@ impl SessionManager {
         self.default_model = default_model;
         self.event_broadcaster = event_broadcaster;
         self.event_store = Some(event_store);
-        self.insight_stores = insight_stores;
-        self.insight_stores_by_id = insight_stores_by_id;
+        self.insight_store = insight_store;
         self.default_project = default_project;
     }
 
@@ -359,19 +355,8 @@ impl SessionManager {
             Arc::new(aeqi_tools::WebSearchTool),
         ];
 
-        // 5. Resolve memory ��� try agent UUID, then default project.
-        let memory_for_agent: Option<Arc<dyn Insight>> = agent_uuid
-            .as_deref()
-            .and_then(|id| self.insight_stores_by_id.get(id))
-            .or_else(|| self.insight_stores.get(agent_id_or_hint))
-            .or_else(|| {
-                if !self.default_project.is_empty() {
-                    self.insight_stores.get(&self.default_project)
-                } else {
-                    self.insight_stores.values().next()
-                }
-            })
-            .cloned();
+        // 5. Resolve memory — single shared insight store.
+        let memory_for_agent: Option<Arc<dyn Insight>> = self.insight_store.clone();
 
         // Resolve graph DB path.
         let graph_project = if self.default_project.is_empty() {

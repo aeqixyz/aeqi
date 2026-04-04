@@ -201,10 +201,8 @@ pub struct MessageRouter {
     pub default_project: String,
     pub pending_tasks: Arc<Mutex<HashMap<String, PendingTask>>>,
     pub task_notify: Arc<tokio::sync::Notify>,
-    /// Per-project memory stores for knowledge-aware chat (keyed by project name).
-    pub insight_stores: HashMap<String, Arc<dyn Insight>>,
-    /// Per-project memory stores keyed by project UUID for id-based lookups.
-    pub insight_stores_by_id: HashMap<String, Arc<dyn Insight>>,
+    /// Single insight store for all agents (scoped by agent_id within queries).
+    pub insight_store: Option<Arc<dyn Insight>>,
     /// Wake signal for the global Scheduler.
     pub scheduler_wake: Arc<tokio::sync::Notify>,
 }
@@ -438,7 +436,7 @@ impl MessageRouter {
 
         let text = Self::completion_text(&status, reason);
         let event_type = match status {
-            CompletionStatus::Done => "task_completed",
+            CompletionStatus::Done => "quest_completed",
             CompletionStatus::Blocked => "task_blocked",
             CompletionStatus::Cancelled => "task_cancelled",
             CompletionStatus::TimedOut => "task_timed_out",
@@ -888,20 +886,24 @@ impl MessageRouter {
         let memory_context = if let (Some(project), Some(q)) = (project_hint, query) {
             self.build_memory_context(project, q).await
         } else if let Some(q) = query {
-            // Global query — search all projects.
-            let mut all_ctx = Vec::new();
-            for (name, mem) in &self.insight_stores {
-                let mq = InsightQuery::new(q, 3);
+            // Global query — search single insight store.
+            if let Some(ref mem) = self.insight_store {
+                let mq = InsightQuery::new(q, 5);
                 if let Ok(results) = mem.search(&mq).await {
-                    for entry in results {
-                        all_ctx.push(format!("  • [{}] {}: {}", name, entry.key, entry.content));
+                    if results.is_empty() {
+                        None
+                    } else {
+                        let lines: Vec<String> = results
+                            .iter()
+                            .map(|entry| format!("  • {}: {}", entry.key, entry.content))
+                            .collect();
+                        Some(format!("Relevant knowledge:\n{}", lines.join("\n")))
                     }
+                } else {
+                    None
                 }
-            }
-            if all_ctx.is_empty() {
-                None
             } else {
-                Some(format!("Relevant knowledge:\n{}", all_ctx.join("\n")))
+                None
             }
         } else {
             None
@@ -1022,9 +1024,9 @@ impl MessageRouter {
         }
     }
 
-    /// Search memory for context relevant to a query in a specific project.
-    pub async fn build_memory_context(&self, project: &str, query: &str) -> Option<String> {
-        let mem = self.insight_stores.get(project)?;
+    /// Search memory for context relevant to a query.
+    pub async fn build_memory_context(&self, _project: &str, query: &str) -> Option<String> {
+        let mem = self.insight_store.as_ref()?;
         let mq = InsightQuery::new(query, 5);
         let results = mem.search(&mq).await.ok()?;
         if results.is_empty() {
@@ -1037,12 +1039,12 @@ impl MessageRouter {
         Some(ctx)
     }
 
-    /// Store a note to the project's memory.
-    pub async fn store_note(&self, project: &str, key: &str, content: &str) -> Result<String> {
+    /// Store a note to the insight store.
+    pub async fn store_note(&self, _project: &str, key: &str, content: &str) -> Result<String> {
         let mem = self
-            .insight_stores
-            .get(project)
-            .ok_or_else(|| anyhow::anyhow!("no memory store for project: {project}"))?;
+            .insight_store
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no insight store available"))?;
         let id = mem
             .store(key, content, aeqi_core::traits::InsightCategory::Fact, None)
             .await?;

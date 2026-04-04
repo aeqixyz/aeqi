@@ -70,7 +70,7 @@ impl SqliteInsights {
                 content TEXT NOT NULL,
                 category TEXT NOT NULL DEFAULT 'fact',
                 scope TEXT NOT NULL DEFAULT 'domain',
-                entity_id TEXT,
+                agent_id TEXT,
                 session_id TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT
@@ -85,7 +85,7 @@ impl SqliteInsights {
         Self::migrate(&conn)?;
 
         conn.execute_batch(
-            "CREATE INDEX IF NOT EXISTS idx_insights_entity ON insights(entity_id);",
+            "CREATE INDEX IF NOT EXISTS idx_insights_agent_id ON insights(agent_id);",
         )?;
 
         let fts_exists: bool = conn.query_row(
@@ -215,14 +215,14 @@ impl SqliteInsights {
         if !has_scope {
             conn.execute_batch(
                 "ALTER TABLE insights ADD COLUMN scope TEXT NOT NULL DEFAULT 'domain';
-                 ALTER TABLE insights ADD COLUMN entity_id TEXT;
+                 ALTER TABLE insights ADD COLUMN agent_id TEXT;
                  CREATE INDEX IF NOT EXISTS idx_insights_scope ON insights(scope);
-                 CREATE INDEX IF NOT EXISTS idx_insights_entity ON insights(entity_id);",
+                 CREATE INDEX IF NOT EXISTS idx_insights_agent_id ON insights(agent_id);",
             )?;
-            debug!("migrated insights table: added scope + entity_id columns");
+            debug!("migrated insights table: added scope + agent_id columns");
         }
 
-        // Rename companion_id → entity_id (for DBs created before the rename).
+        // Rename companion_id → agent_id (for DBs created before the rename).
         let has_companion: bool = conn
             .prepare(
                 "SELECT COUNT(*) FROM pragma_table_info('insights') WHERE name='companion_id'",
@@ -230,15 +230,27 @@ impl SqliteInsights {
             .query_row([], |row| row.get(0))?;
         if has_companion {
             conn.execute_batch(
-                "ALTER TABLE insights RENAME COLUMN companion_id TO entity_id;
+                "ALTER TABLE insights RENAME COLUMN companion_id TO agent_id;
                  UPDATE insights SET scope = 'entity' WHERE scope = 'companion';",
             )?;
-            // Recreate index under new name.
             conn.execute_batch(
                 "DROP INDEX IF EXISTS idx_insights_companion;
-                 CREATE INDEX IF NOT EXISTS idx_insights_entity ON insights(entity_id);",
+                 CREATE INDEX IF NOT EXISTS idx_insights_agent_id ON insights(agent_id);",
             )?;
-            debug!("migrated: companion_id → entity_id");
+            debug!("migrated: companion_id → agent_id");
+        }
+
+        // Rename entity_id → agent_id (for DBs created before this rename).
+        let has_entity_id: bool = conn
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('insights') WHERE name='entity_id'")?
+            .query_row([], |row| row.get(0))?;
+        if has_entity_id {
+            conn.execute_batch("ALTER TABLE insights RENAME COLUMN entity_id TO agent_id;")?;
+            conn.execute_batch(
+                "DROP INDEX IF EXISTS idx_insights_entity;
+                 CREATE INDEX IF NOT EXISTS idx_insights_agent_id ON insights(agent_id);",
+            )?;
+            debug!("migrated: entity_id → agent_id");
         }
 
         Ok(())
@@ -309,7 +321,7 @@ impl SqliteInsights {
         let mut idx = 2usize;
 
         if let Some(ref agent_id) = query.agent_id {
-            conditions.push(format!("m.entity_id = ?{idx}"));
+            conditions.push(format!("m.agent_id = ?{idx}"));
             params.push(Box::new(agent_id.clone()));
             idx += 1;
         }
@@ -317,7 +329,7 @@ impl SqliteInsights {
         let where_clause = conditions.join(" AND ");
 
         let sql = format!(
-            "SELECT m.id, m.key, m.content, m.category, m.entity_id,
+            "SELECT m.id, m.key, m.content, m.category, m.agent_id,
                     m.created_at, m.session_id, bm25(insights_fts) as rank
              FROM insights_fts f
              JOIN insights m ON m.rowid = f.rowid
@@ -371,7 +383,7 @@ impl SqliteInsights {
         let mut idx = 1usize;
 
         if let Some(ref agent_id) = query.agent_id {
-            conditions.push(format!("m.entity_id = ?{idx}"));
+            conditions.push(format!("m.agent_id = ?{idx}"));
             params.push(Box::new(agent_id.clone()));
             idx += 1;
         }
@@ -424,7 +436,7 @@ impl SqliteInsights {
             .collect::<Vec<_>>()
             .join(",");
         let sql = format!(
-            "SELECT id, key, content, category, entity_id, created_at, session_id
+            "SELECT id, key, content, category, agent_id, created_at, session_id
              FROM insights WHERE id IN ({placeholders})"
         );
         let params: Vec<&dyn rusqlite::types::ToSql> = ids
@@ -739,7 +751,7 @@ impl Insight for SqliteInsights {
         {
             let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("lock: {e}"))?;
             conn.execute(
-                "INSERT INTO insights (id, key, content, category, entity_id, created_at)
+                "INSERT INTO insights (id, key, content, category, agent_id, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 rusqlite::params![id, key, content, cat, agent_id, now],
             )?;

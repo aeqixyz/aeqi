@@ -1,6 +1,6 @@
 use aeqi_core::SecretStore;
 use aeqi_core::config::TelegramChatRouteConfig;
-use aeqi_core::traits::{Channel, Insight};
+use aeqi_core::traits::Channel;
 use aeqi_gates::TelegramChannel;
 use aeqi_orchestrator::tools::build_orchestration_tools;
 use aeqi_orchestrator::{
@@ -70,33 +70,19 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             // Pre-create task notify so the completion listener and leader agent project share it.
             let fa_task_notify: Arc<tokio::sync::Notify> = Arc::new(tokio::sync::Notify::new());
 
-            // Build per-project memory stores for knowledge-aware chat.
-            let mut chat_insight_stores: HashMap<String, Arc<dyn aeqi_core::traits::Insight>> =
-                HashMap::new();
-            for project_cfg in &config.agent_spawns {
-                if let Ok(mem) = open_insights(&config, Some(&project_cfg.name)) {
-                    chat_insight_stores.insert(project_cfg.name.clone(), Arc::new(mem));
-                }
-            }
-            info!(
-                "chat memory stores initialized for {} projects",
-                chat_insight_stores.len()
-            );
+            // Open a single insights DB for the entire daemon.
+            let shared_insight_store: Option<Arc<dyn aeqi_core::traits::Insight>> =
+                match open_insights(&config) {
+                    Ok(mem) => {
+                        info!("insight store initialized (single DB)");
+                        Some(Arc::new(mem) as Arc<dyn aeqi_core::traits::Insight>)
+                    }
+                    Err(e) => {
+                        warn!("failed to open insight store: {e}");
+                        None
+                    }
+                };
 
-            // Build UUID-keyed memory stores from the same project memory stores.
-            let mut insight_stores_by_id: HashMap<String, Arc<dyn aeqi_core::traits::Insight>> =
-                HashMap::new();
-            for project_cfg in &config.agent_spawns {
-                if let (Some(id), Some(mem)) =
-                    (&project_cfg.id, chat_insight_stores.get(&project_cfg.name))
-                {
-                    insight_stores_by_id.insert(id.clone(), mem.clone());
-                }
-            }
-
-            // Clone memory stores for SessionManager (MessageRouter consumes the originals).
-            let sm_insight_stores = chat_insight_stores.clone();
-            let sm_insight_stores_by_id = insight_stores_by_id.clone();
             let sm_default_project = config
                 .agent_spawns
                 .first()
@@ -150,8 +136,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     default_project: sm_default_project.clone(),
                     pending_tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                     task_notify: fa_task_notify.clone(),
-                    insight_stores: chat_insight_stores,
-                    insight_stores_by_id,
+                    insight_store: shared_insight_store.clone(),
                 })
             });
 
@@ -281,16 +266,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 let mut fa_tools: Vec<Arc<dyn aeqi_core::traits::Tool>> =
                     build_project_tools(&fa_workdir, &fa_tasks_dir, &fa_prefix, None);
                 let fa_memory: Option<Arc<dyn aeqi_core::traits::Insight>> =
-                    match open_insights(&config, None) {
-                        Ok(m) => {
-                            info!("leader agent memory initialized");
-                            Some(Arc::new(m))
-                        }
-                        Err(e) => {
-                            warn!("failed to open leader agent memory: {e}");
-                            None
-                        }
-                    };
+                    shared_insight_store.clone();
                 let default_project = config
                     .agent_spawns
                     .first()
@@ -582,10 +558,8 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 s.session_store = session_store.clone();
                 let trigger_store = Arc::new(agent_reg.trigger_store());
                 s.trigger_store = Some(trigger_store.clone());
-                // Wire memory for the scheduler (uses leader or first project memory).
-                if let Ok(mem) = open_insights(&config, None) {
-                    s.insight_store = Some(Arc::new(mem) as Arc<dyn Insight>);
-                }
+                // Wire memory for the scheduler (shared single store).
+                s.insight_store = shared_insight_store.clone();
                 Arc::new(s)
             };
 
@@ -637,8 +611,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     daemon.default_model.clone(),
                     Some(daemon.event_broadcaster.clone()),
                     daemon.event_store.clone(),
-                    sm_insight_stores,
-                    sm_insight_stores_by_id,
+                    shared_insight_store,
                     sm_default_project,
                     config.shared_primer.clone(),
                     config.agent_spawns.first().and_then(|c| c.primer.clone()),
@@ -846,7 +819,7 @@ async fn telegram_message_loop(
         tokio::spawn(async move {
             loop {
                 match event_rx.recv().await {
-                    Ok(aeqi_orchestrator::ExecutionEvent::TaskCompleted {
+                    Ok(aeqi_orchestrator::ExecutionEvent::QuestCompleted {
                         task_id,
                         outcome,
                         cost_usd,

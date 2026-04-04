@@ -190,10 +190,10 @@ pub(crate) async fn cmd_doctor(
                         };
                         println!("    Skills: {skill_count} | Pipelines: {pipeline_count}");
 
-                        // Check memory DB
+                        // Check legacy per-project memory DB
                         let mem_db = d.join(".aeqi").join("memory.db");
                         if mem_db.exists() {
-                            println!("    Memory: {}", mem_db.display());
+                            println!("    Memory (legacy): {}", mem_db.display());
                         }
                     }
                     Err(_) => {
@@ -250,10 +250,10 @@ pub(crate) async fn cmd_doctor(
                 }
             }
 
-            // Check global memory DB.
-            let mem_path = config.data_dir().join("memory.db");
+            // Check insights DB.
+            let mem_path = config.data_dir().join("insights.db");
             println!(
-                "[{}] Global memory: {}",
+                "[{}] Insights DB: {}",
                 if mem_path.exists() { "OK" } else { "INFO" },
                 mem_path.display()
             );

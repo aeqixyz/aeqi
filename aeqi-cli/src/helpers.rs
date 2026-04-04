@@ -1,4 +1,3 @@
-use crate::identity::Identity;
 use aeqi_core::traits::{Provider, Tool};
 use aeqi_core::{AEQIConfig, ProviderKind, SecretStore};
 use anyhow::{Context, Result};
@@ -19,8 +18,8 @@ use aeqi_providers::{AnthropicProvider, OllamaProvider, OpenRouterEmbedder, Open
 use aeqi_quests::QuestBoard;
 use aeqi_tools::{
     ExecutePlanTool, FileEditTool, FileReadTool, FileWriteTool, GitWorktreeTool, GlobTool,
-    GrepTool, ListDirTool, PorkbunTool, SecretsTool, ShellTool, TaskCloseTool, TaskCreateTool,
-    TaskDepTool, TaskReadyTool, TaskShowTool, TaskUpdateTool,
+    GrepTool, ListDirTool, PorkbunTool, QuestCloseTool, QuestCreateTool, QuestDepTool,
+    QuestReadyTool, QuestShowTool, QuestUpdateTool, SecretsTool, ShellTool,
 };
 
 use std::path::{Path, PathBuf};
@@ -267,23 +266,23 @@ pub(crate) fn build_project_tools(
         Arc::new(GlobTool::new(workdir.to_path_buf())),
     ];
 
-    // Add task tools (each gets its own store instance).
-    if let Ok(t) = TaskCreateTool::new(tasks_dir.to_path_buf(), prefix.to_string()) {
+    // Add quest tools (each gets its own store instance).
+    if let Ok(t) = QuestCreateTool::new(tasks_dir.to_path_buf(), prefix.to_string()) {
         tools.push(Arc::new(t));
     }
-    if let Ok(t) = TaskReadyTool::new(tasks_dir.to_path_buf()) {
+    if let Ok(t) = QuestReadyTool::new(tasks_dir.to_path_buf()) {
         tools.push(Arc::new(t));
     }
-    if let Ok(t) = TaskUpdateTool::new(tasks_dir.to_path_buf()) {
+    if let Ok(t) = QuestUpdateTool::new(tasks_dir.to_path_buf()) {
         tools.push(Arc::new(t));
     }
-    if let Ok(t) = TaskCloseTool::new(tasks_dir.to_path_buf()) {
+    if let Ok(t) = QuestCloseTool::new(tasks_dir.to_path_buf()) {
         tools.push(Arc::new(t));
     }
-    if let Ok(t) = TaskShowTool::new(tasks_dir.to_path_buf()) {
+    if let Ok(t) = QuestShowTool::new(tasks_dir.to_path_buf()) {
         tools.push(Arc::new(t));
     }
-    if let Ok(t) = TaskDepTool::new(tasks_dir.to_path_buf()) {
+    if let Ok(t) = QuestDepTool::new(tasks_dir.to_path_buf()) {
         tools.push(Arc::new(t));
     }
 
@@ -325,16 +324,8 @@ pub(crate) fn open_tasks_for_project(project_name: &str) -> Result<QuestBoard> {
     QuestBoard::open(&tasks_dir)
 }
 
-pub(crate) fn open_insights(
-    config: &AEQIConfig,
-    project_name: Option<&str>,
-) -> Result<SqliteInsights> {
-    let db_path = if let Some(name) = project_name {
-        let project_dir = find_project_dir(name)?;
-        project_dir.join(".aeqi").join("memory.db")
-    } else {
-        config.data_dir().join("memory.db")
-    };
+pub(crate) fn open_insights(config: &AEQIConfig) -> Result<SqliteInsights> {
+    let db_path = config.data_dir().join("insights.db");
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
@@ -381,22 +372,118 @@ pub(crate) fn format_agent_org_hint(_config: &AEQIConfig, _agent_name: &str) -> 
     String::new()
 }
 
-pub(crate) fn augment_identity_with_org_context(
-    config: &AEQIConfig,
-    mut identity: Identity,
-    _agent_name: Option<&str>,
-    _project_name: Option<&str>,
-) -> Identity {
+/// Load an optional markdown file, returning `None` if missing or empty.
+fn load_optional_file(dir: &std::path::Path, filename: &str) -> Result<Option<String>> {
+    let path = dir.join(filename);
+    match std::fs::read_to_string(&path) {
+        Ok(content) if content.trim().is_empty() => Ok(None),
+        Ok(content) => Ok(Some(content)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(anyhow::anyhow!("failed to read {}: {e}", path.display())),
+    }
+}
+
+/// Build a system prompt string from identity files in agent + optional project directories.
+pub(crate) fn load_system_prompt(
+    agent_dir: &std::path::Path,
+    domain_dir: Option<&std::path::Path>,
+) -> String {
+    let shared_dir = agent_dir.parent().map(|p| p.join("shared"));
+
+    let mut parts = Vec::new();
+
+    // Shared workflow.
+    if let Some(ref sd) = shared_dir {
+        if let Ok(Some(v)) = load_optional_file(sd, "WORKFLOW.md") {
+            parts.push(format!("# Shared Workflow\n\n{v}"));
+        }
+    }
+
+    // Agent-level files.
+    for (heading, file) in [
+        ("Persona", "PERSONA.md"),
+        ("Identity", "IDENTITY.md"),
+        ("Evolution", "EVOLUTION.md"),
+        ("Operational Instructions", "OPERATIONAL.md"),
+    ] {
+        if let Ok(Some(v)) = load_optional_file(agent_dir, file) {
+            parts.push(format!("# {heading}\n\n{v}"));
+        }
+    }
+
+    // Project-level files.
+    if let Some(dd) = domain_dir {
+        if let Ok(Some(v)) = load_optional_file(dd, "AGENTS.md") {
+            parts.push(format!("# Operating Instructions\n\n{v}"));
+        }
+        if let Ok(Some(v)) = load_optional_file(dd, "KNOWLEDGE.md") {
+            parts.push(format!("# Project Knowledge\n\n{v}"));
+        }
+    }
+
+    // Agent preferences + memory (at end, matching original order).
+    if let Ok(Some(v)) = load_optional_file(agent_dir, "PREFERENCES.md") {
+        parts.push(format!("# Architect Preferences\n\n{v}"));
+    }
+    if let Ok(Some(v)) = load_optional_file(agent_dir, "MEMORY.md") {
+        parts.push(format!("# Persistent Memory\n\n{v}"));
+    }
+
+    if parts.is_empty() {
+        "You are a helpful AI agent.".to_string()
+    } else {
+        parts.join("\n\n---\n\n")
+    }
+}
+
+/// Build a system prompt from a single directory (loads all files from one dir).
+pub(crate) fn load_system_prompt_from_dir(dir: &std::path::Path) -> String {
+    let shared_dir = dir.parent().map(|p| p.join("shared"));
+
+    let mut parts = Vec::new();
+
+    if let Some(ref sd) = shared_dir {
+        if let Ok(Some(v)) = load_optional_file(sd, "WORKFLOW.md") {
+            parts.push(format!("# Shared Workflow\n\n{v}"));
+        }
+    }
+
+    for (heading, file) in [
+        ("Persona", "PERSONA.md"),
+        ("Identity", "IDENTITY.md"),
+        ("Evolution", "EVOLUTION.md"),
+        ("Operational Instructions", "OPERATIONAL.md"),
+        ("Operating Instructions", "AGENTS.md"),
+        ("Project Knowledge", "KNOWLEDGE.md"),
+    ] {
+        if let Ok(Some(v)) = load_optional_file(dir, file) {
+            parts.push(format!("# {heading}\n\n{v}"));
+        }
+    }
+
+    if let Ok(Some(v)) = load_optional_file(dir, "PREFERENCES.md") {
+        parts.push(format!("# Architect Preferences\n\n{v}"));
+    }
+    if let Ok(Some(v)) = load_optional_file(dir, "MEMORY.md") {
+        parts.push(format!("# Persistent Memory\n\n{v}"));
+    }
+
+    if parts.is_empty() {
+        "You are a helpful AI agent.".to_string()
+    } else {
+        parts.join("\n\n---\n\n")
+    }
+}
+
+/// Append org context (team leader info) to a system prompt string.
+pub(crate) fn augment_prompt_with_org_context(config: &AEQIConfig, prompt: &str) -> String {
     let leader = config.leader();
     let section = format!("# Team Context\n\nSystem leader: {leader}");
-    let existing = identity.operational.unwrap_or_default();
-    identity.operational = Some(if existing.is_empty() {
+    if prompt.is_empty() || prompt == "You are a helpful AI agent." {
         section
     } else {
-        format!("{existing}\n\n---\n\n{section}")
-    });
-
-    identity
+        format!("{prompt}\n\n---\n\n{section}")
+    }
 }
 
 pub(crate) async fn handle_fast_lane(

@@ -1008,13 +1008,13 @@ impl Tool for TriggerManageTool {
                         });
                     }
                     let pattern = match event {
-                        "task_completed" => crate::trigger::EventPattern::TaskCompleted {
+                        "quest_completed" => crate::trigger::EventPattern::QuestCompleted {
                             project: args
                                 .get("project_filter")
                                 .and_then(|v| v.as_str())
                                 .map(String::from),
                         },
-                        "task_failed" => crate::trigger::EventPattern::TaskFailed {
+                        "quest_failed" => crate::trigger::EventPattern::QuestFailed {
                             project: args
                                 .get("project_filter")
                                 .and_then(|v| v.as_str())
@@ -1181,7 +1181,7 @@ impl Tool for TriggerManageTool {
                     },
                     "event_pattern": {
                         "type": "string",
-                        "enum": ["task_completed", "task_failed", "tool_call_completed"],
+                        "enum": ["quest_completed", "quest_failed", "tool_call_completed"],
                         "description": "Event to react to"
                     },
                     "cooldown_secs": {

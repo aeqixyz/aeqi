@@ -7,11 +7,11 @@ use crate::helpers::{load_config, open_insights};
 pub(crate) async fn cmd_recall(
     config_path: &Option<PathBuf>,
     query: &str,
-    project_name: Option<&str>,
+    _project_name: Option<&str>,
     top_k: usize,
 ) -> Result<()> {
     let (config, _) = load_config(config_path)?;
-    let memory = open_insights(&config, project_name)?;
+    let memory = open_insights(&config)?;
 
     let results = memory
         .search(&aeqi_core::traits::InsightQuery::new(query, top_k))
@@ -49,7 +49,7 @@ pub(crate) async fn cmd_remember(
     project_name: Option<&str>,
 ) -> Result<()> {
     let (config, _) = load_config(config_path)?;
-    let memory = open_insights(&config, project_name)?;
+    let memory = open_insights(&config)?;
 
     let id = memory
         .store(key, content, aeqi_core::traits::InsightCategory::Fact, None)

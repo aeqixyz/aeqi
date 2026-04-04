@@ -1,7 +1,7 @@
 use aeqi_core::chat_stream::ChatStreamEvent;
 /// Real-time execution events streamed from workers to observers.
 ///
-/// Workers publish events through an [`EventBroadcaster`] during task execution.
+/// Workers publish events through an [`EventBroadcaster`] during quest execution.
 /// Dashboard WebSocket handlers, logging pipelines, and other consumers subscribe
 /// to receive events as they happen. This replaces polling-based progress tracking
 /// with push-based streaming.
@@ -15,12 +15,12 @@ use crate::runtime::{RuntimeExecution, RuntimeSession};
 // ExecutionEvent
 // ---------------------------------------------------------------------------
 
-/// An event emitted during worker task execution.
+/// An event emitted during worker quest execution.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "event_type")]
 pub enum ExecutionEvent {
-    /// Worker has begun executing a task.
-    TaskStarted {
+    /// Worker has begun executing a quest.
+    QuestStarted {
         task_id: String,
         agent: String,
         project: String,
@@ -50,8 +50,8 @@ pub enum ExecutionEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         runtime: Option<RuntimeExecution>,
     },
-    /// Task completed successfully.
-    TaskCompleted {
+    /// Quest completed successfully.
+    QuestCompleted {
         task_id: String,
         outcome: String,
         confidence: f32,
@@ -61,8 +61,8 @@ pub enum ExecutionEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         runtime: Option<RuntimeExecution>,
     },
-    /// Task failed.
-    TaskFailed {
+    /// Quest failed.
+    QuestFailed {
         task_id: String,
         reason: String,
         artifacts_preserved: bool,
@@ -137,24 +137,24 @@ pub enum ExecutionEvent {
 }
 
 impl ExecutionEvent {
-    /// Extract event type, agent_id, task_id, and content for EventStore persistence.
+    /// Extract event type, agent_id, quest_id, and content for EventStore persistence.
     fn to_event_fields(&self) -> (String, Option<String>, Option<String>, serde_json::Value) {
         let content = serde_json::to_value(self).unwrap_or(serde_json::Value::Null);
         match self {
-            Self::TaskStarted { task_id, agent, .. } => (
-                "execution.task_started".into(),
+            Self::QuestStarted { task_id, agent, .. } => (
+                "execution.quest_started".into(),
                 Some(agent.clone()),
                 Some(task_id.clone()),
                 content,
             ),
-            Self::TaskCompleted { task_id, .. } => (
-                "execution.task_completed".into(),
+            Self::QuestCompleted { task_id, .. } => (
+                "execution.quest_completed".into(),
                 None,
                 Some(task_id.clone()),
                 content,
             ),
-            Self::TaskFailed { task_id, .. } => (
-                "execution.task_failed".into(),
+            Self::QuestFailed { task_id, .. } => (
+                "execution.quest_failed".into(),
                 None,
                 Some(task_id.clone()),
                 content,
@@ -251,14 +251,14 @@ impl EventBroadcaster {
         // Persist to events table (fire-and-forget).
         if let Some(ref store) = self.event_store {
             let store = store.clone();
-            let (event_type, agent_id, task_id, content) = event.to_event_fields();
+            let (event_type, agent_id, quest_id, content) = event.to_event_fields();
             tokio::spawn(async move {
                 let _ = store
                     .emit(
                         &event_type,
                         agent_id.as_deref(),
                         None,
-                        task_id.as_deref(),
+                        quest_id.as_deref(),
                         &content,
                     )
                     .await;
@@ -301,7 +301,7 @@ mod tests {
         let broadcaster = EventBroadcaster::new();
         let mut rx = broadcaster.subscribe();
 
-        broadcaster.publish(ExecutionEvent::TaskStarted {
+        broadcaster.publish(ExecutionEvent::QuestStarted {
             task_id: "t-1".into(),
             agent: "engineer".into(),
             project: "aeqi".into(),
@@ -310,7 +310,7 @@ mod tests {
 
         let event = rx.recv().await.unwrap();
         match event {
-            ExecutionEvent::TaskStarted {
+            ExecutionEvent::QuestStarted {
                 task_id,
                 agent,
                 project,
@@ -320,7 +320,7 @@ mod tests {
                 assert_eq!(agent, "engineer");
                 assert_eq!(project, "aeqi");
             }
-            _ => panic!("expected TaskStarted"),
+            _ => panic!("expected QuestStarted"),
         }
     }
 
@@ -371,7 +371,7 @@ mod tests {
         assert_eq!(broadcaster.subscriber_count(), 0);
 
         // This must not panic even with zero subscribers.
-        broadcaster.publish(ExecutionEvent::TaskFailed {
+        broadcaster.publish(ExecutionEvent::QuestFailed {
             task_id: "t-3".into(),
             reason: "build error".into(),
             artifacts_preserved: false,
@@ -380,7 +380,7 @@ mod tests {
 
         // Still functional after publishing to zero subscribers.
         let mut rx = broadcaster.subscribe();
-        broadcaster.publish(ExecutionEvent::TaskCompleted {
+        broadcaster.publish(ExecutionEvent::QuestCompleted {
             task_id: "t-4".into(),
             outcome: "done".into(),
             confidence: 0.95,
@@ -391,7 +391,7 @@ mod tests {
         });
 
         let event = rx.recv().await.unwrap();
-        assert!(matches!(event, ExecutionEvent::TaskCompleted { .. }));
+        assert!(matches!(event, ExecutionEvent::QuestCompleted { .. }));
     }
 
     #[tokio::test]

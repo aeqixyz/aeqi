@@ -74,15 +74,21 @@ function Nav() {
 function Backdrop() {
   return (
     <>
-      <div
-        className="fixed inset-0 z-0 bg-cover bg-no-repeat"
+      <video
+        autoPlay
+        muted
+        loop
+        playsInline
+        className="fixed inset-0 z-0 w-full h-full object-cover"
         style={{
-          backgroundImage: "url('/bg.jpg')",
-          backgroundPosition: "center 35%",
+          objectPosition: "center 35%",
           filter: "blur(6px) saturate(1.4) brightness(0.3) contrast(1.3)",
           transform: "scale(1.03)",
         }}
-      />
+        poster="/bg.jpg"
+      >
+        <source src="/bg.mp4" type="video/mp4" />
+      </video>
       <div
         className="fixed inset-0 z-0"
         style={{ background: "rgba(6, 6, 18, 0.5)", mixBlendMode: "multiply" }}

@@ -101,7 +101,7 @@ export default function MemoryPage() {
                 </div>
                 <div className="memory-content">{m.content}</div>
                 <div className="memory-meta">
-                  {m.entity_id && <span>Entity: {m.entity_id}</span>}
+                  {m.agent_id && <span>Agent: {m.agent_id}</span>}
                   <span>{new Date(m.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
                 </div>
               </div>

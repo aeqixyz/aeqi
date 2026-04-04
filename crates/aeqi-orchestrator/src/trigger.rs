@@ -70,13 +70,13 @@ pub enum TriggerType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event")]
 pub enum EventPattern {
-    #[serde(rename = "task_completed")]
-    TaskCompleted {
+    #[serde(rename = "quest_completed")]
+    QuestCompleted {
         #[serde(skip_serializing_if = "Option::is_none")]
         project: Option<String>,
     },
-    #[serde(rename = "task_failed")]
-    TaskFailed {
+    #[serde(rename = "quest_failed")]
+    QuestFailed {
         #[serde(skip_serializing_if = "Option::is_none")]
         project: Option<String>,
     },
@@ -377,25 +377,26 @@ fn parse_interval(expr: &str) -> Option<chrono::Duration> {
 impl EventPattern {
     /// Check if an execution event matches this pattern.
     ///
-    /// Note: TaskCompleted/TaskFailed events don't carry a project field,
+    /// Note: QuestCompleted/QuestFailed events don't carry a project field,
     /// so project filters match against the task_id prefix convention
     /// (task IDs are formatted as "project:counter").
     pub fn matches_event(&self, event: &crate::execution_events::ExecutionEvent) -> bool {
         use crate::execution_events::ExecutionEvent;
         match (self, event) {
             (
-                EventPattern::TaskCompleted { project },
-                ExecutionEvent::TaskCompleted { task_id, .. },
+                EventPattern::QuestCompleted { project },
+                ExecutionEvent::QuestCompleted { task_id, .. },
             ) => match project {
                 Some(p) => task_id.starts_with(&format!("{p}:")),
                 None => true,
             },
-            (EventPattern::TaskFailed { project }, ExecutionEvent::TaskFailed { task_id, .. }) => {
-                match project {
-                    Some(p) => task_id.starts_with(&format!("{p}:")),
-                    None => true,
-                }
-            }
+            (
+                EventPattern::QuestFailed { project },
+                ExecutionEvent::QuestFailed { task_id, .. },
+            ) => match project {
+                Some(p) => task_id.starts_with(&format!("{p}:")),
+                None => true,
+            },
             (
                 EventPattern::ToolCallCompleted { tool },
                 ExecutionEvent::ToolCallCompleted { tool_name, .. },
@@ -1043,7 +1044,7 @@ mod tests {
                 agent_id: "agent-1".into(),
                 name: "failure-watch".into(),
                 trigger_type: TriggerType::Event {
-                    pattern: EventPattern::TaskFailed {
+                    pattern: EventPattern::QuestFailed {
                         project: Some("aeqi".into()),
                     },
                     cooldown_secs: 300,
@@ -1062,10 +1063,10 @@ mod tests {
             } => {
                 assert_eq!(*cooldown_secs, 300);
                 match pattern {
-                    EventPattern::TaskFailed { project } => {
+                    EventPattern::QuestFailed { project } => {
                         assert_eq!(project.as_deref(), Some("aeqi"));
                     }
-                    _ => panic!("expected TaskFailed pattern"),
+                    _ => panic!("expected QuestFailed pattern"),
                 }
             }
             _ => panic!("expected Event trigger type"),
@@ -1264,7 +1265,7 @@ mod tests {
     #[test]
     fn trigger_type_event_roundtrip() {
         let tt = TriggerType::Event {
-            pattern: EventPattern::TaskCompleted {
+            pattern: EventPattern::QuestCompleted {
                 project: Some("aeqi".into()),
             },
             cooldown_secs: 300,
@@ -1278,7 +1279,7 @@ mod tests {
             } => {
                 assert_eq!(cooldown_secs, 300);
                 match pattern {
-                    EventPattern::TaskCompleted { project } => {
+                    EventPattern::QuestCompleted { project } => {
                         assert_eq!(project.as_deref(), Some("aeqi"))
                     }
                     _ => panic!("wrong pattern"),

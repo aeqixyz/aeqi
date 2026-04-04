@@ -97,7 +97,7 @@ function eventTitle(event: ThreadEvent): string {
       return "Task created";
     case "task_released":
       return "Scheduled";
-    case "task_completed":
+    case "quest_completed":
       return "Completed";
     case "task_blocked":
       return "Blocked";
@@ -126,7 +126,7 @@ function eventTitle(event: ThreadEvent): string {
 
 function eventTone(event: ThreadEvent): NoticeMessage["tone"] {
   switch (event.event_type) {
-    case "task_completed":
+    case "quest_completed":
     case "council_ready":
     case "knowledge_stored":
       return "success";
@@ -691,7 +691,7 @@ export default function ChatPage() {
     const byTask = new Map<string, WorkerEvent>();
     for (const event of workerEvents) {
       if (scope.company && event.company && event.company !== scope.company) continue;
-      if (event.task_id && (event.event_type === "TaskStarted" || event.event_type === "Progress")) {
+      if (event.task_id && (event.event_type === "QuestStarted" || event.event_type === "Progress")) {
         const existing = byTask.get(event.task_id);
         byTask.set(event.task_id, {
           ...existing,
@@ -704,7 +704,7 @@ export default function ChatPage() {
           cost_usd: event.cost_usd ?? existing?.cost_usd,
         });
       }
-      if (event.task_id && (event.event_type === "TaskCompleted" || event.event_type === "TaskFailed")) {
+      if (event.task_id && (event.event_type === "QuestCompleted" || event.event_type === "QuestFailed")) {
         byTask.delete(event.task_id);
       }
     }

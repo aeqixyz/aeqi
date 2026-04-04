@@ -44,8 +44,6 @@ pub use daemon::Daemon;
 pub use event_store::{Dispatch, DispatchHealth, DispatchKind, EventStore};
 pub use execution_events::{EventBroadcaster, ExecutionEvent};
 pub use executor::QuestOutcome;
-/// Compat alias.
-pub type TaskOutcome = QuestOutcome;
 pub use hook::Hook;
 pub use message_router::MessageRouter;
 pub use metrics::AEQIMetrics;

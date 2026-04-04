@@ -3,10 +3,10 @@ import type { Checkpoint, AuditEntry } from "./types";
 export type TimelineEventType =
   | "message"
   | "task_created"
-  | "task_started"
+  | "quest_started"
   | "task_checkpoint"
   | "task_blocked"
-  | "task_completed"
+  | "quest_completed"
   | "task_cancelled"
   | "audit";
 
@@ -45,8 +45,8 @@ export function auditToTimeline(entries: AuditEntry[]): TimelineItem[] {
     let type: TimelineEventType = "audit";
     const dt = (e.decision_type || "").toLowerCase();
     if (dt.includes("task_created") || dt.includes("create_task")) type = "task_created";
-    else if (dt.includes("task_started") || dt.includes("start_task")) type = "task_started";
-    else if (dt.includes("task_completed") || dt.includes("complete_task") || dt.includes("close_task")) type = "task_completed";
+    else if (dt.includes("task_started") || dt.includes("start_task")) type = "quest_started";
+    else if (dt.includes("task_completed") || dt.includes("complete_task") || dt.includes("close_task")) type = "quest_completed";
     else if (dt.includes("task_blocked") || dt.includes("block_task")) type = "task_blocked";
     else if (dt.includes("task_cancelled") || dt.includes("cancel_task")) type = "task_cancelled";
 

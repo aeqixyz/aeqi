@@ -48,10 +48,10 @@ pub(crate) async fn cmd_trigger(
                     anyhow::bail!("cooldown must be >= 60 seconds");
                 }
                 let pattern = match event_name.as_str() {
-                    "task_completed" => aeqi_orchestrator::trigger::EventPattern::TaskCompleted {
+                    "quest_completed" => aeqi_orchestrator::trigger::EventPattern::QuestCompleted {
                         project: event_company.clone(),
                     },
-                    "task_failed" => aeqi_orchestrator::trigger::EventPattern::TaskFailed {
+                    "quest_failed" => aeqi_orchestrator::trigger::EventPattern::QuestFailed {
                         project: event_company,
                     },
                     "tool_call_completed" => {

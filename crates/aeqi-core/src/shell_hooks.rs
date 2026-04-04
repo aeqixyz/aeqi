@@ -28,7 +28,7 @@ pub enum HookEvent {
     SubagentStart,
     SubagentStop,
     TaskCreated,
-    TaskCompleted,
+    QuestCompleted,
     UserPromptSubmit,
     FileChanged,
 }

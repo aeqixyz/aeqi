@@ -3,7 +3,6 @@
 mod cli;
 mod cmd;
 mod helpers;
-pub(crate) mod identity;
 mod service;
 #[allow(clippy::collapsible_if)]
 mod tui;

@@ -707,7 +707,6 @@ fn spawn_direct_agent(
     tokio::task::JoinHandle<()>,
 )> {
     use crate::helpers::{build_provider_for_runtime, build_tools};
-    use crate::identity::Identity;
     use aeqi_core::traits::LogObserver;
     use aeqi_core::{Agent, AgentConfig, ProviderKind, SessionType};
 
@@ -719,14 +718,11 @@ fn spawn_direct_agent(
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let tools = build_tools(&cwd);
 
-    // Build identity from agent record.
-    let identity = if let Some(a) = agent_record {
-        Identity {
-            persona: Some(a.system_prompt.clone()),
-            ..Identity::default()
-        }
+    // Build system prompt from agent record.
+    let system_prompt = if let Some(a) = agent_record {
+        format!("# Persona\n\n{}", a.system_prompt)
     } else {
-        Identity::default()
+        "You are a helpful AI agent.".to_string()
     };
 
     // Agent config.
@@ -757,13 +753,7 @@ fn spawn_direct_agent(
     let observer: std::sync::Arc<dyn aeqi_core::traits::Observer> =
         std::sync::Arc::new(LogObserver);
 
-    let mut agent = Agent::new(
-        agent_config,
-        provider,
-        tools,
-        observer,
-        identity.system_prompt(),
-    );
+    let mut agent = Agent::new(agent_config, provider, tools, observer, system_prompt);
 
     // Chat stream sender for TUI events.
     let (stream_sender, mut stream_rx) = aeqi_core::ChatStreamSender::new(64);

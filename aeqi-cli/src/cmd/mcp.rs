@@ -208,7 +208,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                     "content": {"type": "string", "description": "The knowledge to store"},
                     "category": {"type": "string", "enum": ["fact", "procedure", "preference", "context", "evergreen"], "default": "fact"},
                     "scope": {"type": "string", "enum": ["domain", "system", "entity"], "default": "domain", "description": "domain = project-level, system = cross-project, entity = per-agent"},
-                    "entity_id": {"type": "string", "description": "Agent name (required when scope is 'entity')"}
+                    "agent_id": {"type": "string", "description": "Agent ID (required when scope is 'entity')"}
                 },
                 "required": ["project", "key", "content"]
             }),

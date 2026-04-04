@@ -470,7 +470,7 @@ impl AgentWorker {
                     self.persist_runtime_execution(&hook.task_id.0, &runtime_execution)
                         .await;
                     if let Some(ref broadcaster) = self.event_broadcaster {
-                        broadcaster.publish(ExecutionEvent::TaskFailed {
+                        broadcaster.publish(ExecutionEvent::QuestFailed {
                             task_id: hook.task_id.0.clone(),
                             reason: reason.clone(),
                             artifacts_preserved: false,
@@ -491,9 +491,9 @@ impl AgentWorker {
             }
         }
 
-        // Publish TaskStarted event.
+        // Publish QuestStarted event.
         if let Some(ref broadcaster) = self.event_broadcaster {
-            broadcaster.publish(ExecutionEvent::TaskStarted {
+            broadcaster.publish(ExecutionEvent::QuestStarted {
                 task_id: hook.task_id.0.clone(),
                 agent: self.agent_name.clone(),
                 project: self.project_name.clone(),
@@ -1074,7 +1074,7 @@ impl AgentWorker {
         if let Some(ref broadcaster) = self.event_broadcaster {
             match &outcome {
                 QuestOutcome::Done(summary) => {
-                    broadcaster.publish(ExecutionEvent::TaskCompleted {
+                    broadcaster.publish(ExecutionEvent::QuestCompleted {
                         task_id: hook.task_id.0.clone(),
                         outcome: summary.chars().take(500).collect(),
                         confidence: 1.0,
@@ -1103,7 +1103,7 @@ impl AgentWorker {
                     });
                 }
                 QuestOutcome::Failed(reason) => {
-                    broadcaster.publish(ExecutionEvent::TaskFailed {
+                    broadcaster.publish(ExecutionEvent::QuestFailed {
                         task_id: hook.task_id.0.clone(),
                         reason: reason.chars().take(500).collect(),
                         artifacts_preserved: !runtime_execution.outcome.artifacts.is_empty(),

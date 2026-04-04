@@ -1,4 +1,3 @@
-use crate::identity::Identity;
 use aeqi_core::traits::{Insight, LogObserver, Observer};
 use aeqi_core::{Agent, AgentConfig};
 use anyhow::Result;
@@ -7,8 +6,9 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use crate::helpers::{
-    augment_identity_with_org_context, build_project_tools, build_provider_for_one_shot,
-    build_tools, find_agent_dir, find_project_dir, load_config, one_shot_agent_name, open_insights,
+    augment_prompt_with_org_context, build_project_tools, build_provider_for_one_shot, build_tools,
+    find_agent_dir, find_project_dir, load_config, load_system_prompt, load_system_prompt_from_dir,
+    one_shot_agent_name, open_insights,
 };
 
 pub(crate) async fn cmd_run(
@@ -46,24 +46,23 @@ pub(crate) async fn cmd_run(
     } else {
         build_tools(&workdir)
     };
-    // Load agent identity (from agents/) + optional project context.
-    let identity = if let Some(rn) = project_name {
+    // Load system prompt from agent identity files + optional project context.
+    let system_prompt = if let Some(rn) = project_name {
         let project_dir = find_project_dir(rn).ok();
         let agent_dir = find_agent_dir(&execution_agent).ok();
         match (agent_dir, project_dir) {
-            (Some(a), Some(d)) => Identity::load(&a, Some(&d)).unwrap_or_default(),
-            (Some(a), None) => Identity::load(&a, None).unwrap_or_default(),
-            (None, Some(d)) => Identity::load_from_dir(&d).unwrap_or_default(),
-            (None, None) => Identity::default(),
+            (Some(a), Some(d)) => load_system_prompt(&a, Some(&d)),
+            (Some(a), None) => load_system_prompt(&a, None),
+            (None, Some(d)) => load_system_prompt_from_dir(&d),
+            (None, None) => "You are a helpful AI agent.".to_string(),
         }
     } else {
         find_agent_dir(&execution_agent)
             .ok()
-            .map(|d| Identity::load(&d, None).unwrap_or_default())
-            .unwrap_or_default()
+            .map(|d| load_system_prompt(&d, None))
+            .unwrap_or_else(|| "You are a helpful AI agent.".to_string())
     };
-    let identity =
-        augment_identity_with_org_context(&config, identity, Some(&execution_agent), project_name);
+    let system_prompt = augment_prompt_with_org_context(&config, &system_prompt);
     let observer: Arc<dyn Observer> = Arc::new(LogObserver);
 
     let agent_config = AgentConfig {
@@ -73,7 +72,7 @@ pub(crate) async fn cmd_run(
         ..Default::default()
     };
 
-    let memory: Option<Arc<dyn Insight>> = match open_insights(&config, project_name) {
+    let memory: Option<Arc<dyn Insight>> = match open_insights(&config) {
         Ok(m) => Some(Arc::new(m)),
         Err(e) => {
             warn!("memory unavailable: {e}");
@@ -82,13 +81,7 @@ pub(crate) async fn cmd_run(
     };
 
     info!(prompt = %prompt, "starting agent");
-    let mut agent = Agent::new(
-        agent_config,
-        provider,
-        tools,
-        observer,
-        identity.system_prompt(),
-    );
+    let mut agent = Agent::new(agent_config, provider, tools, observer, system_prompt);
     if let Some(mem) = memory {
         agent = agent.with_memory(mem);
     }

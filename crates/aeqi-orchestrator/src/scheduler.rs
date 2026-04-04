@@ -654,7 +654,7 @@ impl Scheduler {
             // Record task completion in unified event store.
             let _ = spawn_event_store
                 .emit(
-                    "task_completed",
+                    "quest_completed",
                     Some(&agent_id_clone),
                     None,
                     Some(&task_id),
@@ -669,7 +669,7 @@ impl Scheduler {
 
             let _ = registry.record_session(&agent_id_clone, 0).await;
 
-            event_broadcaster.publish(ExecutionEvent::TaskCompleted {
+            event_broadcaster.publish(ExecutionEvent::QuestCompleted {
                 task_id: task_id.clone(),
                 outcome: outcome_status.to_string(),
                 confidence: 0.0,

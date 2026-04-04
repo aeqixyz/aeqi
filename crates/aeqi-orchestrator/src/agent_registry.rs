@@ -86,9 +86,9 @@ pub struct Agent {
     /// Execution mode: "agent" (native loop) or "claude_code" (CLI delegation).
     #[serde(default)]
     pub execution_mode: Option<String>,
-    /// Task ID prefix (e.g., "sg" for sigil). None = derived from name.
-    #[serde(default)]
-    pub task_prefix: Option<String>,
+    /// Quest ID prefix (e.g., "sg" for sigil). None = derived from name.
+    #[serde(default, alias = "task_prefix")]
+    pub quest_prefix: Option<String>,
     /// Worker timeout in seconds. None = inherit from parent or use global default.
     #[serde(default)]
     pub worker_timeout_secs: Option<u64>,
@@ -630,7 +630,7 @@ impl AgentRegistry {
             workdir: None,
             budget_usd: None,
             execution_mode: None,
-            task_prefix: None,
+            quest_prefix: None,
             worker_timeout_secs: None,
             prompts: if system_prompt.is_empty() {
                 Vec::new()
@@ -970,17 +970,18 @@ impl AgentRegistry {
         workdir: Option<&str>,
         budget_usd: Option<f64>,
         execution_mode: Option<&str>,
-        task_prefix: Option<&str>,
+        quest_prefix: Option<&str>,
         worker_timeout_secs: Option<u64>,
     ) -> Result<()> {
         let db = self.db.lock().await;
+        // DB column is still `task_prefix` for backward compat; Rust field is `quest_prefix`.
         let updated = db.execute(
             "UPDATE agents SET workdir = ?1, budget_usd = ?2, execution_mode = ?3, task_prefix = ?4, worker_timeout_secs = ?5 WHERE id = ?6",
             params![
                 workdir,
                 budget_usd,
                 execution_mode,
-                task_prefix,
+                quest_prefix,
                 worker_timeout_secs.map(|v| v as i64),
                 id,
             ],
@@ -1232,12 +1233,12 @@ impl AgentRegistry {
         skill: Option<&str>,
         labels: &[String],
     ) -> Result<aeqi_quests::Quest> {
-        // Resolve task prefix: agent's task_prefix, or first 2 chars of name, or "t".
+        // Resolve quest prefix: agent's quest_prefix, or first 2 chars of name, or "t".
         let agent = self
             .get(agent_id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("agent not found: {agent_id}"))?;
-        let prefix = agent.task_prefix.unwrap_or_else(|| {
+        let prefix = agent.quest_prefix.unwrap_or_else(|| {
             let name = &agent.name;
             if name.len() >= 2 {
                 name[..2].to_lowercase()
@@ -1570,10 +1571,10 @@ fn template_trigger_to_type(t: &TemplateTrigger) -> Result<crate::trigger::Trigg
             anyhow::bail!("cooldown_secs must be >= 60, got {cooldown_secs}");
         }
         let pattern = match event.as_str() {
-            "task_completed" => crate::trigger::EventPattern::TaskCompleted {
+            "quest_completed" => crate::trigger::EventPattern::QuestCompleted {
                 project: t.event_project.clone(),
             },
-            "task_failed" => crate::trigger::EventPattern::TaskFailed {
+            "quest_failed" => crate::trigger::EventPattern::QuestFailed {
                 project: t.event_project.clone(),
             },
             "tool_call_completed" => crate::trigger::EventPattern::ToolCallCompleted {
@@ -1612,12 +1613,25 @@ fn row_to_agent(row: &rusqlite::Row) -> Agent {
     let caps_str: String = row.get("capabilities").unwrap_or_else(|_| "[]".to_string());
     let capabilities: Vec<String> = serde_json::from_str(&caps_str).unwrap_or_default();
 
+    let prompts: Vec<aeqi_core::PromptEntry> = row
+        .get::<_, String>("prompts")
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+
+    // Derive system_prompt from prompts[0] (canonical source).
+    // Fall back to the DB column for agents that predate the prompts[] migration.
+    let system_prompt = prompts
+        .first()
+        .map(|p| p.content.clone())
+        .unwrap_or_else(|| row.get("system_prompt").unwrap_or_default());
+
     Agent {
         id: row.get("id").unwrap_or_default(),
         name: row.get("name").unwrap_or_default(),
         display_name: row.get("display_name").ok(),
         template: row.get("template").unwrap_or_default(),
-        system_prompt: row.get("system_prompt").unwrap_or_default(),
+        system_prompt,
         parent_id: row.get("parent_id").ok(),
         model: row.get("model").ok(),
         capabilities,
@@ -1646,16 +1660,12 @@ fn row_to_agent(row: &rusqlite::Row) -> Agent {
         workdir: row.get("workdir").ok(),
         budget_usd: row.get("budget_usd").ok(),
         execution_mode: row.get("execution_mode").ok(),
-        task_prefix: row.get("task_prefix").ok(),
+        quest_prefix: row.get("task_prefix").ok(), // DB column is still `task_prefix`
         worker_timeout_secs: row
             .get::<_, i64>("worker_timeout_secs")
             .ok()
             .map(|v| v as u64),
-        prompts: row
-            .get::<_, String>("prompts")
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default(),
+        prompts,
     }
 }
 

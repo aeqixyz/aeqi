@@ -1,4 +1,3 @@
-use crate::identity::Identity;
 use aeqi_core::traits::{LogObserver, Observer, Tool};
 use aeqi_core::{Agent, AgentConfig};
 use aeqi_tools::Skill;
@@ -9,8 +8,9 @@ use std::sync::Arc;
 
 use crate::cli::SkillAction;
 use crate::helpers::{
-    augment_identity_with_org_context, build_project_tools, build_provider_for_project,
-    find_agent_dir, find_project_dir, load_config, one_shot_agent_name, open_insights,
+    augment_prompt_with_org_context, build_project_tools, build_provider_for_project,
+    find_agent_dir, find_project_dir, load_config, load_system_prompt, load_system_prompt_from_dir,
+    one_shot_agent_name, open_insights,
 };
 
 fn discover_project_skills(project_dir: &Path) -> Result<Vec<Skill>> {
@@ -105,22 +105,14 @@ pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction
                 .filter(|t| skill.is_tool_allowed(t.name()))
                 .collect();
 
-            // Build identity with skill system prompt.
+            // Build system prompt with skill overlay.
             let execution_agent = one_shot_agent_name(&config, Some(&company));
-            let identity = find_agent_dir(&execution_agent)
+            let base_prompt = find_agent_dir(&execution_agent)
                 .ok()
-                .map(|agent_dir| Identity::load(&agent_dir, Some(&project_dir)).unwrap_or_default())
-                .unwrap_or_else(|| Identity::load_from_dir(&project_dir).unwrap_or_default());
-            let identity = augment_identity_with_org_context(
-                &config,
-                identity,
-                Some(&execution_agent),
-                Some(&company),
-            );
-            let base_prompt = identity.system_prompt();
-
-            let mut skill_identity = identity.clone();
-            skill_identity.persona = Some(skill.system_prompt(&base_prompt));
+                .map(|agent_dir| load_system_prompt(&agent_dir, Some(&project_dir)))
+                .unwrap_or_else(|| load_system_prompt_from_dir(&project_dir));
+            let base_prompt = augment_prompt_with_org_context(&config, &base_prompt);
+            let final_prompt = skill.system_prompt(&base_prompt);
 
             let user_prompt = if let Some(ref p) = prompt {
                 format!("{}{}", skill.prompt.user_prefix, p)
@@ -143,9 +135,9 @@ pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction
                 provider,
                 filtered_tools,
                 observer,
-                skill_identity.system_prompt(),
+                final_prompt,
             );
-            if let Ok(mem) = open_insights(&config, Some(&company)) {
+            if let Ok(mem) = open_insights(&config) {
                 agent = agent.with_memory(Arc::new(mem));
             }
             let result = agent.run(&user_prompt).await?;
