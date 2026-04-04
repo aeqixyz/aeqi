@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Hero } from "./components/Hero";
-import { VerticalLines } from "./components/VerticalLines";
+
 import { motion } from "framer-motion";
 
 function GitHubStars() {
@@ -130,7 +130,6 @@ export default function App() {
   return (
     <div className="relative min-h-screen">
       <Backdrop />
-      <VerticalLines />
       <Nav />
       <Hero />
       <Footer />
