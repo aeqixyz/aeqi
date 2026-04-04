@@ -58,6 +58,7 @@ pub fn api_routes() -> Router<AppState> {
         .route("/sessions", get(sessions).post(create_session))
         .route("/sessions/{id}/close", post(close_session))
         .route("/sessions/{id}/messages", get(session_messages))
+        .route("/sessions/{id}/children", get(session_children))
 }
 
 // --- Status ---
@@ -651,6 +652,18 @@ async fn session_messages(
         state,
         "session_messages",
         serde_json::json!({"session_id": id, "limit": limit}),
+    )
+    .await
+}
+
+async fn session_children(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Response {
+    ipc_proxy(
+        state,
+        "session_children",
+        serde_json::json!({"session_id": id}),
     )
     .await
 }

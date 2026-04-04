@@ -1,0 +1,171 @@
+[skill]
+name = "workflow-migration"
+description = "Use when upgrading frameworks, migrating databases, changing APIs, or moving between systems. Triggers: migration, upgrade, version bump, breaking change, deprecation."
+phase = "workflow"
+
+[prompt]
+system = '''
+# Migration Workflow
+
+Migrations are high-risk, high-consequence operations. Every step must leave the system working. Never big-bang.
+
+```
+Analyze → Plan → Migrate Incrementally → Verify → Clean Up → Close
+```
+
+---
+
+## Phase 1: Analyze
+
+**Before ANY changes.** Map the full blast radius and understand every breaking change.
+
+1. **Recall context** — `aeqi_recall` for prior migrations in this area, known constraints, past failures
+2. **What's changing** — exact version/API/schema differences between old and new
+3. **Map blast radius** — `aeqi_graph` impact analysis on every symbol/module being migrated
+4. **Enumerate breaking changes** — every incompatibility in the upgrade path, no exceptions
+5. **Data migration** — does data need transforming? Is it reversible? What's the volume?
+6. **Load domain knowledge** — `aeqi_skills` list for relevant domain skills (e.g., rust-expertise, db skills)
+7. **Rollback plan** — can we undo each step? At what cost? What's the point of no return?
+
+<HARD-GATE>
+No migration without a documented rollback plan. If you can't describe how to undo a step, you don't understand it well enough to execute it.
+</HARD-GATE>
+
+**Post analysis** — `aeqi_notes` post with key `task:{id}:migration-analysis` containing: what's changing, blast radius, all breaking changes, rollback plan.
+
+**Terminal state:** Full analysis posted, proceed to Plan.
+
+---
+
+## Phase 2: Plan
+
+Use the **expand-contract pattern** (parallel run):
+1. **Expand** — add new alongside old (both work simultaneously)
+2. **Migrate** — switch consumers from old to new, one at a time
+3. **Contract** — remove old once ALL consumers are migrated and verified
+
+### Planning Steps
+
+1. **Create parent task** — `aeqi_create_task` with the migration description
+2. **Map all consumers** — `aeqi_graph` context on each symbol being migrated to find every caller
+3. **Decompose into steps** — each step is ONE atomic change. Include:
+   - Exact file paths and symbols affected
+   - What changes and the mechanical transformation
+   - Test command to verify (compile + test suite)
+   - Rollback command if it fails
+   - Must compile and pass tests independently
+4. **Order for safety** — expand steps before migrate steps before contract steps. Internal before public API.
+5. **Validate with architect** — `aeqi_delegate` with the architect agent to review the migration plan
+6. **Post plan** — `aeqi_notes` post with key `task:{id}:plan`
+
+### Plan Quality Checklist
+- [ ] Every step compiles and passes tests independently
+- [ ] Every step has exact file paths and a rollback command
+- [ ] Expand-contract pattern is followed (never remove old before new is verified)
+- [ ] Consumer migration order minimizes risk (internal → external, low-traffic → high-traffic)
+- [ ] Data migration steps include backup commands and integrity checks
+- [ ] No step depends on another step's uncommitted changes
+
+<HARD-GATE>
+Never do a big-bang migration. Every step must leave the system working. If step 3 of 10 fails, steps 1-2 are still live and correct.
+</HARD-GATE>
+
+**Terminal state:** Plan validated and posted, proceed to Migrate.
+
+---
+
+## Phase 3: Migrate Incrementally
+
+Execute the plan step by step. The system must work after EVERY step.
+
+### Per-Step Workflow
+
+1. **Delegate to implementer** — `aeqi_delegate` with the implementer agent, full step context inline (file paths, exact transformation, rollback command)
+2. **Handle implementer status:**
+   - **DONE** → proceed to step verification
+   - **DONE_WITH_CONCERNS** → read concerns, assess risk before continuing
+   - **NEEDS_CONTEXT** → provide missing context, re-delegate
+   - **BLOCKED** → respect it. The step decomposition may be wrong.
+3. **Run full test suite** — after each step. Not just the changed module. `cargo test --workspace` / `npm test`.
+4. **If tests fail** — the migration step is wrong. **Revert immediately.** Don't fix forward. Re-examine the step and try a different approach.
+5. **Commit each step** — one logical change per commit with a message describing what was migrated and why
+
+### Data Migration Steps (when applicable)
+- **Backup first** — always. Full backup before any data transformation.
+- **Migrate in batches** — never the whole dataset at once
+- **Verify row counts and checksums** after each batch
+- **Keep old schema accessible** until the contract phase
+
+### 3-Fix Escalation Rule
+If 3 attempts at the same step fail: **STOP.** The plan decomposition is wrong. Go back to Phase 2 and re-plan with smaller steps or a different approach. Don't keep patching.
+
+**Terminal state:** All steps complete, tests pass after each, proceed to Verify.
+
+---
+
+## Phase 4: Verify
+
+Prove the migration is complete and correct. Adversarial mindset.
+
+### Verification Gate (MANDATORY)
+
+1. **COMPILE** — clean compile, zero warnings, zero deprecation warnings from the new version
+2. **TEST** — full test suite passes, including integration tests
+3. **SEARCH** — grep for old API names, old schema references, old version strings. Nothing should remain except in the expand shims (not yet contracted).
+4. **PERFORMANCE** — compare with pre-migration baselines. Migrations should not regress performance.
+5. **DATA INTEGRITY** — row counts, checksums, spot-check samples against pre-migration state
+
+<HARD-GATE>
+"Tests pass" is necessary but not sufficient. You must also verify no old references remain and that performance hasn't regressed. A migration that compiles but leaves dead imports or stale references is incomplete.
+</HARD-GATE>
+
+1. **Delegate final review** — `aeqi_delegate` with the reviewer agent to check ALL changes against the original plan
+2. **Read findings** — `aeqi_notes` query for the reviewer's posted findings
+3. **Handle review result:**
+   - **Approved** → proceed to Clean Up
+   - **Issues found** → fix issues, re-verify (respect the 3-fix rule)
+
+**Terminal state:** Verified complete and correct, proceed to Clean Up.
+
+---
+
+## Phase 5: Clean Up (Contract Phase)
+
+Remove the old code now that the new code is verified.
+
+1. **Remove old implementations** — dead code from the expand phase
+2. **Remove compatibility shims** — any adapters between old and new
+3. **Remove old dependencies** — unused packages, old SDK versions
+4. **Run full test suite again** — after cleanup. Removing code can break things too.
+5. **Search for orphans** — `aeqi_graph` search for any symbols that lost all callers during cleanup
+
+**Terminal state:** Old code removed, tests pass, proceed to Close.
+
+---
+
+## Phase 6: Close
+
+1. **Store learnings** — `aeqi_remember` with:
+   - What was migrated and from/to versions
+   - What broke unexpectedly (the non-obvious gotchas)
+   - Rollback steps that were or weren't needed
+   - How long it actually took vs. estimate
+2. **Commit** with a clear message describing the migration and why
+3. **Close task** — `aeqi_close_task`
+4. **Consider skill creation** — if this migration type will recur, codify the specific steps as a project skill
+
+---
+
+## Anti-Rationalization Table
+
+| Excuse | Reality |
+|--------|---------|
+| "Let's just upgrade everything at once" | Big-bang migrations fail unpredictably. Every step must be independently verifiable. |
+| "The old version still works" | Until it doesn't. Migrate before it's urgent. Rushed migrations skip the expand phase. |
+| "We can skip the expand phase" | Expand-contract is how you rollback safely. Skipping it means no safety net. |
+| "Data migration is straightforward" | Backup first. Always. "Straightforward" is what you say before data loss. |
+| "I'll clean up the old code later" | Dead code from migrations never gets cleaned up "later." Contract now or carry the debt forever. |
+| "Tests pass so the migration is complete" | Grep for old references. Check performance. Tests didn't catch every consumer of the old API. |
+| "Three attempts failed, let me try one more thing" | The plan is wrong. Re-decompose into smaller steps. |
+| "This step is too small to commit separately" | Atomic commits are your rollback mechanism. Skip them and you lose the ability to undo. |
+'''

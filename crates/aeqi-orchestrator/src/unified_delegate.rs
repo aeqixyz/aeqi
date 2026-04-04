@@ -41,6 +41,8 @@ pub struct UnifiedDelegateTool {
     fallback_target: Option<String>,
     /// Optional event broadcaster for emitting DepartmentMessage events.
     event_broadcaster: Option<Arc<EventBroadcaster>>,
+    /// Session ID of the calling agent, propagated as parent_session_id in delegations.
+    session_id: Option<String>,
 }
 
 impl UnifiedDelegateTool {
@@ -52,6 +54,7 @@ impl UnifiedDelegateTool {
             project_name: None,
             fallback_target: None,
             event_broadcaster: None,
+            session_id: None,
         }
     }
 
@@ -70,6 +73,13 @@ impl UnifiedDelegateTool {
     /// Set the project name for scoping default-agent lookups.
     pub fn with_project(mut self, project_name: Option<String>) -> Self {
         self.project_name = project_name;
+        self
+    }
+
+    /// Set the session ID of the calling agent. Propagated as `parent_session_id`
+    /// in DelegateRequest dispatches so child workers can link their sessions.
+    pub fn with_session_id(mut self, id: String) -> Self {
+        self.session_id = Some(id);
         self
     }
 
@@ -96,6 +106,7 @@ impl UnifiedDelegateTool {
             create_task,
             skill: skill.clone(),
             reply_to: None,
+            parent_session_id: self.session_id.clone(),
         };
 
         let dispatch = Dispatch::new_typed(&self.agent_name, to, kind);
@@ -107,6 +118,7 @@ impl UnifiedDelegateTool {
             response_mode = %response_mode,
             create_task = create_task,
             dispatch_id = %dispatch_id,
+            parent_session_id = ?self.session_id,
             "sending DelegateRequest dispatch"
         );
 
@@ -176,6 +188,7 @@ impl UnifiedDelegateTool {
             create_task: false,
             skill: None,
             reply_to: None,
+            parent_session_id: self.session_id.clone(),
         };
 
         let to = format!("dept:{dept}");

@@ -275,6 +275,10 @@ export const api = {
   closeSession: (sessionId: string) =>
     request<any>(`/sessions/${sessionId}/close`, { method: "POST" }),
 
+  // Session children (spawned work)
+  getSessionChildren: (sessionId: string) =>
+    request<any>(`/sessions/${sessionId}/children`),
+
   // Session messages
   getSessionMessages: (params: { session_id?: string; channel_name?: string; agent_id?: string; limit?: number }) => {
     // Prefer new session-based endpoint when a UUID session_id is available.

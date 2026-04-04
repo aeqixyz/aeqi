@@ -406,6 +406,7 @@ impl Daemon {
                     response_mode,
                     create_task,
                     skill,
+                    parent_session_id,
                     ..
                 } => {
                     if !create_task {
@@ -424,11 +425,14 @@ impl Daemon {
                         prompt, dispatch.from, response_mode
                     );
 
-                    let labels = vec![
+                    let mut labels = vec![
                         format!("delegate_from:{}", dispatch.from),
                         format!("delegate_dispatch:{}", dispatch.id),
                         format!("delegate_response_mode:{}", response_mode),
                     ];
+                    if let Some(psid) = &parent_session_id {
+                        labels.push(format!("parent_session_id:{psid}"));
+                    }
 
                     let skill_name = skill.as_deref().unwrap_or("process-dispatch");
 
@@ -723,6 +727,7 @@ impl Daemon {
                                             if let DispatchKind::DelegateRequest {
                                                 ref prompt,
                                                 ref response_mode,
+                                                ref parent_session_id,
                                                 ..
                                             } = d.kind
                                             {
@@ -733,6 +738,10 @@ impl Daemon {
                                                 delegation_labels.push(format!(
                                                     "delegate_response_mode:{response_mode}"
                                                 ));
+                                                if let Some(psid) = &parent_session_id {
+                                                    delegation_labels
+                                                        .push(format!("parent_session_id:{psid}"));
+                                                }
                                                 Some(format!("From {}: {}", d.from, prompt))
                                             } else {
                                                 None
@@ -2103,20 +2112,25 @@ impl Daemon {
                     let channel_name = request_field(&request, "channel_name");
                     let agent_id_param = request_field(&request, "agent_id").map(|s| s.to_string());
 
-                    // If agent_id is provided, look up history directly by agent UUID.
+                    // If agent_id is provided, look up timeline (messages + tool events) by agent UUID.
                     if let Some(ref aid) = agent_id_param {
                         if let Some(ref ss) = registry.session_store {
-                            match ss.get_history_by_agent_id(aid, limit).await {
-                                Ok(messages) => {
-                                    let msgs: Vec<serde_json::Value> = messages
+                            match ss.get_timeline_by_agent_id(aid, limit).await {
+                                Ok(events) => {
+                                    let msgs: Vec<serde_json::Value> = events
                                         .iter()
-                                        .map(|m| {
-                                            serde_json::json!({
-                                                "role": m.role,
-                                                "content": m.content,
-                                                "timestamp": m.timestamp.to_rfc3339(),
-                                                "source": m.source,
-                                            })
+                                        .map(|e| {
+                                            let mut obj = serde_json::json!({
+                                                "role": e.role,
+                                                "content": e.content,
+                                                "timestamp": e.timestamp.to_rfc3339(),
+                                                "source": e.source,
+                                                "event_type": e.event_type,
+                                            });
+                                            if let Some(ref meta) = e.metadata {
+                                                obj["metadata"] = meta.clone();
+                                            }
+                                            obj
                                         })
                                         .collect();
                                     serde_json::json!({"ok": true, "messages": msgs})
@@ -3390,6 +3404,8 @@ impl Daemon {
                                     None,
                                     "perpetual",
                                     "Permanent Session",
+                                    None,
+                                    None,
                                 )
                                 .await
                             {
@@ -3432,21 +3448,39 @@ impl Daemon {
                         let session_id = request_field(&request, "session_id").unwrap_or("");
                         let limit =
                             request.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
-                        match ss.history_by_session(session_id, limit).await {
-                            Ok(messages) => {
-                                let msgs: Vec<serde_json::Value> = messages
+                        // Use timeline_by_session to include tool events alongside messages.
+                        match ss.timeline_by_session(session_id, limit).await {
+                            Ok(events) => {
+                                let msgs: Vec<serde_json::Value> = events
                                     .iter()
-                                    .map(|m| {
-                                        serde_json::json!({
-                                            "role": m.role,
-                                            "content": m.content,
-                                            "created_at": m.timestamp.to_rfc3339(),
-                                            "source": m.source,
-                                        })
+                                    .map(|e| {
+                                        let mut obj = serde_json::json!({
+                                            "role": e.role,
+                                            "content": e.content,
+                                            "created_at": e.timestamp.to_rfc3339(),
+                                            "source": e.source,
+                                            "event_type": e.event_type,
+                                        });
+                                        if let Some(ref meta) = e.metadata {
+                                            obj["metadata"] = meta.clone();
+                                        }
+                                        obj
                                     })
                                     .collect();
                                 serde_json::json!({"ok": true, "messages": msgs})
                             }
+                            Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                        }
+                    } else {
+                        serde_json::json!({"ok": false, "error": "session store not available"})
+                    }
+                }
+
+                "session_children" => {
+                    if let Some(ref ss) = registry.session_store {
+                        let session_id = request_field(&request, "session_id").unwrap_or("");
+                        match ss.list_children(session_id).await {
+                            Ok(children) => serde_json::json!({"ok": true, "sessions": children}),
                             Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
                         }
                     } else {
@@ -3588,6 +3622,29 @@ impl Daemon {
                                                     match &event {
                                                         aeqi_core::ChatStreamEvent::TextDelta { text: delta } => {
                                                             text.push_str(delta);
+                                                        }
+                                                        aeqi_core::ChatStreamEvent::ToolComplete {
+                                                            tool_use_id: _,
+                                                            tool_name,
+                                                            success,
+                                                            input_preview,
+                                                            output_preview,
+                                                            duration_ms,
+                                                        } => {
+                                                            // Persist tool completion for reload
+                                                            if let (Some(cs), Some(usid)) = (&session_store, &store_session_id) {
+                                                                let meta = serde_json::json!({
+                                                                    "tool_name": tool_name,
+                                                                    "success": success,
+                                                                    "input_preview": input_preview,
+                                                                    "output_preview": output_preview,
+                                                                    "duration_ms": duration_ms,
+                                                                });
+                                                                let _ = cs.record_event_by_session(
+                                                                    usid, "tool_complete", "system",
+                                                                    tool_name, Some("session"), Some(&meta),
+                                                                ).await;
+                                                            }
                                                         }
                                                         aeqi_core::ChatStreamEvent::Complete {
                                                             total_prompt_tokens: pt,
@@ -3880,6 +3937,12 @@ impl Daemon {
                                 path.exists().then_some(path)
                             });
 
+                            // Pass session_id so the delegate tool can propagate parent_session_id.
+                            let delegate_session_id = if resolved_session_id.is_empty() {
+                                None
+                            } else {
+                                Some(resolved_session_id.clone())
+                            };
                             let orch_tools = crate::tools::build_orchestration_tools(
                                 registry.clone(),
                                 dispatch_bus.clone(),
@@ -3889,6 +3952,7 @@ impl Daemon {
                                 registry.notes.clone(),
                                 Some(event_broadcaster.clone()),
                                 graph_db_path,
+                                delegate_session_id,
                             );
                             tools.extend(orch_tools);
 
@@ -3949,6 +4013,8 @@ impl Daemon {
                                     agent_department_id.as_deref(),
                                     "perpetual",
                                     &agent_hint,
+                                    None,
+                                    None,
                                 )
                                 .await
                                 .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string())
@@ -4004,6 +4070,37 @@ impl Daemon {
                                                 text: delta,
                                             } => {
                                                 text.push_str(delta);
+                                            }
+                                            aeqi_core::ChatStreamEvent::ToolComplete {
+                                                tool_use_id: _,
+                                                tool_name,
+                                                success,
+                                                input_preview,
+                                                output_preview,
+                                                duration_ms,
+                                            } => {
+                                                // Persist tool completion for reload
+                                                if let (Some(cs), Some(usid)) =
+                                                    (&session_store, &store_session_id)
+                                                {
+                                                    let meta = serde_json::json!({
+                                                        "tool_name": tool_name,
+                                                        "success": success,
+                                                        "input_preview": input_preview,
+                                                        "output_preview": output_preview,
+                                                        "duration_ms": duration_ms,
+                                                    });
+                                                    let _ = cs
+                                                        .record_event_by_session(
+                                                            usid,
+                                                            "tool_complete",
+                                                            "system",
+                                                            tool_name,
+                                                            Some("session"),
+                                                            Some(&meta),
+                                                        )
+                                                        .await;
+                                                }
                                             }
                                             aeqi_core::ChatStreamEvent::Complete {
                                                 total_prompt_tokens: pt,

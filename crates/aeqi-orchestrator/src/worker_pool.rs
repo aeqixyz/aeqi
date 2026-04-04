@@ -525,6 +525,11 @@ impl WorkerPool {
             worker.set_broadcaster(broadcaster.clone());
         }
 
+        // Inject session store for worker transcript recording.
+        if let Some(ref ss) = self.session_store {
+            worker.session_store = Some(ss.clone());
+        }
+
         worker.with_max_task_retries(self.max_task_retries)
     }
 
@@ -662,6 +667,7 @@ impl WorkerPool {
                         create_task: false,
                         skill: None,
                         reply_to: None,
+                        parent_session_id: None,
                     },
                 ))
                 .await;
@@ -1339,6 +1345,7 @@ impl WorkerPool {
                                                     create_task: false,
                                                     skill: None,
                                                     reply_to: Some(task_id_clone.clone()),
+                                                    parent_session_id: None,
                                                 },
                                             ))
                                             .await;
@@ -1372,6 +1379,7 @@ impl WorkerPool {
                                             create_task: false,
                                             skill: None,
                                             reply_to: Some(task_id_clone.clone()),
+                                            parent_session_id: None,
                                         },
                                     ))
                                     .await;
@@ -1390,6 +1398,7 @@ impl WorkerPool {
                                             create_task: false,
                                             skill: None,
                                             reply_to: Some(task_id_clone.clone()),
+                                            parent_session_id: None,
                                         },
                                     ))
                                     .await;
@@ -1809,6 +1818,7 @@ impl WorkerPool {
                     create_task: false,
                     skill: None,
                     reply_to: Some(task.id.to_string()),
+                    parent_session_id: None,
                 },
             ))
             .await;

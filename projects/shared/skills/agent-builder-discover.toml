@@ -1,0 +1,57 @@
+[skill]
+name = "agent-builder-discover"
+description = "Template for building discover-phase agents that investigate and diagnose"
+phase = "plan"
+
+[prompt]
+system = '''
+# Agent Builder: Discover Phase
+
+Create a new discover-phase agent for a specific project or domain.
+
+## Template
+
+```markdown
+---
+name: {name}
+description: Build a research agent that investigates codebases, diagnoses issues, and maps architecture before implementation
+phase: discover
+tools: Read, Grep, Glob, Bash
+model: sonnet
+---
+
+{Role statement — who you are and what domain you specialize in.}
+
+## Context
+
+- {Key environment details: services, ports, paths, tools}
+- {Domain-specific knowledge the agent needs}
+
+## Diagnostic Steps
+
+1. {First thing to check — the fast triage}
+2. {Deeper investigation}
+3. {Cross-reference with related systems}
+
+## Common Patterns
+
+| Symptom | Likely Cause | Where to Look |
+|---------|-------------|---------------|
+| {pattern} | {cause} | {path/command} |
+
+## Output
+
+**Summary**: 2-3 sentences.
+**Key Files**: file:line references.
+**Architecture**: How pieces connect.
+**Constraints**: Invariants, gotchas.
+**Recommendation**: What the implementer needs to know.
+```
+
+## Guidelines
+
+- Tools should be read-only (Read, Grep, Glob). Add Bash only if the agent needs to run diagnostic commands.
+- Model should be `sonnet` for thorough research, `haiku` for quick lookups.
+- Include concrete commands and paths — agents should not guess.
+- Output must follow the Discover phase contract: Summary, Key Files, Architecture, Constraints, Recommendation.
+'''

@@ -1,0 +1,89 @@
+[skill]
+name = "workflow-plan-review"
+description = "Use when reviewing a plan before implementation starts. Three passes: strategic (CEO), design (UX), engineering (technical). Triggers: plan review, pre-code review, architecture review, design review."
+phase = "workflow"
+
+[prompt]
+system = '''
+# Plan Review Workflow
+
+Three-pass review of implementation plans BEFORE coding starts. Catches wrong premises, bad UX, and brittle architecture while changes are still cheap.
+
+```
+Strategic Review → Design Review → Engineering Review → Approval Gate
+```
+
+---
+
+## Pass 1: Strategic Review (CEO lens)
+
+Challenge the premise, not the plan.
+
+1. **Premise check** — is the problem real? What happens if we don't build this?
+2. **Scope challenge** — is this the right scope? Too small (half-measure) or too big (over-engineering)?
+3. **Alternative analysis** — present 3 approaches: quick/cheap, complete, elegant. Include effort estimate and trade-offs for each.
+4. **Dream state** — what's the ideal implementation if no constraints? What prevents it? Are those constraints real?
+5. **Mode detection:**
+   - **CREATE** — building something new. Validate the need.
+   - **REPLAN** — changing an existing plan. What failed about the original?
+   - **HOLD** — maintenance only. Is that the right call?
+
+<HARD-GATE>
+If the premise is wrong, stop. Don't polish a plan that solves the wrong problem.
+</HARD-GATE>
+
+**Deliverable:** Strategic verdict — PROCEED / RETHINK / HOLD with reasoning.
+
+---
+
+## Pass 2: Design Review (UX lens)
+
+Rate each dimension 0-10. Explain what a 10 looks like.
+
+1. **Information architecture** — does the user find what they need? Is the hierarchy logical?
+2. **State management** — loading, error, empty, success states all designed? Edge cases?
+3. **User journey** — can the user accomplish their goal in minimal steps? Any dead ends?
+4. **Slop risk** — where will this look generic/unfinished? What needs craft?
+5. **System alignment** — does this match existing patterns? Or does it introduce inconsistency?
+6. **Accessibility** — keyboard nav, screen reader, color contrast, semantic HTML?
+7. **Decision log** — what design decisions were made and why? What was rejected?
+
+**Deliverable:** Design score (0-10 per dimension) + specific improvements to reach 10.
+
+---
+
+## Pass 3: Engineering Review (Technical lens)
+
+1. **Architecture** — data flow, service boundaries, API contracts. Any single points of failure?
+2. **Error/rescue maps** — what fails? How does it recover? What's the blast radius?
+3. **Security/threat model** — auth, input validation, data exposure, injection surfaces
+4. **Data flow edge cases** — concurrent access, partial failures, eventual consistency
+5. **Test strategy** — what tests prove this works? Unit, integration, E2E?
+6. **Performance** — hot paths, scaling bottlenecks, resource usage
+7. **Migration** — backwards compatibility, rollback plan, data migration
+
+**Deliverable:** Engineering verdict — APPROVE / NEEDS_CHANGES / BLOCK with specific issues.
+
+---
+
+## Approval Gate
+
+All three passes must be satisfied:
+- Strategic: PROCEED
+- Design: average score ≥ 7/10, no dimension below 5
+- Engineering: APPROVE
+
+If any pass fails, address the feedback and re-review that pass only.
+
+---
+
+## Anti-Rationalization Table
+
+| Excuse | Reality |
+|--------|---------|
+| "The plan is obvious, skip review" | Obvious plans fail for non-obvious reasons. 3 passes take 15 minutes. |
+| "Design doesn't matter for backend" | Backend APIs have UX too — error messages, response shapes, documentation. |
+| "We'll fix architecture later" | Architecture debt compounds faster than code debt. Fix now. |
+| "Strategic review is overkill" | If the premise is wrong, every line of code is waste. 5 minutes to check. |
+| "One pass is enough" | Each pass catches different problems. Strategic, design, and engineering failures are independent. |
+'''

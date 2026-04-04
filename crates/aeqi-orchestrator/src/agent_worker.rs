@@ -90,6 +90,8 @@ pub struct AgentWorker {
     pub project_primer: Option<String>,
     /// Shared primer from top-level config — injected into ALL workers.
     pub shared_primer: Option<String>,
+    /// Session store for recording worker transcripts.
+    pub session_store: Option<Arc<crate::SessionStore>>,
 }
 
 impl AgentWorker {
@@ -137,6 +139,7 @@ impl AgentWorker {
             persistent_agent_id: None,
             project_primer: None,
             shared_primer: None,
+            session_store: None,
         }
     }
 
@@ -180,6 +183,7 @@ impl AgentWorker {
             persistent_agent_id: None,
             project_primer: None,
             shared_primer: None,
+            session_store: None,
         }
     }
 
@@ -435,6 +439,35 @@ impl AgentWorker {
         );
         runtime_session.mark_phase(RuntimePhase::Prime, "Loaded task hook and worker identity");
 
+        // Extract parent_session_id from task labels (set by dispatch consumption).
+        let parent_session_id = {
+            let store = self.tasks.lock().await;
+            store.get(&hook.task_id.0).and_then(|t| {
+                t.labels
+                    .iter()
+                    .find_map(|l| l.strip_prefix("parent_session_id:"))
+                    .map(String::from)
+            })
+        };
+
+        // Create a DB session for this worker execution.
+        let worker_session_id = if let Some(ref ss) = self.session_store {
+            let task_id_str = hook.task_id.0.clone();
+            ss.create_session(
+                &self.agent_name,
+                Some(&self.project_name),
+                None,
+                "task",
+                &task_id_str,
+                parent_session_id.as_deref(),
+                Some(&task_id_str),
+            )
+            .await
+            .ok()
+        } else {
+            None
+        };
+
         // Build WorkerContext for middleware chain.
         let task_description_for_ctx = {
             let store = self.tasks.lock().await;
@@ -569,6 +602,13 @@ impl AgentWorker {
             RuntimePhase::Frame,
             "Prepared task context, checkpoints, and resume brief",
         );
+
+        // Record the task context into the worker session.
+        if let (Some(ss), Some(sid)) = (&self.session_store, &worker_session_id) {
+            let _ = ss
+                .record_by_session(sid, "user", &task_context, Some("worker"))
+                .await;
+        }
 
         // Inject project + shared primers into identity (before memory recall).
         let mut base_identity = self.identity.clone();
@@ -748,6 +788,17 @@ impl AgentWorker {
                     })
             }
         };
+
+        // Record the agent result into the worker session.
+        if let (Some(ss), Some(sid)) = (&self.session_store, &worker_session_id) {
+            let content = match &raw_result {
+                Ok((text, _, _)) => text.clone(),
+                Err(e) => format!("ERROR: {e}"),
+            };
+            let _ = ss
+                .record_by_session(sid, "assistant", &content, Some("worker"))
+                .await;
+        }
 
         // Fire-and-forget reflection so the worker slot does not wait on memory extraction.
         if let Ok((ref result_text, _, _)) = raw_result
@@ -1130,6 +1181,11 @@ impl AgentWorker {
                 }
                 self.state = WorkerState::Failed(error_text.to_string());
             }
+        }
+
+        // Close the worker session now that the outcome is determined.
+        if let (Some(ss), Some(sid)) = (&self.session_store, &worker_session_id) {
+            let _ = ss.close_session(sid).await;
         }
 
         if let Some(checkpoint_path) = self.checkpoint_path_for_task(&hook.task_id.0)

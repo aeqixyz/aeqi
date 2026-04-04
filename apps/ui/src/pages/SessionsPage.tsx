@@ -274,6 +274,7 @@ export default function SessionsPage() {
     Promise.all([sessionsPromise, tasksPromise]).then(() => setSessions([...list]));
   }, [agentId, agentName]);
 
+  const [childSessions, setChildSessions] = useState<SessionInfo[]>([]);
   const [linkedTasks, setLinkedTasks] = useState<any[]>([]);
 
   useEffect(() => {
@@ -287,6 +288,76 @@ export default function SessionsPage() {
     }).catch(() => {});
   }, [agentName]);
 
+  // Load child sessions for the selected session
+  useEffect(() => {
+    const sel = sessions.find(s => s.id === activeSessionId);
+    if (sel?.sessionId) {
+      api.getSessionChildren(sel.sessionId).then((d: any) => {
+        const children = (d.sessions || []).map((s: any) => ({
+          id: `child-${s.id}`,
+          name: s.name || s.task_id || "subtask",
+          type: s.status === "active" ? "active" as const : "history" as const,
+          status: s.status,
+          time: s.created_at,
+          sessionId: s.id,
+          agentId: s.agent_id,
+        }));
+        setChildSessions(children);
+      }).catch(() => setChildSessions([]));
+    } else {
+      setChildSessions([]);
+    }
+  }, [activeSessionId, sessions]);
+
+  // Reconstruct interleaved segments from a flat timeline (messages + tool events).
+  // DB order is: user, tool_complete(s), assistant — tool events recorded during streaming
+  // come before the final assistant text. We collect pending tool events and attach them
+  // to the next assistant message.
+  const processRawMessages = useCallback((rawMessages: any[]): Message[] => {
+    const processed: Message[] = [];
+    let pendingToolSegments: MessageSegment[] = [];
+
+    for (const m of rawMessages) {
+      const eventType = m.event_type || "message";
+      if (eventType === "tool_complete") {
+        // Collect tool events — they will attach to the next assistant message
+        const meta = m.metadata || {};
+        pendingToolSegments.push({
+          kind: "tool" as const,
+          event: {
+            type: "complete" as const,
+            name: meta.tool_name || m.content || "tool",
+            success: meta.success !== false,
+            input_preview: meta.input_preview,
+            output_preview: meta.output_preview,
+            duration_ms: meta.duration_ms,
+            timestamp: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
+          },
+        });
+      } else if (m.role === "assistant") {
+        // Build segments: pending tools + final text
+        const segments: MessageSegment[] = [
+          ...pendingToolSegments,
+          { kind: "text" as const, text: m.content },
+        ];
+        pendingToolSegments = [];
+        processed.push({
+          ...m,
+          segments,
+          timestamp: m.created_at ? new Date(m.created_at).getTime() : undefined,
+        });
+      } else {
+        // Non-assistant, non-tool: flush any orphaned pending tools (shouldn't happen normally)
+        pendingToolSegments = [];
+        processed.push({
+          ...m,
+          timestamp: m.created_at ? new Date(m.created_at).getTime() : (m.timestamp ? new Date(m.timestamp).getTime() : undefined),
+        });
+      }
+    }
+    return processed;
+  }, []);
+
   // Load messages for selected session
   useEffect(() => {
     if (activeSessionId === "perpetual" && (agentId || agentName)) {
@@ -297,32 +368,17 @@ export default function SessionsPage() {
         params.channel_name = agentName.toLowerCase();
       }
       api.getSessionMessages(params)
-        .then((d: any) => setMessages(
-          (d.messages || []).map((m: any) => ({
-            ...m,
-            timestamp: m.created_at ? new Date(m.created_at).getTime() : undefined,
-          }))
-        ))
+        .then((d: any) => setMessages(processRawMessages(d.messages || [])))
         .catch(() => setMessages([]));
     } else if (activeSessionId === "perpetual") {
       api.getSessionMessages({ limit: 50 })
-        .then((d: any) => setMessages(
-          (d.messages || []).map((m: any) => ({
-            ...m,
-            timestamp: m.created_at ? new Date(m.created_at).getTime() : undefined,
-          }))
-        ))
+        .then((d: any) => setMessages(processRawMessages(d.messages || [])))
         .catch(() => setMessages([]));
     } else if (activeSessionId.startsWith("new-")) {
       setMessages([]);
     } else {
       api.getSessionMessages({ channel_name: `transcript:task:${activeSessionId}`, limit: 50 })
-        .then((d: any) => setMessages(
-          (d.messages || []).map((m: any) => ({
-            ...m,
-            timestamp: m.created_at ? new Date(m.created_at).getTime() : undefined,
-          }))
-        ))
+        .then((d: any) => setMessages(processRawMessages(d.messages || [])))
         .catch(() => setMessages([]));
     }
 
@@ -620,6 +676,34 @@ export default function SessionsPage() {
                   <span className="session-list-time"><SubagentTimer start={s.startTime} /></span>
                 )}
                 {s.duration && <span className="session-list-time">{s.duration}</span>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {childSessions.length > 0 && (
+          <div className="sessions-list-section">
+            <div className="sessions-list-header">spawned work</div>
+            {childSessions.map(s => (
+              <div key={s.id}
+                className={`session-list-item${activeSessionId === s.id ? " active" : ""}`}
+                onClick={() => {
+                  setActiveSessionId(s.id);
+                  if (s.sessionId) {
+                    api.getSessionMessages({ session_id: s.sessionId, limit: 50 })
+                      .then((d: any) => setMessages(
+                        (d.messages || []).map((m: any) => ({
+                          ...m,
+                          timestamp: m.created_at ? new Date(m.created_at).getTime() : undefined,
+                        }))
+                      ))
+                      .catch(() => setMessages([]));
+                  }
+                }}
+              >
+                <span className="session-list-dot">{s.status === "active" ? "\u25CF" : "\u25CB"}</span>
+                <span className="session-list-name">{s.name}</span>
+                {s.time && <span className="session-list-time">{timeAgo(s.time)}</span>}
               </div>
             ))}
           </div>

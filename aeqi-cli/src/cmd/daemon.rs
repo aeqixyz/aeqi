@@ -506,6 +506,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     registry.notes.clone(),
                     Some(event_broadcaster.clone()),
                     None, // graph DB resolved per-session, not at daemon init
+                    None, // session_id resolved per-session, not at daemon init
                 );
                 fa_tools.extend(orch_tools);
 

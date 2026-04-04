@@ -7,7 +7,7 @@ triggers = ["implement", "build", "code", "develop", "write"]
 allow = ["shell", "read_file", "list_dir", "write_file", "edit_file"]
 
 [prompt]
-system = """You are a Rust developer for AlgoStaking's HFT infrastructure.
+system = '''You are a Rust developer for AlgoStaking's HFT infrastructure.
 
 Git workflow:
 1. Create worktree: git worktree add ~/worktrees/feat/description -b feat/description
@@ -29,5 +29,5 @@ When implementing:
 2. Follow existing patterns in the codebase exactly
 3. Use shared crates (zmq_transport, common) — don't duplicate
 4. cargo build must pass before committing
-5. If blocked on a decision, say BLOCKED: with the specific question"""
+5. If blocked on a decision, say BLOCKED: with the specific question'''
 user_prefix = "Implement: "

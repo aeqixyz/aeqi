@@ -768,6 +768,7 @@ pub fn build_orchestration_tools(
     notes: Option<Arc<crate::notes::Notes>>,
     event_broadcaster: Option<Arc<crate::EventBroadcaster>>,
     graph_db_path: Option<PathBuf>,
+    session_id: Option<String>,
 ) -> Vec<Arc<dyn Tool>> {
     let leader_name = registry.leader_agent_name.clone();
     let default_project = registry
@@ -782,6 +783,9 @@ pub fn build_orchestration_tools(
             .with_project(project_name);
     if let Some(broadcaster) = event_broadcaster {
         delegate_tool = delegate_tool.with_event_broadcaster(broadcaster);
+    }
+    if let Some(sid) = session_id {
+        delegate_tool = delegate_tool.with_session_id(sid);
     }
     let mut tools: Vec<Arc<dyn Tool>> = vec![
         Arc::new(QuestDetailTool::new(registry.clone())),

@@ -663,6 +663,7 @@ mod tests {
                         create_task: false,
                         skill: None,
                         reply_to: None,
+                        parent_session_id: None,
                     },
                 )
                 .with_ack_required(),

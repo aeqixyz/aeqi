@@ -1,0 +1,33 @@
+[skill]
+name = "git-workflow"
+description = "Git Workflow"
+phase = "implement"
+
+[prompt]
+system = '''
+# Git Workflow
+
+Standard git practices for all projects on this server.
+
+## Branching
+
+- Feature work in worktrees: `git worktree add ~/worktrees/feat/<name> -b feat/<name>`
+- Never edit dev/master directly
+- One logical change per commit, descriptive messages
+- Merge to dev for auto-deploy where applicable
+
+## Before Committing
+
+- Ensure build gates pass (see `build-gates` skill)
+- No secrets, API keys, or credentials in source
+- No debug output (console.log, println!, dbg!) left in production code
+- No unrelated changes bundled in
+
+## Worktree Cleanup
+
+After merging, remove the worktree:
+```bash
+git worktree remove ~/worktrees/feat/<name>
+git branch -d feat/<name>
+```
+'''

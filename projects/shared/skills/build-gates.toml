@@ -1,0 +1,41 @@
+[skill]
+name = "build-gates"
+description = "Build Gates"
+phase = "verify"
+
+[prompt]
+system = '''
+# Build Gates
+
+Minimum quality gates that must pass before work is considered done. Check the project type and apply the relevant gates.
+
+## Rust Projects
+
+```bash
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
+
+Both must pass with zero warnings/failures.
+
+## Frontend Projects (Vite / React / TypeScript)
+
+```bash
+npx tsc --noEmit
+npm run build
+```
+
+Both must pass. Type errors and build failures are blockers.
+
+## Solidity Projects
+
+```bash
+forge build
+forge test
+```
+
+## General
+
+- If the project has a CI pipeline, the same checks CI runs should pass locally first
+- If you're unsure which gates apply, check the project's CLAUDE.md or Cargo.toml/package.json
+'''

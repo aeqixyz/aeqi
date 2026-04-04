@@ -19,6 +19,9 @@ pub enum DispatchKind {
         skill: Option<String>,
         /// Dispatch ID this is replying to (for chained delegations).
         reply_to: Option<String>,
+        /// Session ID of the calling agent, so the child worker can set parent_id.
+        #[serde(default)]
+        parent_session_id: Option<String>,
     },
     /// A response to a previous DelegateRequest.
     DelegateResponse {
@@ -59,6 +62,7 @@ impl DispatchKind {
                 create_task,
                 skill,
                 reply_to,
+                ..
             } => {
                 let mut text = format!(
                     "Delegation request (response_mode: {response_mode}, create_task: {create_task})"
@@ -897,6 +901,7 @@ mod tests {
             create_task: false,
             skill: None,
             reply_to: None,
+            parent_session_id: None,
         }
     }
 

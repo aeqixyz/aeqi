@@ -5,6 +5,8 @@ use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 use std::time::Instant;
 
+use aeqi_tools::skill::Skill;
+
 use crate::helpers::load_config;
 
 #[derive(Debug, Deserialize)]
@@ -75,7 +77,17 @@ fn extract_frontmatter_field(content: &str, field: &str) -> Option<String> {
     None
 }
 
-fn scan_dir(dir: &std::path::Path, source: &str) -> Vec<serde_json::Value> {
+/// Discover skills in a directory using the canonical Skill parser, tagged with source.
+fn discover_skills(dir: &std::path::Path, source: &str) -> Vec<(Skill, String)> {
+    Skill::discover(dir)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| (s, source.to_string()))
+        .collect()
+}
+
+/// Scan a directory for agent template .md files (YAML frontmatter).
+fn scan_agent_dir(dir: &std::path::Path, source: &str) -> Vec<serde_json::Value> {
     let mut items = Vec::new();
     if !dir.exists() {
         return items;
@@ -83,7 +95,7 @@ fn scan_dir(dir: &std::path::Path, source: &str) -> Vec<serde_json::Value> {
     for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
         let path = entry.path();
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        if ext != "toml" && ext != "md" {
+        if ext != "md" {
             continue;
         }
         let name = path
@@ -110,7 +122,6 @@ fn scan_dir(dir: &std::path::Path, source: &str) -> Vec<serde_json::Value> {
         items.push(serde_json::json!({
             "name": name,
             "source": source,
-            "kind": if ext == "toml" { "skill" } else { "doc" },
             "preview": preview,
             "phase": phase,
             "model": model,
@@ -416,9 +427,12 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                         let phase_filter = args.get("phase").and_then(|v| v.as_str());
                         let name_filter = args.get("name").and_then(|v| v.as_str());
 
-                        let mut all_skills = Vec::new();
-                        all_skills
-                            .extend(scan_dir(&base_dir.join("projects/shared/skills"), "shared"));
+                        // Discover all .toml skills via the canonical Skill parser.
+                        let mut all_skills: Vec<(Skill, String)> = Vec::new();
+                        all_skills.extend(discover_skills(
+                            &base_dir.join("projects/shared/skills"),
+                            "shared",
+                        ));
                         for entry in std::fs::read_dir(base_dir.join("projects"))
                             .into_iter()
                             .flatten()
@@ -428,17 +442,21 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                             if p == "shared" {
                                 continue;
                             }
-                            all_skills.extend(scan_dir(&entry.path().join("skills"), &p));
+                            all_skills.extend(discover_skills(&entry.path().join("skills"), &p));
                         }
 
                         if action == "get" {
                             let name = name_filter.unwrap_or("");
-                            match all_skills.into_iter().find(|s| {
-                                s.get("name")
-                                    .and_then(|n| n.as_str())
-                                    .is_some_and(|n| n == name)
-                            }) {
-                                Some(s) => Ok(s),
+                            match all_skills.into_iter().find(|(s, _)| s.skill.name == name) {
+                                Some((s, source)) => Ok(serde_json::json!({
+                                    "name": s.skill.name,
+                                    "source": source,
+                                    "description": s.skill.description,
+                                    "phase": s.skill.phase,
+                                    "model": s.skill.model,
+                                    "prompt": s.prompt.system,
+                                    "tools": { "allow": s.tools.allow, "deny": s.tools.deny },
+                                })),
                                 None => Ok(
                                     serde_json::json!({"ok": false, "error": format!("skill '{name}' not found")}),
                                 ),
@@ -446,23 +464,19 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                         } else {
                             let filtered: Vec<serde_json::Value> = all_skills
                                 .into_iter()
-                                .filter(|s| {
-                                    let project_ok = project_filter.is_none_or(|pf| {
-                                        let src =
-                                            s.get("source").and_then(|v| v.as_str()).unwrap_or("");
-                                        src == pf || src == "shared"
-                                    });
-                                    let phase_ok = phase_filter.is_none_or(|pf| {
-                                        s.get("phase")
-                                            .and_then(|v| v.as_str())
-                                            .is_some_and(|p| p == pf)
-                                    });
+                                .filter(|(s, source)| {
+                                    let project_ok = project_filter
+                                        .is_none_or(|pf| source == pf || source == "shared");
+                                    let phase_ok =
+                                        phase_filter.is_none_or(|pf| s.skill.phase == pf);
                                     project_ok && phase_ok
                                 })
-                                .map(|s| {
+                                .map(|(s, source)| {
                                     serde_json::json!({
-                                        "name": s["name"], "source": s["source"],
-                                        "phase": s["phase"], "preview": s["preview"],
+                                        "name": s.skill.name,
+                                        "source": source,
+                                        "phase": s.skill.phase,
+                                        "description": s.skill.description,
                                     })
                                 })
                                 .collect();
@@ -483,8 +497,10 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                         let name_filter = args.get("name").and_then(|v| v.as_str());
 
                         let mut all_agents = Vec::new();
-                        all_agents
-                            .extend(scan_dir(&base_dir.join("projects/shared/agents"), "shared"));
+                        all_agents.extend(scan_agent_dir(
+                            &base_dir.join("projects/shared/agents"),
+                            "shared",
+                        ));
                         for entry in std::fs::read_dir(base_dir.join("projects"))
                             .into_iter()
                             .flatten()
@@ -494,7 +510,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                             if p == "shared" {
                                 continue;
                             }
-                            all_agents.extend(scan_dir(&entry.path().join("agents"), &p));
+                            all_agents.extend(scan_agent_dir(&entry.path().join("agents"), &p));
                         }
 
                         if action == "get" {

@@ -33,6 +33,8 @@ pub struct Session {
     pub status: String,
     pub created_at: String,
     pub closed_at: Option<String>,
+    pub parent_id: Option<String>,
+    pub task_id: Option<String>,
 }
 
 /// A single typed thread event in a chat timeline.
@@ -179,6 +181,14 @@ impl SessionStore {
              CREATE INDEX IF NOT EXISTS idx_sess_type ON sessions(session_type);",
         )
         .context("failed to create sessions table")?;
+
+        // ── Phase A: Add parent_id and task_id to sessions ──
+        let _ = conn.execute_batch("ALTER TABLE sessions ADD COLUMN parent_id TEXT;");
+        let _ = conn.execute_batch("ALTER TABLE sessions ADD COLUMN task_id TEXT;");
+        let _ = conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_sess_parent ON sessions(parent_id);
+             CREATE INDEX IF NOT EXISTS idx_sess_task ON sessions(task_id);",
+        );
 
         // ── 4B: Backfill from channels ──
         let _ = conn.execute_batch(
@@ -588,6 +598,32 @@ impl SessionStore {
         Ok(messages)
     }
 
+    /// Retrieve full timeline (messages + tool events) by agent UUID.
+    pub async fn get_timeline_by_agent_id(
+        &self,
+        agent_id: &str,
+        limit: usize,
+    ) -> Result<Vec<ThreadEvent>> {
+        let db = self.db.lock().await;
+
+        // Find the chat_id for this agent_id.
+        let chat_id: Option<i64> = db
+            .query_row(
+                "SELECT chat_id FROM channels WHERE agent_id = ?1 LIMIT 1",
+                params![agent_id],
+                |row| row.get(0),
+            )
+            .ok();
+
+        let chat_id = match chat_id {
+            Some(id) => id,
+            None => return Ok(Vec::new()),
+        };
+        drop(db);
+
+        self.timeline(chat_id, limit).await
+    }
+
     // ── Session methods (UUID-based) ──
 
     /// Get or create a session UUID for a legacy chat_id.
@@ -643,6 +679,28 @@ impl SessionStore {
             .await
     }
 
+    /// Record a typed event by session UUID (resolves to legacy chat_id internally).
+    pub async fn record_event_by_session(
+        &self,
+        session_id: &str,
+        event_type: &str,
+        role: &str,
+        content: &str,
+        source: Option<&str>,
+        metadata: Option<&serde_json::Value>,
+    ) -> Result<()> {
+        let chat_id: i64 = {
+            let db = self.db.lock().await;
+            db.query_row(
+                "SELECT legacy_chat_id FROM sessions WHERE id = ?1",
+                params![session_id],
+                |row| row.get(0),
+            )?
+        };
+        self.record_event(chat_id, event_type, role, content, source, metadata)
+            .await
+    }
+
     /// Get message history by session UUID.
     pub async fn history_by_session(
         &self,
@@ -660,6 +718,23 @@ impl SessionStore {
         self.recent(chat_id, limit).await
     }
 
+    /// Get full timeline (messages + tool events) by session UUID.
+    pub async fn timeline_by_session(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> Result<Vec<ThreadEvent>> {
+        let chat_id: i64 = {
+            let db = self.db.lock().await;
+            db.query_row(
+                "SELECT legacy_chat_id FROM sessions WHERE id = ?1",
+                params![session_id],
+                |row| row.get(0),
+            )?
+        };
+        self.timeline(chat_id, limit).await
+    }
+
     /// List sessions, optionally filtered by agent_id or project_id.
     pub async fn list_sessions(
         &self,
@@ -672,7 +747,7 @@ impl SessionStore {
         let (sql, boxed_params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
             match (agent_id, project_id) {
                 (Some(aid), Some(pid)) => (
-                    "SELECT id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, status, created_at, closed_at \
+                    "SELECT id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, status, created_at, closed_at, parent_id, task_id \
                      FROM sessions WHERE agent_id = ?1 AND project_id = ?2 ORDER BY created_at DESC LIMIT ?3"
                         .to_string(),
                     vec![
@@ -682,7 +757,7 @@ impl SessionStore {
                     ],
                 ),
                 (Some(aid), None) => (
-                    "SELECT id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, status, created_at, closed_at \
+                    "SELECT id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, status, created_at, closed_at, parent_id, task_id \
                      FROM sessions WHERE agent_id = ?1 ORDER BY created_at DESC LIMIT ?2"
                         .to_string(),
                     vec![
@@ -691,7 +766,7 @@ impl SessionStore {
                     ],
                 ),
                 (None, Some(pid)) => (
-                    "SELECT id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, status, created_at, closed_at \
+                    "SELECT id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, status, created_at, closed_at, parent_id, task_id \
                      FROM sessions WHERE project_id = ?1 ORDER BY created_at DESC LIMIT ?2"
                         .to_string(),
                     vec![
@@ -700,7 +775,7 @@ impl SessionStore {
                     ],
                 ),
                 (None, None) => (
-                    "SELECT id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, status, created_at, closed_at \
+                    "SELECT id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, status, created_at, closed_at, parent_id, task_id \
                      FROM sessions ORDER BY created_at DESC LIMIT ?1"
                         .to_string(),
                     vec![Box::new(limit as i64) as Box<dyn rusqlite::types::ToSql>],
@@ -723,6 +798,8 @@ impl SessionStore {
                     status: row.get(7)?,
                     created_at: row.get(8)?,
                     closed_at: row.get(9)?,
+                    parent_id: row.get(10)?,
+                    task_id: row.get(11)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -738,6 +815,8 @@ impl SessionStore {
         department_id: Option<&str>,
         session_type: &str,
         name: &str,
+        parent_id: Option<&str>,
+        task_id: Option<&str>,
     ) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
         let legacy_chat_id = {
@@ -751,9 +830,9 @@ impl SessionStore {
         };
         let db = self.db.lock().await;
         db.execute(
-            "INSERT INTO sessions (id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, status)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active')",
-            params![id, legacy_chat_id, agent_id, project_id, department_id, session_type, name],
+            "INSERT INTO sessions (id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, status, parent_id, task_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active', ?8, ?9)",
+            params![id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, parent_id, task_id],
         )?;
         Ok(id)
     }
@@ -774,7 +853,7 @@ impl SessionStore {
         let db = self.db.lock().await;
         let session = db
             .query_row(
-                "SELECT id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, status, created_at, closed_at
+                "SELECT id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, status, created_at, closed_at, parent_id, task_id
                  FROM sessions WHERE id = ?1",
                 params![session_id],
                 |row| {
@@ -789,11 +868,41 @@ impl SessionStore {
                         status: row.get(7)?,
                         created_at: row.get(8)?,
                         closed_at: row.get(9)?,
+                        parent_id: row.get(10)?,
+                        task_id: row.get(11)?,
                     })
                 },
             )
             .optional()?;
         Ok(session)
+    }
+
+    /// List child sessions for a given parent session.
+    pub async fn list_children(&self, parent_id: &str) -> Result<Vec<Session>> {
+        let db = self.db.lock().await;
+        let mut stmt = db.prepare(
+            "SELECT id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, status, created_at, closed_at, parent_id, task_id
+             FROM sessions WHERE parent_id = ?1 ORDER BY created_at DESC",
+        )?;
+        let rows = stmt
+            .query_map(params![parent_id], |row| {
+                Ok(Session {
+                    id: row.get(0)?,
+                    legacy_chat_id: row.get(1)?,
+                    agent_id: row.get(2)?,
+                    project_id: row.get(3)?,
+                    department_id: row.get(4)?,
+                    session_type: row.get(5)?,
+                    name: row.get(6)?,
+                    status: row.get(7)?,
+                    created_at: row.get(8)?,
+                    closed_at: row.get(9)?,
+                    parent_id: row.get(10)?,
+                    task_id: row.get(11)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 }
 
