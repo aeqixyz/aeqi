@@ -16,8 +16,8 @@ function Nav() {
       {...fade(0.1)}
     >
       <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
-        <a href="/" className="text-[16px] font-medium tracking-tight text-black/40">
-          æqi.ai
+        <a href="/" className="text-[20px] font-bold tracking-tight text-black">
+          aeqi.ai
         </a>
         <div className="flex items-center gap-5">
           <a
@@ -103,7 +103,10 @@ function Footer() {
   return (
     <footer className="border-t border-black/5 py-8 px-6">
       <div className="max-w-5xl mx-auto flex items-center justify-between text-[13px] text-black/25">
-        <span className="font-medium tracking-tight">aeqi.ai</span>
+        <span className="flex items-center gap-2 font-medium tracking-tight">
+          <span className="text-[18px] font-bold text-black/20">æ</span>
+          aeqi.ai
+        </span>
         <div className="flex items-center gap-5">
           <a
             href="https://github.com/0xAEQI/aeqi"
