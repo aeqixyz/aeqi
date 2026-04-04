@@ -49,7 +49,7 @@ function Nav() {
           href="/"
           className="text-[14px] font-bold tracking-[0.06em] hover:opacity-80 transition-opacity"
         >
-          <span className="text-[#c0392b]">aeqi</span><span className="text-white">.ai</span>
+          <span className="text-[#c0392b]">aeqi</span><span className="text-white/30">.</span><span className="text-white">ai</span>
         </a>
         <div className="flex items-center gap-4">
           <a
@@ -115,7 +115,7 @@ function Footer() {
         className="backdrop-blur-2xl bg-white/[0.03] border border-white/[0.07] rounded-full px-5 py-2 flex items-center gap-4 text-[11px] text-white/25"
 
       >
-        <span className="tracking-[0.08em]"><span className="text-[#c0392b]">aeqi</span><span className="text-white">.ai</span></span>
+        <span className="tracking-[0.08em]"><span className="text-[#c0392b]">aeqi</span><span className="text-white/30">.</span><span className="text-white">ai</span></span>
         <div className="w-px h-3 bg-white/[0.08]" />
         <GitHubStars />
         <a href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md" className="hover:text-white/50 transition-colors">docs</a>
