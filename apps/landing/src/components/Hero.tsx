@@ -26,13 +26,13 @@ function InstallCommand() {
     >
       <button
         onClick={copy}
-        className="group flex items-center gap-3 text-[14px] tracking-wide cursor-pointer transition-colors"
+        className="group flex items-center gap-3 text-[15px] tracking-wide cursor-pointer transition-colors"
       >
         <code className="text-white/25 group-hover:text-white/40 transition-colors">
           <span className="text-white/15 select-none">$ </span>cargo install aeqi
         </code>
         <span
-          className="text-[12px] transition-all duration-300"
+          className="text-[13px] transition-all duration-300"
           style={{ color: copied ? "#c0392b" : "rgba(255,255,255,0.15)" }}
         >
           {copied ? "copied" : "copy"}
@@ -98,7 +98,7 @@ export function Hero() {
 
       {/* Tagline */}
       <motion.p
-        className="mt-10 text-[17px] md:text-[20px] text-white/45 tracking-wide text-center relative z-10"
+        className="mt-12 text-[20px] md:text-[24px] text-white/45 tracking-wide text-center relative z-10"
 
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}

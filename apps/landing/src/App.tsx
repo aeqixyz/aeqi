@@ -20,10 +20,10 @@ function GitHubStars() {
       href="https://github.com/0xAEQI/aeqi"
       className="flex items-center gap-2 text-white/35 hover:text-white/60 transition-colors"
     >
-      <svg viewBox="0 0 16 16" fill="currentColor" className="w-[15px] h-[15px]">
+      <svg viewBox="0 0 16 16" fill="currentColor" className="w-[16px] h-[16px]">
         <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z" />
       </svg>
-      <span className="text-[12px]">star</span>
+      <span className="text-[13px]">star</span>
       {stars !== null && (
         <span className="text-[10px] bg-white/[0.06] px-1.5 py-0.5 rounded">
           {stars}
@@ -42,25 +42,25 @@ function Nav() {
       transition={{ duration: 0.6, delay: 0.4, ease: "easeOut" }}
     >
       <div
-        className="backdrop-blur-2xl bg-white/[0.03] border border-white/[0.07] rounded-full px-6 py-3 flex items-center gap-6"
+        className="backdrop-blur-2xl bg-white/[0.03] border border-white/[0.07] rounded-full px-7 py-3.5 flex items-center gap-7"
 
       >
         <a
           href="/"
-          className="text-[16px] font-bold tracking-[0.06em] hover:opacity-80 transition-opacity"
+          className="text-[18px] font-bold tracking-[0.06em] hover:opacity-80 transition-opacity"
         >
           <span className="text-[#c0392b]">aeqi</span><span className="text-white/30">.</span><span className="text-white">ai</span>
         </a>
         <div className="flex items-center gap-4">
           <a
             href="mailto:enterprise@aeqi.ai"
-            className="text-[13px] text-white/35 hover:text-white/60 transition-colors"
+            className="text-[14px] text-white/35 hover:text-white/60 transition-colors"
           >
             enterprise
           </a>
           <a
             href="https://app.aeqi.ai"
-            className="bg-white text-[#06060E] rounded-full px-5 py-2 text-[13px] font-semibold hover:bg-white/90 transition-colors"
+            className="bg-white text-[#06060E] rounded-full px-6 py-2.5 text-[14px] font-semibold hover:bg-white/90 transition-colors"
     
           >
             Get Started
@@ -112,7 +112,7 @@ function Footer() {
       transition={{ duration: 0.6, delay: 1.2, ease: "easeOut" }}
     >
       <div
-        className="backdrop-blur-2xl bg-white/[0.03] border border-white/[0.07] rounded-full px-6 py-2.5 flex items-center gap-5 text-[12px] text-white/25"
+        className="backdrop-blur-2xl bg-white/[0.03] border border-white/[0.07] rounded-full px-7 py-3 flex items-center gap-6 text-[13px] text-white/25"
 
       >
         <span className="tracking-[0.08em]"><span className="text-[#c0392b]">aeqi</span><span className="text-white/30">.</span><span className="text-white">ai</span></span>
