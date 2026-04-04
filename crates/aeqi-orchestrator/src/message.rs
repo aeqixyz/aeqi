@@ -214,14 +214,8 @@ impl Dispatch {
             .get("requires_ack")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        let retry_count = c
-            .get("retry_count")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32;
-        let max_retries = c
-            .get("max_retries")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(3) as u32;
+        let retry_count = c.get("retry_count").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+        let max_retries = c.get("max_retries").and_then(|v| v.as_u64()).unwrap_or(3) as u32;
         let first_sent_at = c
             .get("first_sent_at")
             .and_then(|v| v.as_str())
@@ -343,10 +337,7 @@ impl DispatchBus {
 
     pub async fn read(&self, recipient: &str) -> Vec<Dispatch> {
         match self.event_store.read_dispatches(recipient).await {
-            Ok(events) => events
-                .iter()
-                .filter_map(Dispatch::from_event)
-                .collect(),
+            Ok(events) => events.iter().filter_map(Dispatch::from_event).collect(),
             Err(e) => {
                 warn!(error = %e, "failed to read dispatches");
                 Vec::new()
@@ -356,10 +347,7 @@ impl DispatchBus {
 
     pub async fn all(&self) -> Vec<Dispatch> {
         match self.event_store.all_dispatches().await {
-            Ok(events) => events
-                .iter()
-                .filter_map(Dispatch::from_event)
-                .collect(),
+            Ok(events) => events.iter().filter_map(Dispatch::from_event).collect(),
             Err(e) => {
                 warn!(error = %e, "failed to list all dispatches");
                 Vec::new()
@@ -379,7 +367,7 @@ impl DispatchBus {
         // For the EventStore backend, we query synchronously via a try_lock.
         // Fall back to 0 if the lock is held (non-blocking).
         0 // This method is only used in tests with the old memory backend.
-          // The async health() method should be used instead.
+        // The async health() method should be used instead.
     }
 
     /// Summarize current control-plane delivery health.
@@ -398,10 +386,7 @@ impl DispatchBus {
                 tokio::task::block_in_place(|| {
                     handle.block_on(async {
                         match self.event_store.drain_dispatches().await {
-                            Ok(events) => events
-                                .iter()
-                                .filter_map(Dispatch::from_event)
-                                .collect(),
+                            Ok(events) => events.iter().filter_map(Dispatch::from_event).collect(),
                             Err(e) => {
                                 warn!(error = %e, "failed to drain dispatches");
                                 Vec::new()
@@ -424,11 +409,12 @@ impl DispatchBus {
     /// Return unacknowledged dispatches older than `max_age_secs` that haven't
     /// exceeded their retry limit. Increments retry_count on each returned dispatch.
     pub async fn retry_unacked(&self, max_age_secs: u64) -> Vec<Dispatch> {
-        match self.event_store.retry_unacked_dispatches(max_age_secs).await {
-            Ok(events) => events
-                .iter()
-                .filter_map(Dispatch::from_event)
-                .collect(),
+        match self
+            .event_store
+            .retry_unacked_dispatches(max_age_secs)
+            .await
+        {
+            Ok(events) => events.iter().filter_map(Dispatch::from_event).collect(),
             Err(e) => {
                 warn!(error = %e, "failed to retry unacked dispatches");
                 Vec::new()
@@ -439,10 +425,7 @@ impl DispatchBus {
     /// Return dispatches that have exceeded their max retry count (dead letters).
     pub async fn dead_letters(&self) -> Vec<Dispatch> {
         match self.event_store.dead_letter_dispatches().await {
-            Ok(events) => events
-                .iter()
-                .filter_map(Dispatch::from_event)
-                .collect(),
+            Ok(events) => events.iter().filter_map(Dispatch::from_event).collect(),
             Err(e) => {
                 warn!(error = %e, "failed to get dead letter dispatches");
                 Vec::new()
@@ -458,11 +441,7 @@ impl DispatchBus {
     /// No-op: state is already persisted in EventStore (SQLite).
     /// Returns the count of pending dispatches for logging.
     pub async fn load(&self) -> Result<usize> {
-        let count = self
-            .event_store
-            .pending_dispatch_count()
-            .await
-            .unwrap_or(0) as usize;
+        let count = self.event_store.pending_dispatch_count().await.unwrap_or(0) as usize;
         if count > 0 {
             debug!(count, "dispatch bus has persisted unread messages");
         }

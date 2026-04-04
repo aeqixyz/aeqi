@@ -931,7 +931,8 @@ impl MessageRouter {
                         .filter(|t| {
                             !matches!(
                                 t.status,
-                                aeqi_quests::QuestStatus::Done | aeqi_quests::QuestStatus::Cancelled
+                                aeqi_quests::QuestStatus::Done
+                                    | aeqi_quests::QuestStatus::Cancelled
                             )
                         })
                         .count();
@@ -956,7 +957,8 @@ impl MessageRouter {
                         .filter(|t| {
                             !matches!(
                                 t.status,
-                                aeqi_quests::QuestStatus::Done | aeqi_quests::QuestStatus::Cancelled
+                                aeqi_quests::QuestStatus::Done
+                                    | aeqi_quests::QuestStatus::Cancelled
                             )
                         })
                         .count();

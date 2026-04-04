@@ -1174,7 +1174,10 @@ mod tests {
 
         let mem = SqliteInsights::open(&db_path, 30.0).unwrap();
 
-        let results = mem.search(&InsightQuery::new("old data", 10)).await.unwrap();
+        let results = mem
+            .search(&InsightQuery::new("old data", 10))
+            .await
+            .unwrap();
         assert_eq!(results.len(), 1);
         assert!(results[0].agent_id.is_none());
 
@@ -1321,7 +1324,12 @@ mod tests {
             .await
             .unwrap();
         let _id2 = mem
-            .store("key-2", "second unique content", InsightCategory::Fact, None)
+            .store(
+                "key-2",
+                "second unique content",
+                InsightCategory::Fact,
+                None,
+            )
             .await
             .unwrap();
 

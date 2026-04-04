@@ -1,5 +1,5 @@
-use crate::store::QuestBoard;
 use crate::quest::{Priority, Quest, QuestStatus};
+use crate::store::QuestBoard;
 
 /// Query builder for filtering quests.
 pub struct QuestQuery<'a> {

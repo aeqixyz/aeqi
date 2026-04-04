@@ -461,9 +461,8 @@ impl EventStore {
     /// Get all dispatches (for health checks, listing, etc.).
     pub async fn all_dispatches(&self) -> Result<Vec<Event>> {
         let db = self.db.lock().await;
-        let mut stmt = db.prepare(
-            "SELECT * FROM events WHERE type = 'dispatch' ORDER BY created_at ASC",
-        )?;
+        let mut stmt =
+            db.prepare("SELECT * FROM events WHERE type = 'dispatch' ORDER BY created_at ASC")?;
         let events = stmt
             .query_map([], |row| Ok(row_to_event(row)))?
             .filter_map(|r| r.ok())

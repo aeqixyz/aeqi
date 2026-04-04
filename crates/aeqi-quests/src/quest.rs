@@ -367,13 +367,15 @@ mod tests {
         quest.set_aeqi_metadata("runtime", serde_json::json!({"phase": "act"}));
 
         assert_eq!(
-            quest.metadata
+            quest
+                .metadata
                 .pointer("/_legacy")
                 .and_then(|value| value.as_str()),
             Some("legacy")
         );
         assert_eq!(
-            quest.metadata
+            quest
+                .metadata
                 .pointer("/aeqi/runtime/phase")
                 .and_then(|value| value.as_str()),
             Some("act")

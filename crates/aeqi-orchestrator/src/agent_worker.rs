@@ -1598,8 +1598,9 @@ impl AgentWorker {
                                 continue;
                             }
                             if aeqi_insights::dedup::is_support(content, &entry.content) {
-                                let _ =
-                                    mem.store_insight_edge(&id, &entry.id, "supports", 0.7).await;
+                                let _ = mem
+                                    .store_insight_edge(&id, &entry.id, "supports", 0.7)
+                                    .await;
                                 debug!(
                                     worker = %worker_name,
                                     source = %id, target = %entry.id,

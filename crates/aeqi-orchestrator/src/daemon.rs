@@ -1236,20 +1236,35 @@ impl Daemon {
                     let spent = ipc_ctx.event_store.daily_cost().await.unwrap_or(0.0);
                     let budget = ipc_ctx.daily_budget_usd;
                     let remaining = (budget - spent).max(0.0);
-                    let project_costs = ipc_ctx.event_store.daily_costs_by_project().await.unwrap_or_default();
+                    let project_costs = ipc_ctx
+                        .event_store
+                        .daily_costs_by_project()
+                        .await
+                        .unwrap_or_default();
                     let project_budget_info: serde_json::Map<String, serde_json::Value> = {
-                        let mut all_projects: std::collections::HashSet<String> = ipc_ctx.project_budgets.keys().cloned().collect();
+                        let mut all_projects: std::collections::HashSet<String> =
+                            ipc_ctx.project_budgets.keys().cloned().collect();
                         all_projects.extend(project_costs.keys().cloned());
-                        all_projects.into_iter().map(|name| {
-                            let p_spent = project_costs.get(&name).copied().unwrap_or(0.0);
-                            let p_budget = ipc_ctx.project_budgets.get(&name).copied().unwrap_or(budget);
-                            let p_remaining = (p_budget - p_spent).max(0.0);
-                            (name, serde_json::json!({
-                                "spent_usd": p_spent,
-                                "budget_usd": p_budget,
-                                "remaining_usd": p_remaining,
-                            }))
-                        }).collect()
+                        all_projects
+                            .into_iter()
+                            .map(|name| {
+                                let p_spent = project_costs.get(&name).copied().unwrap_or(0.0);
+                                let p_budget = ipc_ctx
+                                    .project_budgets
+                                    .get(&name)
+                                    .copied()
+                                    .unwrap_or(budget);
+                                let p_remaining = (p_budget - p_spent).max(0.0);
+                                (
+                                    name,
+                                    serde_json::json!({
+                                        "spent_usd": p_spent,
+                                        "budget_usd": p_budget,
+                                        "remaining_usd": p_remaining,
+                                    }),
+                                )
+                            })
+                            .collect()
                     };
 
                     let active = scheduler.active_count().await;
@@ -1431,20 +1446,35 @@ impl Daemon {
                     let spent = ipc_ctx.event_store.daily_cost().await.unwrap_or(0.0);
                     let budget = ipc_ctx.daily_budget_usd;
                     let remaining = (budget - spent).max(0.0);
-                    let report = ipc_ctx.event_store.daily_costs_by_project().await.unwrap_or_default();
+                    let report = ipc_ctx
+                        .event_store
+                        .daily_costs_by_project()
+                        .await
+                        .unwrap_or_default();
                     let project_budget_info: serde_json::Map<String, serde_json::Value> = {
-                        let mut all_projects: std::collections::HashSet<String> = ipc_ctx.project_budgets.keys().cloned().collect();
+                        let mut all_projects: std::collections::HashSet<String> =
+                            ipc_ctx.project_budgets.keys().cloned().collect();
                         all_projects.extend(report.keys().cloned());
-                        all_projects.into_iter().map(|name| {
-                            let p_spent = report.get(&name).copied().unwrap_or(0.0);
-                            let p_budget = ipc_ctx.project_budgets.get(&name).copied().unwrap_or(budget);
-                            let p_remaining = (p_budget - p_spent).max(0.0);
-                            (name, serde_json::json!({
-                                "spent_usd": p_spent,
-                                "budget_usd": p_budget,
-                                "remaining_usd": p_remaining,
-                            }))
-                        }).collect()
+                        all_projects
+                            .into_iter()
+                            .map(|name| {
+                                let p_spent = report.get(&name).copied().unwrap_or(0.0);
+                                let p_budget = ipc_ctx
+                                    .project_budgets
+                                    .get(&name)
+                                    .copied()
+                                    .unwrap_or(budget);
+                                let p_remaining = (p_budget - p_spent).max(0.0);
+                                (
+                                    name,
+                                    serde_json::json!({
+                                        "spent_usd": p_spent,
+                                        "budget_usd": p_budget,
+                                        "remaining_usd": p_remaining,
+                                    }),
+                                )
+                            })
+                            .collect()
                     };
                     serde_json::json!({
                         "ok": true,
@@ -3638,13 +3668,16 @@ impl Daemon {
                                             resp.prompt_tokens,
                                             resp.completion_tokens,
                                         );
-                                        let _ = ipc_ctx.event_store.record_cost(
-                                            &agent_hint,
-                                            &resolved_session_id,
-                                            &agent_hint,
-                                            cost_usd,
-                                            resp.iterations,
-                                        ).await;
+                                        let _ = ipc_ctx
+                                            .event_store
+                                            .record_cost(
+                                                &agent_hint,
+                                                &resolved_session_id,
+                                                &agent_hint,
+                                                cost_usd,
+                                                resp.iterations,
+                                            )
+                                            .await;
                                         serde_json::json!({
                                             "ok": true,
                                             "text": resp.text,
@@ -3789,13 +3822,16 @@ impl Daemon {
                                         prompt_tokens,
                                         completion_tokens,
                                     );
-                                    let _ = ipc_ctx.event_store.record_cost(
-                                        &agent_hint,
-                                        &session_id,
-                                        &agent_hint,
-                                        cost_usd,
-                                        iterations,
-                                    ).await;
+                                    let _ = ipc_ctx
+                                        .event_store
+                                        .record_cost(
+                                            &agent_hint,
+                                            &session_id,
+                                            &agent_hint,
+                                            cost_usd,
+                                            iterations,
+                                        )
+                                        .await;
 
                                     if stream_mode {
                                         let done = serde_json::json!({

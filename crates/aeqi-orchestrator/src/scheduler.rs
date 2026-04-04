@@ -279,16 +279,17 @@ impl Scheduler {
                                     continue;
                                 }
                                 // Check expertise score.
-                                if let Some(score) =
-                                    expertise.iter().find(|s| {
-                                        s.get("agent").and_then(|a| a.as_str()) == Some(&sibling.name)
-                                    })
-                                {
+                                if let Some(score) = expertise.iter().find(|s| {
+                                    s.get("agent").and_then(|a| a.as_str()) == Some(&sibling.name)
+                                }) {
                                     let rate = score
                                         .get("success_rate")
                                         .and_then(|r| r.as_f64())
                                         .unwrap_or(0.0);
-                                    if best_agent.as_ref().map_or(true, |(_, best_rate)| rate > *best_rate) {
+                                    if best_agent
+                                        .as_ref()
+                                        .map_or(true, |(_, best_rate)| rate > *best_rate)
+                                    {
                                         best_agent = Some((sibling.id.clone(), rate));
                                     }
                                 }
@@ -298,7 +299,8 @@ impl Scheduler {
                                 let own_rate = expertise
                                     .iter()
                                     .find(|s| {
-                                        s.get("agent").and_then(|a| a.as_str()) == Some(&assigned.name)
+                                        s.get("agent").and_then(|a| a.as_str())
+                                            == Some(&assigned.name)
                                     })
                                     .and_then(|s| s.get("success_rate").and_then(|r| r.as_f64()))
                                     .unwrap_or(0.0);

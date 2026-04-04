@@ -324,7 +324,10 @@ pub(crate) fn open_tasks_for_project(project_name: &str) -> Result<QuestBoard> {
     QuestBoard::open(&tasks_dir)
 }
 
-pub(crate) fn open_insights(config: &AEQIConfig, project_name: Option<&str>) -> Result<SqliteInsights> {
+pub(crate) fn open_insights(
+    config: &AEQIConfig,
+    project_name: Option<&str>,
+) -> Result<SqliteInsights> {
     let db_path = if let Some(name) = project_name {
         let project_dir = find_project_dir(name)?;
         project_dir.join(".aeqi").join("memory.db")

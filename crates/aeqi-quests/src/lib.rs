@@ -8,12 +8,12 @@
 
 pub mod dependency_inference;
 pub mod query;
-pub mod store;
 pub mod quest;
+pub mod store;
 
 pub use dependency_inference::{InferredDependency, infer_dependencies};
 pub use query::QuestQuery;
-pub use store::QuestBoard;
 pub use quest::{
     Checkpoint, Priority, Quest, QuestId, QuestOutcomeKind, QuestOutcomeRecord, QuestStatus,
 };
+pub use store::QuestBoard;

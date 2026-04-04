@@ -365,7 +365,10 @@ impl QuestBoard {
             b.status = QuestStatus::Cancelled;
             b.closed_at = Some(chrono::Utc::now());
             b.closed_reason = Some(reason.to_string());
-            b.set_task_outcome(&QuestOutcomeRecord::new(QuestOutcomeKind::Cancelled, reason));
+            b.set_task_outcome(&QuestOutcomeRecord::new(
+                QuestOutcomeKind::Cancelled,
+                reason,
+            ));
         })
     }
 
@@ -738,10 +741,16 @@ mod tests {
         let c3 = store.create_child(&parent.id, "Step 3: Ship").unwrap();
 
         store.close(&c1.id.0, "built").unwrap();
-        assert_eq!(store.get(&parent.id.0).unwrap().status, QuestStatus::Pending);
+        assert_eq!(
+            store.get(&parent.id.0).unwrap().status,
+            QuestStatus::Pending
+        );
 
         store.close(&c2.id.0, "tested").unwrap();
-        assert_eq!(store.get(&parent.id.0).unwrap().status, QuestStatus::Pending);
+        assert_eq!(
+            store.get(&parent.id.0).unwrap().status,
+            QuestStatus::Pending
+        );
 
         store.close(&c3.id.0, "shipped").unwrap();
         assert_eq!(store.get(&parent.id.0).unwrap().status, QuestStatus::Done);
