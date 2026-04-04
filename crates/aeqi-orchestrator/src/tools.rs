@@ -769,6 +769,10 @@ pub fn build_orchestration_tools(
     event_broadcaster: Option<Arc<crate::EventBroadcaster>>,
     graph_db_path: Option<PathBuf>,
     session_id: Option<String>,
+    provider: Option<Arc<dyn aeqi_core::traits::Provider>>,
+    session_store: Option<Arc<crate::SessionStore>>,
+    session_manager: Option<Arc<crate::session_manager::SessionManager>>,
+    default_model: String,
 ) -> Vec<Arc<dyn Tool>> {
     let leader_name = registry.leader_agent_name.clone();
     let default_project = registry
@@ -777,16 +781,25 @@ pub fn build_orchestration_tools(
         .cloned()
         .unwrap_or_else(|| "*".to_string());
     let project_name = registry.config_project_names.first().cloned();
-    let mut delegate_tool =
-        crate::unified_delegate::UnifiedDelegateTool::new(dispatch_bus, leader_name.clone())
-            .with_registry(registry.clone())
-            .with_project(project_name);
+    let mut delegate_tool = crate::delegate::DelegateTool::new(dispatch_bus, leader_name.clone())
+        .with_registry(registry.clone())
+        .with_project(project_name);
     if let Some(broadcaster) = event_broadcaster {
         delegate_tool = delegate_tool.with_event_broadcaster(broadcaster);
     }
     if let Some(sid) = session_id {
         delegate_tool = delegate_tool.with_session_id(sid);
     }
+    if let Some(ref p) = provider {
+        delegate_tool = delegate_tool.with_provider(p.clone());
+    }
+    if let Some(ref sm) = session_manager {
+        delegate_tool = delegate_tool.with_session_manager(sm.clone());
+    }
+    if let Some(ref ss) = session_store {
+        delegate_tool = delegate_tool.with_session_store(ss.clone());
+    }
+    delegate_tool = delegate_tool.with_default_model(default_model);
     let mut tools: Vec<Arc<dyn Tool>> = vec![
         Arc::new(QuestDetailTool::new(registry.clone())),
         Arc::new(QuestCancelTool::new(registry.clone())),
@@ -1200,7 +1213,7 @@ impl Tool for TriggerManageTool {
 }
 
 // ChannelPostTool removed — department channel posting is now handled by
-// UnifiedDelegateTool via the "dept:<name>" routing pattern.
+// DelegateTool via the "dept:<name>" routing pattern.
 
 // ---------------------------------------------------------------------------
 // TranscriptSearchTool — FTS search across past session transcripts

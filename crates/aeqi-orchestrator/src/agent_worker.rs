@@ -1460,7 +1460,7 @@ impl AgentWorker {
                 while let Ok(event) = rx.recv().await {
                     bc.publish(crate::execution_events::ExecutionEvent::ChatStream {
                         task_id: tid.clone(),
-                        chat_id: 0, // Filled by ChatEngine when routing
+                        chat_id: 0, // Filled by MessageRouter when routing
                         event,
                     });
                 }

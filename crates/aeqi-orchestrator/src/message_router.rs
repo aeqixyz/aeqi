@@ -1,7 +1,7 @@
-//! Unified Chat Engine — source-agnostic chat processing for Telegram, web, and future channels.
+//! Unified Message Router — source-agnostic message processing for Telegram, web, and future channels.
 //!
-//! Both Telegram and web chat are thin clients that delegate to this engine.
-//! The engine handles: conversation history, agent routing, task creation,
+//! Both Telegram and web interfaces are thin clients that delegate to this router.
+//! The router handles: conversation history, agent routing, task creation,
 //! and completion tracking.
 
 use std::collections::{HashMap, HashSet};
@@ -23,37 +23,37 @@ const CHAT_COUNCIL_HOLD_REASON: &str = "awaiting_council";
 
 /// Source of a chat message.
 #[derive(Debug, Clone)]
-pub enum ChatSource {
+pub enum MessageSource {
     Telegram { message_id: i64 },
     Web,
     Discord,
     Slack,
 }
 
-impl ChatSource {
+impl MessageSource {
     pub fn channel_type(&self) -> &str {
         match self {
-            ChatSource::Telegram { .. } => "telegram",
-            ChatSource::Web => "web",
-            ChatSource::Discord => "discord",
-            ChatSource::Slack => "slack",
+            MessageSource::Telegram { .. } => "telegram",
+            MessageSource::Web => "web",
+            MessageSource::Discord => "discord",
+            MessageSource::Slack => "slack",
         }
     }
 
     pub fn message_id(&self) -> i64 {
         match self {
-            ChatSource::Telegram { message_id } => *message_id,
+            MessageSource::Telegram { message_id } => *message_id,
             _ => 0,
         }
     }
 }
 
 /// Incoming chat message.
-pub struct ChatMessage {
+pub struct IncomingMessage {
     pub message: String,
     pub chat_id: i64,
     pub sender: String,
-    pub source: ChatSource,
+    pub source: MessageSource,
     pub project_hint: Option<String>,
     pub department_hint: Option<String>,
     pub channel_name: Option<String>,
@@ -61,7 +61,7 @@ pub struct ChatMessage {
     pub agent_id: Option<String>,
 }
 
-impl ChatMessage {
+impl IncomingMessage {
     fn conversation_channel_type(&self) -> String {
         match (
             self.source.channel_type(),
@@ -149,18 +149,18 @@ impl ChatResponse {
 
 /// Handle returned when a full (async) chat task is created.
 #[derive(Debug, Clone)]
-pub struct ChatTaskHandle {
+pub struct TaskHandle {
     pub task_id: String,
     pub chat_id: i64,
     pub project: String,
 }
 
 /// A pending task that's being processed asynchronously.
-pub struct PendingChatTask {
+pub struct PendingTask {
     pub project: String,
     pub chat_id: i64,
     pub message_id: i64,
-    pub source: ChatSource,
+    pub source: MessageSource,
     pub channel_type: String,
     pub created_at: std::time::Instant,
     pub phase1_reaction: Option<String>,
@@ -173,7 +173,7 @@ pub struct ChatCompletion {
     pub task_id: String,
     pub chat_id: i64,
     pub message_id: i64,
-    pub source: ChatSource,
+    pub source: MessageSource,
     pub status: CompletionStatus,
     pub text: String,
 }
@@ -189,7 +189,7 @@ pub enum CompletionStatus {
 // ── Engine ──
 
 /// The unified chat engine.
-pub struct ChatEngine {
+pub struct MessageRouter {
     pub conversations: Arc<SessionStore>,
     pub registry: Arc<CompanyRegistry>,
     pub agent_router: Arc<Mutex<AgentRouter>>,
@@ -199,7 +199,7 @@ pub struct ChatEngine {
     pub leader_name: String,
     /// Default company to route messages to when no project_hint is given.
     pub default_project: String,
-    pub pending_tasks: Arc<Mutex<HashMap<String, PendingChatTask>>>,
+    pub pending_tasks: Arc<Mutex<HashMap<String, PendingTask>>>,
     pub task_notify: Arc<tokio::sync::Notify>,
     /// Per-project memory stores for knowledge-aware chat (keyed by project name).
     pub memory_stores: HashMap<String, Arc<dyn Memory>>,
@@ -209,7 +209,7 @@ pub struct ChatEngine {
     pub intent_classifier: Option<Arc<crate::intent::IntentClassifier>>,
 }
 
-impl ChatEngine {
+impl MessageRouter {
     fn set_scheduler_hold(task: &mut aeqi_tasks::Task, hold: bool, reason: Option<&str>) {
         let mut metadata = match std::mem::take(&mut task.metadata) {
             serde_json::Value::Object(map) => map,
@@ -278,7 +278,7 @@ impl ChatEngine {
             .await;
     }
 
-    async fn ensure_channel_registered(&self, msg: &ChatMessage) {
+    async fn ensure_channel_registered(&self, msg: &IncomingMessage) {
         let channel_type = msg.conversation_channel_type();
         let channel_name = msg.conversation_channel_name();
         let _ = self
@@ -287,7 +287,7 @@ impl ChatEngine {
             .await;
     }
 
-    pub async fn record_exchange(&self, msg: &ChatMessage, reply_text: &str) {
+    pub async fn record_exchange(&self, msg: &IncomingMessage, reply_text: &str) {
         let source_tag = msg.conversation_channel_type();
         self.ensure_channel_registered(msg).await;
         let _ = self
@@ -320,7 +320,7 @@ impl ChatEngine {
             .await;
     }
 
-    async fn record_response_action_event(&self, msg: &ChatMessage, response: &ChatResponse) {
+    async fn record_response_action_event(&self, msg: &IncomingMessage, response: &ChatResponse) {
         let Some(action) = response.action.as_deref() else {
             return;
         };
@@ -464,7 +464,7 @@ impl ChatEngine {
 
     /// Handle explicit command shortcuts (no LLM call).
     /// Returns None for normal messages — caller should use `handle_message_full`.
-    pub async fn handle_message(&self, msg: &ChatMessage) -> Option<ChatResponse> {
+    pub async fn handle_message(&self, msg: &IncomingMessage) -> Option<ChatResponse> {
         if msg.message.is_empty() {
             return Some(ChatResponse::error("message is required"));
         }
@@ -500,9 +500,9 @@ impl ChatEngine {
     /// handle is returned and before the task is released to the scheduler.
     pub async fn handle_message_full(
         &self,
-        msg: &ChatMessage,
+        msg: &IncomingMessage,
         phase1_reaction: Option<String>,
-    ) -> Result<ChatTaskHandle> {
+    ) -> Result<TaskHandle> {
         let source_tag = msg.conversation_channel_type();
         let scoped_project = msg
             .project_hint
@@ -667,7 +667,7 @@ impl ChatEngine {
         // Register pending task for completion tracking.
         self.pending_tasks.lock().await.insert(
             task_id.clone(),
-            PendingChatTask {
+            PendingTask {
                 project: scoped_project.clone(),
                 chat_id: msg.chat_id,
                 message_id: msg.source.message_id(),
@@ -694,7 +694,7 @@ impl ChatEngine {
             let chat_id = msg.chat_id;
 
             tokio::spawn(async move {
-                ChatEngine::finish_council_enrichment(
+                MessageRouter::finish_council_enrichment(
                     registry,
                     conversations,
                     agent_router,
@@ -713,7 +713,7 @@ impl ChatEngine {
             });
         }
 
-        Ok(ChatTaskHandle {
+        Ok(TaskHandle {
             task_id,
             chat_id: msg.chat_id,
             project: scoped_project,
@@ -790,7 +790,7 @@ impl ChatEngine {
     }
 
     /// Get pending tasks that need a slow-progress notice (elapsed > 2min).
-    pub async fn get_slow_tasks(&self) -> Vec<(String, i64, i64, ChatSource)> {
+    pub async fn get_slow_tasks(&self) -> Vec<(String, i64, i64, MessageSource)> {
         let mut slow = Vec::new();
         let mut map = self.pending_tasks.lock().await;
         for (qid, pq) in map.iter_mut() {
@@ -1037,7 +1037,7 @@ impl ChatEngine {
 
     // ── Private helpers ──
 
-    async fn handle_create_task(&self, msg: &ChatMessage) -> ChatResponse {
+    async fn handle_create_task(&self, msg: &IncomingMessage) -> ChatResponse {
         let msg_lower = msg.message.to_lowercase();
 
         let project = if let Some(p) = &msg.project_hint {
@@ -1108,7 +1108,7 @@ impl ChatEngine {
         }
     }
 
-    async fn handle_close_task(&self, msg: &ChatMessage) -> ChatResponse {
+    async fn handle_close_task(&self, msg: &IncomingMessage) -> ChatResponse {
         let task_id: String = msg
             .message
             .split_whitespace()
@@ -1515,7 +1515,7 @@ mod tests {
     }
 
     async fn test_engine() -> (
-        ChatEngine,
+        MessageRouter,
         Arc<Company>,
         Arc<CompanyRegistry>,
         TempDir,
@@ -1534,7 +1534,7 @@ mod tests {
         let conv_path = conv_dir.path().join("conv.db");
         let conversations = Arc::new(SessionStore::open(&conv_path).unwrap());
 
-        let engine = ChatEngine {
+        let engine = MessageRouter {
             conversations,
             registry: registry.clone(),
             agent_router: Arc::new(Mutex::new(AgentRouter::new(String::new(), 0))),
@@ -1578,11 +1578,11 @@ mod tests {
     async fn quick_path_records_user_and_reply() {
         let (engine, _project, _registry, _project_dir, _conv_dir, _conv_path) =
             test_engine().await;
-        let msg = ChatMessage {
+        let msg = IncomingMessage {
             message: "create task review the patrol loop".to_string(),
             chat_id: 7,
             sender: "alice".to_string(),
-            source: ChatSource::Web,
+            source: MessageSource::Web,
             project_hint: None,
             department_hint: None,
             channel_name: None,
@@ -1603,11 +1603,11 @@ mod tests {
     #[tokio::test]
     async fn poll_completion_records_reply_in_history() {
         let (engine, project, _registry, _project_dir, _conv_dir, _conv_path) = test_engine().await;
-        let msg = ChatMessage {
+        let msg = IncomingMessage {
             message: "Give me a deployment update".to_string(),
             chat_id: 11,
             sender: "alice".to_string(),
-            source: ChatSource::Web,
+            source: MessageSource::Web,
             project_hint: None,
             department_hint: None,
             channel_name: None,
@@ -1634,11 +1634,11 @@ mod tests {
     #[tokio::test]
     async fn full_path_records_timeline_lifecycle_events() {
         let (engine, project, _registry, _project_dir, _conv_dir, _conv_path) = test_engine().await;
-        let msg = ChatMessage {
+        let msg = IncomingMessage {
             message: "Investigate the patrol loop".to_string(),
             chat_id: 12,
             sender: "alice".to_string(),
-            source: ChatSource::Web,
+            source: MessageSource::Web,
             project_hint: None,
             department_hint: None,
             channel_name: None,
@@ -1722,11 +1722,11 @@ mod tests {
         )
         .unwrap();
 
-        let msg = ChatMessage {
+        let msg = IncomingMessage {
             message: "What should we do next?".to_string(),
             chat_id: 21,
             sender: "alice".to_string(),
-            source: ChatSource::Web,
+            source: MessageSource::Web,
             project_hint: None,
             department_hint: None,
             channel_name: None,
@@ -1754,7 +1754,7 @@ mod tests {
         let conv_path = conv_dir.path().join("conv.db");
         let conversations = Arc::new(SessionStore::open(&conv_path).unwrap());
 
-        let engine = ChatEngine {
+        let engine = MessageRouter {
             conversations,
             registry: registry.clone(),
             agent_router: Arc::new(Mutex::new(AgentRouter::new(String::new(), 0))),
@@ -1769,11 +1769,11 @@ mod tests {
             default_project: "leader".to_string(),
         };
 
-        let msg = ChatMessage {
+        let msg = IncomingMessage {
             message: "Ship the release checklist".to_string(),
             chat_id: 55,
             sender: "alice".to_string(),
-            source: ChatSource::Web,
+            source: MessageSource::Web,
             project_hint: Some("app".to_string()),
             department_hint: None,
             channel_name: Some("app-ops".to_string()),
@@ -1830,7 +1830,7 @@ mod tests {
             let mut store = project.tasks.lock().await;
             store
                 .update(&task.id.0, |entry| {
-                    ChatEngine::set_scheduler_hold(entry, false, None);
+                    MessageRouter::set_scheduler_hold(entry, false, None);
                 })
                 .unwrap();
             let ready = store.ready();
@@ -1885,7 +1885,7 @@ mod tests {
         let conv_path = conv_dir.path().join("conv.db");
         let conversations = Arc::new(SessionStore::open(&conv_path).unwrap());
 
-        let engine = ChatEngine {
+        let engine = MessageRouter {
             conversations,
             registry,
             agent_router: Arc::new(Mutex::new(AgentRouter::new(String::new(), 0))),
@@ -2012,11 +2012,11 @@ mod tests {
         }]);
         engine.auto_council_enabled = false;
 
-        let normal = ChatMessage {
+        let normal = IncomingMessage {
             message: "check the chat tests".to_string(),
             chat_id: 88,
             sender: "alice".to_string(),
-            source: ChatSource::Web,
+            source: MessageSource::Web,
             project_hint: None,
             department_hint: None,
             channel_name: None,
@@ -2032,11 +2032,11 @@ mod tests {
             assert!(!stored.is_scheduler_held());
         }
 
-        let explicit = ChatMessage {
+        let explicit = IncomingMessage {
             message: "/council check the chat tests".to_string(),
             chat_id: 89,
             sender: "alice".to_string(),
-            source: ChatSource::Web,
+            source: MessageSource::Web,
             project_hint: None,
             department_hint: None,
             channel_name: None,

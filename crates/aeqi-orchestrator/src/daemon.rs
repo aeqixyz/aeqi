@@ -7,9 +7,9 @@ use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
 use crate::agent_registry::AgentRegistry;
-use crate::chat_engine::{ChatEngine, ChatMessage, ChatSource};
 use crate::execution_events::{EventBroadcaster, ExecutionEvent};
 use crate::message::{Dispatch, DispatchBus, DispatchHealth, DispatchKind};
+use crate::message_router::{IncomingMessage, MessageRouter, MessageSource};
 use crate::progress_tracker::ProgressTracker;
 use crate::registry::CompanyRegistry;
 use crate::session_manager::{RunningSession, SessionManager};
@@ -202,7 +202,7 @@ pub struct Daemon {
     pub background_automation_enabled: bool,
     pub trigger_store: Option<Arc<TriggerStore>>,
     pub agent_registry: Option<Arc<AgentRegistry>>,
-    pub chat_engine: Option<Arc<ChatEngine>>,
+    pub message_router: Option<Arc<MessageRouter>>,
     pub write_queue: Arc<std::sync::Mutex<aeqi_memory::debounce::WriteQueue>>,
     pub event_broadcaster: Arc<EventBroadcaster>,
     pub default_provider: Option<Arc<dyn aeqi_core::traits::Provider>>,
@@ -227,7 +227,7 @@ impl Daemon {
             background_automation_enabled: true,
             trigger_store: None,
             agent_registry: None,
-            chat_engine: None,
+            message_router: None,
             write_queue: Arc::new(std::sync::Mutex::new(
                 aeqi_memory::debounce::WriteQueue::default(),
             )),
@@ -835,7 +835,7 @@ impl Daemon {
                 let dispatch_bus = self.dispatch_bus.clone();
                 let trigger_store = self.trigger_store.clone();
                 let agent_registry = self.agent_registry.clone();
-                let chat_engine = self.chat_engine.clone();
+                let message_router = self.message_router.clone();
                 let event_buffer = self.event_buffer.clone();
                 let running = self.running.clone();
                 let readiness = self.readiness.clone();
@@ -851,7 +851,7 @@ impl Daemon {
                         dispatch_bus,
                         trigger_store,
                         agent_registry,
-                        chat_engine,
+                        message_router,
                         event_buffer,
                         running,
                         readiness,
@@ -1066,7 +1066,7 @@ impl Daemon {
         }
 
         info!(count = ready.len(), "flushing debounced memory writes");
-        let Some(ref engine) = self.chat_engine else {
+        let Some(ref engine) = self.message_router else {
             return;
         };
         for w in &ready {
@@ -1138,7 +1138,7 @@ impl Daemon {
         dispatch_bus: Arc<DispatchBus>,
         trigger_store: Option<Arc<TriggerStore>>,
         agent_registry: Option<Arc<AgentRegistry>>,
-        chat_engine: Option<Arc<ChatEngine>>,
+        message_router: Option<Arc<MessageRouter>>,
         event_buffer: Arc<Mutex<EventBuffer>>,
         running: Arc<std::sync::atomic::AtomicBool>,
         readiness: ReadinessContext,
@@ -1157,7 +1157,7 @@ impl Daemon {
                     let dispatch_bus = dispatch_bus.clone();
                     let trigger_store = trigger_store.clone();
                     let agent_registry = agent_registry.clone();
-                    let chat_engine = chat_engine.clone();
+                    let message_router = message_router.clone();
                     let event_buffer = event_buffer.clone();
                     let readiness = readiness.clone();
                     let default_provider = default_provider.clone();
@@ -1171,7 +1171,7 @@ impl Daemon {
                             dispatch_bus,
                             trigger_store,
                             agent_registry,
-                            chat_engine,
+                            message_router,
                             event_buffer,
                             readiness,
                             default_provider,
@@ -1202,7 +1202,7 @@ impl Daemon {
         dispatch_bus: Arc<DispatchBus>,
         trigger_store: Option<Arc<TriggerStore>>,
         agent_registry: Option<Arc<AgentRegistry>>,
-        chat_engine: Option<Arc<ChatEngine>>,
+        message_router: Option<Arc<MessageRouter>>,
         event_buffer: Arc<Mutex<EventBuffer>>,
         readiness: ReadinessContext,
         default_provider: Option<Arc<dyn aeqi_core::traits::Provider>>,
@@ -1969,7 +1969,7 @@ impl Daemon {
                         .and_then(|v| v.as_str())
                         .unwrap_or("user");
 
-                    match &chat_engine {
+                    match &message_router {
                         Some(engine) => {
                             let chat_id = resolve_web_chat_id(
                                 request.get("chat_id").and_then(|v| v.as_i64()),
@@ -1978,11 +1978,11 @@ impl Daemon {
                                 channel_name,
                             );
 
-                            let msg = ChatMessage {
+                            let msg = IncomingMessage {
                                 message: message.to_string(),
                                 chat_id,
                                 sender: sender.to_string(),
-                                source: ChatSource::Web,
+                                source: MessageSource::Web,
                                 project_hint: project_hint.map(|s| s.to_string()),
                                 department_hint: department_hint.map(|s| s.to_string()),
                                 channel_name: channel_name.map(|s| s.to_string()),
@@ -2020,7 +2020,7 @@ impl Daemon {
                         .unwrap_or("user");
                     let agent_id = request_field(&request, "agent_id");
 
-                    match &chat_engine {
+                    match &message_router {
                         Some(engine) => {
                             if message.is_empty() {
                                 serde_json::json!({"ok": false, "error": "message is required"})
@@ -2032,11 +2032,11 @@ impl Daemon {
                                     channel_name,
                                 );
 
-                                let msg = ChatMessage {
+                                let msg = IncomingMessage {
                                     message: message.to_string(),
                                     chat_id,
                                     sender: sender.to_string(),
-                                    source: ChatSource::Web,
+                                    source: MessageSource::Web,
                                     project_hint: project_hint.map(|s| s.to_string()),
                                     department_hint: department_hint.map(|s| s.to_string()),
                                     channel_name: channel_name.map(|s| s.to_string()),
@@ -2075,7 +2075,7 @@ impl Daemon {
                         .get("task_id")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
-                    match &chat_engine {
+                    match &message_router {
                         Some(engine) => {
                             if task_id.is_empty() {
                                 serde_json::json!({"ok": false, "error": "task_id is required"})
@@ -2141,7 +2141,7 @@ impl Daemon {
                             serde_json::json!({"ok": false, "error": "session store not initialized"})
                         }
                     } else {
-                        match &chat_engine {
+                        match &message_router {
                             Some(engine) => {
                                 let resolved_chat_id = resolve_web_chat_id(
                                     if chat_id != 0 { Some(chat_id) } else { None },
@@ -2186,7 +2186,7 @@ impl Daemon {
                     let department_hint = request_field(&request, "department");
                     let channel_name = request_field(&request, "channel_name");
 
-                    match &chat_engine {
+                    match &message_router {
                         Some(engine) => {
                             let resolved_chat_id = resolve_web_chat_id(
                                 if chat_id != 0 { Some(chat_id) } else { None },
@@ -2239,7 +2239,7 @@ impl Daemon {
                     }
                 }
 
-                "chat_channels" => match &chat_engine {
+                "chat_channels" => match &message_router {
                     Some(engine) => match engine.list_channels().await {
                         Ok(channels) => {
                             let chs: Vec<serde_json::Value> = channels
@@ -2567,7 +2567,7 @@ impl Daemon {
                             }
                         }
                         serde_json::json!({"ok": true, "projects": project_memories})
-                    } else if let Some(ref engine) = chat_engine {
+                    } else if let Some(ref engine) = message_router {
                         if let Some(mem) = engine.memory_stores.get(project) {
                             let scope_param = request.get("scope").and_then(|v| v.as_str());
                             let entity_id_param = request.get("entity_id").and_then(|v| v.as_str());
@@ -2929,7 +2929,7 @@ impl Daemon {
                         let mut items: Vec<serde_json::Value> = Vec::new();
 
                         // 1. Search project memories.
-                        if let Some(ref engine) = chat_engine
+                        if let Some(ref engine) = message_router
                             && let Some(mem) = engine.memory_stores.get(project)
                         {
                             let q = if query.is_empty() { project } else { query };
@@ -2995,7 +2995,7 @@ impl Daemon {
 
                     if project.is_empty() || key.is_empty() || content.is_empty() {
                         serde_json::json!({"ok": false, "error": "project, key, and content required"})
-                    } else if let Some(ref engine) = chat_engine {
+                    } else if let Some(ref engine) = message_router {
                         if let Some(mem) = engine.memory_stores.get(project) {
                             let cat = match category {
                                 "procedure" => aeqi_core::traits::MemoryCategory::Procedure,
@@ -3032,7 +3032,7 @@ impl Daemon {
 
                     if project.is_empty() || id.is_empty() {
                         serde_json::json!({"ok": false, "error": "project and id required"})
-                    } else if let Some(ref engine) = chat_engine {
+                    } else if let Some(ref engine) = message_router {
                         if let Some(mem) = engine.memory_stores.get(project) {
                             match mem.delete(id).await {
                                 Ok(_) => serde_json::json!({"ok": true}),
@@ -3858,7 +3858,7 @@ impl Daemon {
                             // Falls back to default company, then daemon cwd (root workspace).
                             let workdir = {
                                 let project_name = agent_company.as_deref().or_else(|| {
-                                    chat_engine
+                                    message_router
                                         .as_ref()
                                         .map(|e| e.default_project.as_str())
                                         .filter(|s| !s.is_empty())
@@ -3899,7 +3899,7 @@ impl Daemon {
                             > = Arc::new(
                                 tokio::sync::RwLock::new(std::collections::HashMap::new()),
                             );
-                            let memory_for_agent = chat_engine.as_ref().and_then(|e| {
+                            let memory_for_agent = message_router.as_ref().and_then(|e| {
                                 // Prefer UUID-based lookup.
                                 agent_project_id
                                     .as_deref()
@@ -3924,7 +3924,7 @@ impl Daemon {
                             // Resolve graph DB path from data dir.
                             // Falls back to default company when agent has no project.
                             let graph_company = agent_company.as_deref().or_else(|| {
-                                chat_engine
+                                message_router
                                     .as_ref()
                                     .map(|e| e.default_project.as_str())
                                     .filter(|s| !s.is_empty())
@@ -3953,6 +3953,10 @@ impl Daemon {
                                 Some(event_broadcaster.clone()),
                                 graph_db_path,
                                 delegate_session_id,
+                                Some(provider.clone()),
+                                registry.session_store.clone(),
+                                Some(session_manager.clone()),
+                                default_model.clone(),
                             );
                             tools.extend(orch_tools);
 

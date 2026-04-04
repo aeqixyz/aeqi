@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::helpers::daemon_ipc_request;
 
-/// Interactive chat REPL connected to the daemon ChatEngine.
+/// Interactive chat REPL connected to the daemon MessageRouter.
 pub(crate) async fn cmd_chat(config_path: &Option<PathBuf>) -> Result<()> {
     let session_id = format!(
         "cli-{}-{}",

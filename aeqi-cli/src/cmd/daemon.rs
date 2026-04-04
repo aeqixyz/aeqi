@@ -312,15 +312,15 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 }
             }
 
-            // Build the unified ChatEngine.
+            // Build the unified MessageRouter.
             let council_advisors: Arc<Vec<aeqi_core::config::PeerAgentConfig>> =
                 Arc::new(config.advisor_agents().into_iter().cloned().collect());
             let auto_council_enabled = config.team.max_background_cost_usd > 0.0;
             // Intent classifier (legacy — no longer used for routing).
             let intent_classifier: Option<Arc<aeqi_orchestrator::intent::IntentClassifier>> = None;
 
-            let chat_engine = registry.session_store.as_ref().map(|cs| {
-                Arc::new(aeqi_orchestrator::ChatEngine {
+            let message_router = registry.session_store.as_ref().map(|cs| {
+                Arc::new(aeqi_orchestrator::MessageRouter {
                     conversations: cs.clone(),
                     registry: registry.clone(),
                     agent_router: agent_router.clone(),
@@ -388,7 +388,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                                 match Channel::start(tg.as_ref()).await {
                                     Ok(mut rx) => {
                                         let tg_reply = tg.clone();
-                                        match chat_engine.clone() {
+                                        match message_router.clone() {
                                             Some(engine) => {
                                                 let advisor_bots_outer = advisor_bots.clone();
                                                 let debounce_ms = tg_config.debounce_window_ms;
@@ -505,8 +505,12 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     fa_memory,
                     registry.notes.clone(),
                     Some(event_broadcaster.clone()),
-                    None, // graph DB resolved per-session, not at daemon init
-                    None, // session_id resolved per-session, not at daemon init
+                    None,          // graph DB resolved per-session, not at daemon init
+                    None,          // session_id resolved per-session, not at daemon init
+                    None,          // provider — workers don't need direct session spawning
+                    None,          // session_store
+                    None,          // session_manager
+                    String::new(), // default_model
                 );
                 fa_tools.extend(orch_tools);
 
@@ -549,7 +553,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
 
             let mut daemon = Daemon::new(registry, dispatch_bus);
             daemon.event_broadcaster = event_broadcaster;
-            daemon.chat_engine = chat_engine;
+            daemon.message_router = message_router;
 
             // Set up default provider for direct session messaging.
             if let Some(first_project) = config.companies.first() {
@@ -626,7 +630,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                             agent_reg,
                             trigger_store,
                             daemon
-                                .chat_engine
+                                .message_router
                                 .as_ref()
                                 .map(|ce| ce.conversations.clone()),
                         )
@@ -739,7 +743,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
 #[allow(clippy::too_many_arguments)]
 async fn telegram_message_loop(
     rx: &mut tokio::sync::mpsc::Receiver<aeqi_core::traits::IncomingMessage>,
-    engine: Arc<aeqi_orchestrator::ChatEngine>,
+    engine: Arc<aeqi_orchestrator::MessageRouter>,
     tg_reply: Arc<TelegramChannel>,
     _advisor_bots: HashMap<String, Arc<TelegramChannel>>,
     debounce_ms: u64,
@@ -754,7 +758,7 @@ async fn telegram_message_loop(
         message_id: i64,
     }
 
-    // Completion listener: polls ChatEngine for completed tasks, delivers via Telegram.
+    // Completion listener: polls MessageRouter for completed tasks, delivers via Telegram.
     // Also drains proactive messages (morning brief, completion notifications) from the daemon.
     {
         let engine_cl = engine.clone();
@@ -799,10 +803,10 @@ async fn telegram_message_loop(
                 // Check for completed tasks and deliver replies.
                 for completion in engine_cl.check_completions().await {
                     let emoji = match completion.status {
-                        aeqi_orchestrator::chat_engine::CompletionStatus::Done => "👍",
-                        aeqi_orchestrator::chat_engine::CompletionStatus::Blocked => "❓",
-                        aeqi_orchestrator::chat_engine::CompletionStatus::Cancelled => "❌",
-                        aeqi_orchestrator::chat_engine::CompletionStatus::TimedOut => "😢",
+                        aeqi_orchestrator::message_router::CompletionStatus::Done => "👍",
+                        aeqi_orchestrator::message_router::CompletionStatus::Blocked => "❓",
+                        aeqi_orchestrator::message_router::CompletionStatus::Cancelled => "❌",
+                        aeqi_orchestrator::message_router::CompletionStatus::TimedOut => "😢",
                     };
                     let out = aeqi_core::traits::OutgoingMessage {
                         channel: "telegram".to_string(),
@@ -957,11 +961,11 @@ async fn telegram_message_loop(
                         let fast_channel = channel_name.clone();
                         tokio::spawn(async move {
                             let reply = handle_fast_lane(&fast_text, &fast_reg).await;
-                            let chat_msg = aeqi_orchestrator::chat_engine::ChatMessage {
+                            let chat_msg = aeqi_orchestrator::message_router::IncomingMessage {
                                 message: fast_text,
                                 chat_id,
                                 sender: fast_sender,
-                                source: aeqi_orchestrator::chat_engine::ChatSource::Telegram {
+                                source: aeqi_orchestrator::message_router::MessageSource::Telegram {
                                     message_id,
                                 },
                                 project_hint: fast_project,
@@ -987,11 +991,11 @@ async fn telegram_message_loop(
                     }
 
                     // === Quick intent check ===
-                    let chat_msg = aeqi_orchestrator::chat_engine::ChatMessage {
+                    let chat_msg = aeqi_orchestrator::message_router::IncomingMessage {
                         message: user_text.clone(),
                         chat_id,
                         sender: sender.clone(),
-                        source: aeqi_orchestrator::chat_engine::ChatSource::Telegram { message_id },
+                        source: aeqi_orchestrator::message_router::MessageSource::Telegram { message_id },
                         project_hint: project_hint.clone(),
                         department_hint: department_hint.clone(),
                         channel_name: channel_name.clone(),
@@ -1022,11 +1026,11 @@ async fn telegram_message_loop(
 
                     tokio::spawn(async move {
                         let _ = tg2.send_typing(chat_id).await;
-                        let chat_msg = aeqi_orchestrator::chat_engine::ChatMessage {
+                        let chat_msg = aeqi_orchestrator::message_router::IncomingMessage {
                             message: user_text,
                             chat_id,
                             sender,
-                            source: aeqi_orchestrator::chat_engine::ChatSource::Telegram { message_id },
+                            source: aeqi_orchestrator::message_router::MessageSource::Telegram { message_id },
                             project_hint,
                             department_hint,
                             channel_name,
