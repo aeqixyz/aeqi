@@ -853,9 +853,97 @@
   height: 48px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   padding: 0 16px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+}
+.asv-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.asv-session-toggle {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s;
+}
+.asv-session-toggle:hover { color: var(--text-secondary); border-color: var(--text-muted); }
+.asv-new-session {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.asv-new-session:hover { color: var(--text-secondary); border-color: var(--text-muted); }
+
+/* Session list dropdown */
+.asv-session-list {
+  border-bottom: 1px solid var(--border);
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--bg-elevated);
+  flex-shrink: 0;
+}
+.asv-session-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.asv-session-item {
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: background 0.1s;
+  border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,0.04));
+}
+.asv-session-item:hover { background: rgba(255,255,255,0.03); }
+.asv-session-item.active { background: rgba(255,255,255,0.05); border-left: 2px solid #c0392b; }
+.asv-session-item-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.asv-session-item-preview {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 70%;
+}
+.asv-session-item-date {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.asv-session-item-meta {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+.asv-session-status {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.asv-session-status.active { color: var(--success); }
+.asv-session-item-count {
+  font-size: 10px;
+  color: var(--text-muted);
 }
 
 .asv-header-info {

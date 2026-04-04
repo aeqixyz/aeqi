@@ -120,6 +120,17 @@ function ThinkingTimer({ start }: { start: number }) {
 
 // ── Main Component ──
 
+interface SessionInfo {
+  id: string;
+  agent_id?: string;
+  agent_name?: string;
+  status: string;
+  created_at: string;
+  last_active?: string;
+  message_count?: number;
+  first_message?: string;
+}
+
 export default function AgentSessionView() {
   const selectedAgent = useChatStore((s) => s.selectedAgent);
   const token = useAuthStore((s) => s.token);
@@ -129,6 +140,9 @@ export default function AgentSessionView() {
   const agentName = selectedAgent?.name;
   const displayName = selectedAgent?.display_name || agentName || "Agent";
 
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [showSessionList, setShowSessionList] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -138,6 +152,55 @@ export default function AgentSessionView() {
   const messagesEnd = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+
+  // Load sessions for this agent
+  useEffect(() => {
+    if (!agentId && !agentName) return;
+    const id = agentId || agentName || "";
+    api.getSessions(id)
+      .then((d: any) => {
+        const list: SessionInfo[] = d.sessions || [];
+        setSessions(list);
+        // Auto-select the most recent session
+        if (list.length > 0 && !activeSessionId) {
+          setActiveSessionId(list[0].id);
+        }
+      })
+      .catch(() => setSessions([]));
+  }, [agentId, agentName]);
+
+  // Create a new session
+  const handleNewSession = useCallback(() => {
+    const id = agentId || agentName || "";
+    if (!id) return;
+    api.createSession(id)
+      .then((d: any) => {
+        if (d.session_id) {
+          const newSession: SessionInfo = {
+            id: d.session_id,
+            agent_id: agentId || undefined,
+            agent_name: agentName || undefined,
+            status: "active",
+            created_at: new Date().toISOString(),
+          };
+          setSessions((prev) => [newSession, ...prev]);
+          setActiveSessionId(d.session_id);
+          setMessages([]);
+          setStreamText("");
+          setShowSessionList(false);
+        }
+      })
+      .catch(() => {});
+  }, [agentId, agentName]);
+
+  // Switch sessions
+  const handleSelectSession = useCallback((sessionId: string) => {
+    setActiveSessionId(sessionId);
+    setMessages([]);
+    setStreamText("");
+    setLiveToolEvents([]);
+    setShowSessionList(false);
+  }, []);
 
   // Process raw messages from API into our format
   const processRawMessages = useCallback((rawMessages: any[]): Message[] => {
@@ -182,15 +245,17 @@ export default function AgentSessionView() {
     return processed;
   }, []);
 
-  // Load messages when agent changes
+  // Load messages when session changes
   useEffect(() => {
-    if (!agentId && !agentName) return;
+    if (!activeSessionId && !agentId && !agentName) return;
     setMessages([]);
     setStreamText("");
     setLiveToolEvents([]);
 
-    const params: { agent_id?: string; channel_name?: string; limit: number } = { limit: 50 };
-    if (agentId) {
+    const params: { session_id?: string; agent_id?: string; channel_name?: string; limit: number } = { limit: 50 };
+    if (activeSessionId) {
+      params.session_id = activeSessionId;
+    } else if (agentId) {
       params.agent_id = agentId;
     } else if (agentName) {
       params.channel_name = agentName.toLowerCase();
@@ -199,7 +264,7 @@ export default function AgentSessionView() {
     api.getSessionMessages(params)
       .then((d: any) => setMessages(processRawMessages(d.messages || [])))
       .catch(() => setMessages([]));
-  }, [agentId, agentName, processRawMessages]);
+  }, [activeSessionId, agentId, agentName, processRawMessages]);
 
   // Auto-scroll
   useEffect(() => {
@@ -231,7 +296,11 @@ export default function AgentSessionView() {
     wsRef.current = ws;
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ message: userMsg.content, agent_id: agentId || undefined }));
+      ws.send(JSON.stringify({
+        message: userMsg.content,
+        agent_id: agentId || undefined,
+        session_id: activeSessionId || undefined,
+      }));
     };
 
     let fullText = "";
@@ -419,7 +488,56 @@ export default function AgentSessionView() {
           {selectedAgent.model && <span className="asv-header-model">{selectedAgent.model}</span>}
           <span className={`asv-header-dot ${wsConnected ? "live" : ""}`} />
         </div>
+        <div className="asv-header-actions">
+          <button
+            className="asv-session-toggle"
+            onClick={() => setShowSessionList(!showSessionList)}
+            title="Sessions"
+          >
+            {sessions.length > 0 ? `${sessions.length} sessions` : "sessions"}
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d={showSessionList ? "M3 7.5L6 4.5L9 7.5" : "M3 4.5L6 7.5L9 4.5"} />
+            </svg>
+          </button>
+          <button className="asv-new-session" onClick={handleNewSession} title="New conversation">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d="M7 3v8M3 7h8" />
+            </svg>
+          </button>
+        </div>
       </div>
+
+      {/* Session list dropdown */}
+      {showSessionList && (
+        <div className="asv-session-list">
+          {sessions.length === 0 ? (
+            <div className="asv-session-empty">No sessions yet. Start a conversation below.</div>
+          ) : (
+            sessions.map((s) => (
+              <div
+                key={s.id}
+                className={`asv-session-item${s.id === activeSessionId ? " active" : ""}`}
+                onClick={() => handleSelectSession(s.id)}
+              >
+                <div className="asv-session-item-info">
+                  <span className="asv-session-item-preview">
+                    {s.first_message || `Session ${s.id.slice(0, 8)}`}
+                  </span>
+                  <span className="asv-session-item-date">
+                    {new Date(s.created_at).toLocaleDateString([], { month: "short", day: "numeric" })}
+                  </span>
+                </div>
+                <div className="asv-session-item-meta">
+                  <span className={`asv-session-status ${s.status}`}>{s.status}</span>
+                  {s.message_count != null && (
+                    <span className="asv-session-item-count">{s.message_count} msgs</span>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
       {/* Message transcript */}
       <div className="asv-messages">
