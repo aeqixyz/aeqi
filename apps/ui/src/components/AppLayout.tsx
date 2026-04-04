@@ -63,7 +63,7 @@ export default function AppLayout() {
             <AgentTree />
           </div>
           <div className="sidebar-profile">
-            <BlockAvatar name={userName} size={32} />
+            <BlockAvatar name={userName} size={22} />
             <div className="sidebar-profile-info">
               <span className="sidebar-profile-name">{userName}</span>
               <span className="sidebar-profile-plan">free plan</span>
