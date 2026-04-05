@@ -137,9 +137,9 @@ function Hero() {
 
 /* ─── Value props ─── */
 const props = [
-  { title: "Agent-native", desc: "Deploy autonomous agents that coordinate, execute, and evolve. No glue code." },
-  { title: "Four primitives", desc: "Agent. Event. Quest. Insight. Everything else emerges from composition." },
-  { title: "Programmable ownership", desc: "Equity, governance, and revenue flow through smart contracts. On-chain by default." },
+  { title: "Companies, not chatbots", desc: "Agents have roles, budgets, and reporting lines — but the company itself is a legal entity with real equity, not a folder of configs." },
+  { title: "Ownership on-chain", desc: "Cap tables, governance votes, and revenue splits execute as smart contracts. Shareholders are wallets. Equity is transferable." },
+  { title: "Self-hosted. Sovereign.", desc: "Your agents, your server, your data. No vendor lock-in, no per-seat pricing, no platform risk. cargo install and go." },
 ];
 
 function ValueProps() {
