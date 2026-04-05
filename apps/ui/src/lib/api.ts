@@ -275,6 +275,14 @@ export const api = {
   },
   createSession: (agentId: string) =>
     request<any>("/sessions", { method: "POST", body: JSON.stringify({ agent_id: agentId }) }),
+
+  // Spawn Agent
+  spawnAgent: (data: { template: string; project?: string; parent_id?: string }) =>
+    request<{ agent_id: string }>("/agents/spawn", { method: "POST", body: JSON.stringify(data) }),
+
+  // Create Prompt
+  createPrompt: (data: { project: string; name: string; content: string }) =>
+    request<{ ok: boolean }>("/prompts", { method: "POST", body: JSON.stringify(data) }),
   closeSession: (sessionId: string) =>
     request<any>(`/sessions/${sessionId}/close`, { method: "POST" }),
 

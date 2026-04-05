@@ -1,23 +1,42 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import Header from "@/components/Header";
+import CreateAgentModal from "@/components/CreateAgentModal";
 import { DataState } from "@/components/ui";
 import { api } from "@/lib/api";
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
 
-  useEffect(() => {
+  const loadAgents = () => {
+    setLoading(true);
     api.getAgents().then((data) => {
       setAgents(data.agents || []);
       setLoading(false);
     }).catch(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadAgents();
   }, []);
+
+  const handleModalClose = () => {
+    setModalOpen(false);
+    loadAgents();
+  };
 
   return (
     <>
-      <Header title="Agents" />
+      <Header
+        title="Agents"
+        actions={
+          <button className="btn btn-primary" onClick={() => setModalOpen(true)}>
+            + New Agent
+          </button>
+        }
+      />
       <DataState loading={loading} empty={agents.length === 0} emptyTitle="No agents" emptyDescription="No active agents found." loadingText="Loading agents...">
         <div className="cards-grid">
           {agents.map((a: any) => (
@@ -51,6 +70,7 @@ export default function AgentsPage() {
           ))}
         </div>
       </DataState>
+      <CreateAgentModal open={modalOpen} onClose={handleModalClose} />
     </>
   );
 }

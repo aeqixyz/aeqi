@@ -1,0 +1,408 @@
+/* ── Kanban Board ─────────────────────────────────────── */
+
+.kb-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.kb-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 12px 0;
+  flex-shrink: 0;
+}
+
+.kb-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.kb-search {
+  flex: 1;
+  max-width: 260px;
+  padding: 6px 10px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+.kb-search:focus {
+  border-color: var(--border-hover);
+}
+.kb-search::placeholder {
+  color: var(--text-muted);
+}
+
+.kb-filter-select {
+  padding: 6px 10px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  outline: none;
+  cursor: pointer;
+}
+
+.kb-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  user-select: none;
+  transition: var(--transition-fast);
+}
+.kb-toggle:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+.kb-toggle.active {
+  color: var(--text-primary);
+  border-color: var(--border-hover);
+}
+
+.kb-btn-new {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: var(--accent);
+  color: var(--bg-base);
+  border: none;
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity var(--transition-fast);
+}
+.kb-btn-new:hover {
+  opacity: 0.85;
+}
+
+.kb-kbd {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+  padding: 1px 4px;
+  border-radius: var(--radius-xs);
+  background: rgba(255, 255, 255, 0.15);
+  margin-left: 4px;
+}
+
+/* ── Board Columns ───────────────────────────────────── */
+
+.kb-board {
+  display: flex;
+  gap: 12px;
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+}
+
+.kb-column {
+  width: 280px;
+  min-width: 280px;
+  flex-shrink: 0;
+  background: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+}
+
+.kb-col-header {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.kb-col-title {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  flex: 1;
+}
+
+.kb-col-count {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  min-width: 18px;
+  text-align: center;
+}
+
+.kb-col-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  transition: var(--transition-fast);
+}
+.kb-col-add:hover {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+
+.kb-col-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.kb-col-empty {
+  padding: 16px 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+
+/* ── Cards ───────────────────────────────────────────── */
+
+.kb-card {
+  padding: 10px 12px;
+  margin: 4px 8px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  border-left: 3px solid var(--text-muted);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.kb-card:hover {
+  border-color: var(--border-hover);
+  box-shadow: var(--shadow-sm);
+}
+
+.kb-card.cancelled .kb-card-subject {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.kb-card-subject {
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.kb-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.kb-card-assignee {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+  color: var(--text-secondary);
+}
+
+.kb-card-time {
+  font-size: var(--font-size-2xs);
+  color: var(--text-muted);
+}
+
+.kb-card-dot {
+  color: var(--text-muted);
+  font-size: var(--font-size-2xs);
+}
+
+.kb-card-labels {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.kb-card-label {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-3xs, 9px);
+  padding: 1px 5px;
+  border-radius: var(--radius-full);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ── Create Quest Modal ──────────────────────────────── */
+
+.cq-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cq-modal {
+  max-width: 480px;
+  width: calc(100% - 32px);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  box-shadow: var(--shadow-lg);
+}
+
+.cq-title {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+
+.cq-field {
+  margin-bottom: 14px;
+}
+
+.cq-label {
+  display: block;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.cq-input,
+.cq-textarea,
+.cq-select {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+.cq-input:focus,
+.cq-textarea:focus,
+.cq-select:focus {
+  border-color: var(--border-hover);
+}
+.cq-input::placeholder,
+.cq-textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.cq-textarea {
+  resize: vertical;
+  min-height: 60px;
+  line-height: 1.4;
+}
+
+/* Priority selector */
+.cq-priority-group {
+  display: flex;
+  gap: 6px;
+}
+
+.cq-priority-btn {
+  flex: 1;
+  padding: 6px 0;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+.cq-priority-btn:hover {
+  border-color: var(--border-hover);
+}
+.cq-priority-btn.selected {
+  border-color: var(--border-accent);
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+
+/* Modal actions */
+.cq-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.cq-btn {
+  padding: 8px 16px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  transition: var(--transition-fast);
+}
+
+.cq-btn-cancel {
+  background: var(--bg-base);
+  color: var(--text-secondary);
+}
+.cq-btn-cancel:hover {
+  color: var(--text-primary);
+  border-color: var(--border-hover);
+}
+
+.cq-btn-create {
+  background: var(--accent);
+  color: var(--bg-base);
+  border-color: var(--accent);
+}
+.cq-btn-create:hover {
+  opacity: 0.85;
+}
+.cq-btn-create:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
