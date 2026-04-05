@@ -210,27 +210,27 @@ function Footer() {
       <div className="max-w-4xl mx-auto px-6 py-14 w-full">
         <div className="grid grid-cols-2 md:grid-cols-3 gap-10 md:gap-14">
           <motion.div {...fadeView(0.05)}>
-            <p className="text-[11px] uppercase tracking-[0.2em] text-black/20 mb-4">Product</p>
+            <p className="text-[11px] uppercase tracking-[0.2em] text-black/40 mb-4">Product</p>
             <div className="space-y-2.5 text-[13px]">
-              <a href="https://app.aeqi.ai" className="block text-black/35 hover:text-black/60 transition-colors">Launch a Company</a>
-              <a href="/pricing" className="block text-black/35 hover:text-black/60 transition-colors">Pricing</a>
-              <a href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md" className="block text-black/35 hover:text-black/60 transition-colors">Docs</a>
+              <a href="https://app.aeqi.ai" className="block text-black/50 hover:text-black/70 transition-colors">Launch a Company</a>
+              <a href="/pricing" className="block text-black/50 hover:text-black/70 transition-colors">Pricing</a>
+              <a href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md" className="block text-black/50 hover:text-black/70 transition-colors">Docs</a>
             </div>
           </motion.div>
 
           <motion.div {...fadeView(0.1)}>
-            <p className="text-[11px] uppercase tracking-[0.2em] text-black/20 mb-4">Community</p>
+            <p className="text-[11px] uppercase tracking-[0.2em] text-black/40 mb-4">Community</p>
             <div className="space-y-2.5 text-[13px]">
-              <a href="https://github.com/0xAEQI/aeqi" className="block text-black/35 hover:text-black/60 transition-colors">GitHub</a>
-              <a href="https://x.com/0xAEQI" className="block text-black/35 hover:text-black/60 transition-colors">X</a>
+              <a href="https://github.com/0xAEQI/aeqi" className="block text-black/50 hover:text-black/70 transition-colors">GitHub</a>
+              <a href="https://x.com/0xAEQI" className="block text-black/50 hover:text-black/70 transition-colors">X</a>
             </div>
           </motion.div>
 
           <motion.div {...fadeView(0.15)}>
-            <p className="text-[11px] uppercase tracking-[0.2em] text-black/20 mb-4">Legal</p>
+            <p className="text-[11px] uppercase tracking-[0.2em] text-black/40 mb-4">Legal</p>
             <div className="space-y-2.5 text-[13px]">
-              <a href="/terms" className="block text-black/35 hover:text-black/60 transition-colors">Terms</a>
-              <a href="/privacy" className="block text-black/35 hover:text-black/60 transition-colors">Privacy</a>
+              <a href="/terms" className="block text-black/50 hover:text-black/70 transition-colors">Terms</a>
+              <a href="/privacy" className="block text-black/50 hover:text-black/70 transition-colors">Privacy</a>
             </div>
           </motion.div>
         </div>
