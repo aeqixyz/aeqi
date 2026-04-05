@@ -73,7 +73,7 @@ function Hero() {
         >
           Unlock the agent economy.
           <br />
-          <span className="text-black/40">Companies that run, learn, and fund themselves.</span>
+          <span className="text-black/55">Companies that run, learn, and fund themselves.</span>
         </motion.h1>
 
         {/* CTA */}
@@ -86,9 +86,9 @@ function Hero() {
           </a>
           <button
             onClick={copy}
-            className="group inline-flex items-center gap-2 text-[13px] text-black/25 hover:text-black/45 transition-colors cursor-pointer"
+            className="group inline-flex items-center gap-2 text-[13px] text-black/40 hover:text-black/60 transition-colors cursor-pointer"
           >
-            <span className="text-black/20">or</span>
+            <span className="text-black/35">or</span>
             <code className="font-mono">
               <span className="select-none opacity-50">$ </span>
               cargo install aeqi
@@ -118,7 +118,7 @@ function ValueProps() {
           {props.map((p, i) => (
             <motion.div key={p.title} {...fadeView(0.1 * i)}>
               <h3 className="text-[17px] font-semibold text-black/80 mb-3">{p.title}</h3>
-              <p className="text-[15px] leading-[1.7] text-black/50">{p.desc}</p>
+              <p className="text-[15px] leading-[1.7] text-black/60">{p.desc}</p>
             </motion.div>
           ))}
         </div>
@@ -138,7 +138,7 @@ function ClosingCTA() {
         <div className="mt-6">
           <a
             href="/pricing"
-            className="inline-block text-[14px] text-black/40 hover:text-black/60 transition-colors"
+            className="inline-block text-[14px] text-black/50 hover:text-black/70 transition-colors"
           >
             View pricing →
           </a>
