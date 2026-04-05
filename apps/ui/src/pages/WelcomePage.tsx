@@ -20,36 +20,36 @@ const ITEMS = [
   { key: "events", name: "Events", desc: "Real-time activity stream. Decisions, messages, and approvals.", route: "/events" },
   { key: "quests", name: "Quests", desc: "Units of work tracked through your agent pipeline.", route: "/quests" },
   { key: "insights", name: "Insights", desc: "Knowledge your agents accumulate and share across sessions.", route: "/insights" },
-  { key: "company", name: "Company", desc: "Team, settings, and configuration for this workspace.", route: "/company" },
+  { key: "company", name: "Company", desc: "Team, settings, and configuration for this company.", route: "/company" },
   { key: "drive", name: "Drive", desc: "Files, prompts, agent templates, and artifacts.", route: "/drive" },
   { key: "apps", name: "Apps", desc: "Integrations, MCP tools, and third-party connections.", route: "/apps" },
 ];
 
 export default function WelcomePage() {
   const navigate = useNavigate();
-  const activeWorkspace = useUIStore((s) => s.activeWorkspace);
-  const setActiveWorkspace = useUIStore((s) => s.setActiveWorkspace);
+  const activeCompany = useUIStore((s) => s.activeCompany);
+  const setActiveCompany = useUIStore((s) => s.setActiveCompany);
 
   const [editingName, setEditingName] = useState(false);
-  const [nameDraft, setNameDraft] = useState(activeWorkspace);
+  const [nameDraft, setNameDraft] = useState(activeCompany);
   const [tagline, setTagline] = useState(
-    () => localStorage.getItem("aeqi_workspace_tagline") || "The agent runtime.",
+    () => localStorage.getItem("aeqi_company_tagline") || "The agent runtime.",
   );
   const [editingTagline, setEditingTagline] = useState(false);
   const [taglineDraft, setTaglineDraft] = useState(tagline);
 
   const saveName = () => {
-    if (nameDraft.trim()) setActiveWorkspace(nameDraft.trim());
+    if (nameDraft.trim()) setActiveCompany(nameDraft.trim());
     setEditingName(false);
   };
   const saveTagline = () => {
     const val = taglineDraft.trim() || "The agent runtime.";
     setTagline(val);
-    localStorage.setItem("aeqi_workspace_tagline", val);
+    localStorage.setItem("aeqi_company_tagline", val);
     setEditingTagline(false);
   };
 
-  const displayName = activeWorkspace || "aeqi";
+  const displayName = activeCompany || "aeqi";
 
   return (
     <div className="welcome">
@@ -66,14 +66,14 @@ export default function WelcomePage() {
                 onBlur={saveName}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") saveName();
-                  if (e.key === "Escape") { setEditingName(false); setNameDraft(activeWorkspace); }
+                  if (e.key === "Escape") { setEditingName(false); setNameDraft(activeCompany); }
                 }}
                 autoFocus
               />
             ) : (
               <h1
                 className="welcome-name"
-                onClick={() => { setEditingName(true); setNameDraft(activeWorkspace); }}
+                onClick={() => { setEditingName(true); setNameDraft(activeCompany); }}
                 title="Click to rename"
               >
                 {displayName}
@@ -117,9 +117,9 @@ export default function WelcomePage() {
           ))}
         </div>
 
-        {/* New workspace */}
+        {/* New company */}
         <button className="welcome-new-ws" onClick={() => navigate("/new")}>
-          + New workspace
+          + New company
         </button>
 
         {/* Footer */}

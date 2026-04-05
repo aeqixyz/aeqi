@@ -10,14 +10,14 @@ interface Workspace {
 }
 
 export default function WorkspaceSwitcher() {
-  const activeWorkspace = useUIStore((s) => s.activeWorkspace);
-  const setActiveWorkspace = useUIStore((s) => s.setActiveWorkspace);
+  const activeCompany = useUIStore((s) => s.activeCompany);
+  const setActiveCompany = useUIStore((s) => s.setActiveCompany);
   const agents = useDaemonStore((s) => s.agents);
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  // Derive workspaces from top-level agents (no parent) or companies API
+  // Derive companies from top-level agents (no parent) or companies API
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
 
   useEffect(() => {
@@ -62,12 +62,12 @@ export default function WorkspaceSwitcher() {
     }
   };
 
-  // Auto-select first workspace
+  // Auto-select first company
   useEffect(() => {
-    if (!activeWorkspace && workspaces.length > 0) {
-      setActiveWorkspace(workspaces[0].name);
+    if (!activeCompany && workspaces.length > 0) {
+      setActiveCompany(workspaces[0].name);
     }
-  }, [workspaces, activeWorkspace, setActiveWorkspace]);
+  }, [workspaces, activeCompany, setActiveCompany]);
 
   // Click outside to close
   useEffect(() => {
@@ -81,7 +81,7 @@ export default function WorkspaceSwitcher() {
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  const displayName = activeWorkspace || "aeqi";
+  const displayName = activeCompany || "aeqi";
 
   return (
     <div className="ws-switcher" ref={ref}>
@@ -92,13 +92,13 @@ export default function WorkspaceSwitcher() {
         <div className="ws-trigger-text" onClick={() => navigate("/")}>
           <span className="ws-trigger-name">{displayName}</span>
           <span className="ws-trigger-plan">
-            {localStorage.getItem("aeqi_workspace_tagline") || "The agent runtime."}
+            {localStorage.getItem("aeqi_company_tagline") || "The agent runtime."}
           </span>
         </div>
         <button
           className="ws-chevron-btn"
           onClick={() => setOpen(!open)}
-          title="Switch workspace"
+          title="Switch company"
         >
           <svg
             width="12"
@@ -117,19 +117,19 @@ export default function WorkspaceSwitcher() {
 
       {open && (
         <div className="ws-dropdown">
-          <div className="ws-dropdown-label">Workspaces</div>
+          <div className="ws-dropdown-label">Companies</div>
           {workspaces.map((w) => (
             <button
               key={w.name}
-              className={`ws-option ${w.name === activeWorkspace ? "active" : ""}`}
+              className={`ws-option ${w.name === activeCompany ? "active" : ""}`}
               onClick={() => {
-                setActiveWorkspace(w.name);
+                setActiveCompany(w.name);
                 setOpen(false);
               }}
             >
               <BlockAvatar name={w.name} size={20} />
               <span className="ws-option-name">{w.name}</span>
-              {w.name === activeWorkspace && (
+              {w.name === activeCompany && (
                 <svg
                   width="12"
                   height="12"
@@ -152,7 +152,7 @@ export default function WorkspaceSwitcher() {
               navigate("/new");
             }}
           >
-            + New workspace
+            + New company
           </button>
         </div>
       )}

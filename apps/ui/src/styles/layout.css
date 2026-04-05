@@ -98,7 +98,7 @@
   padding: 4px 8px 8px;
 }
 
-/* ── Shared sidebar menu (workspace + profile) ── */
+/* ── Shared sidebar menu (company + profile) ── */
 .sidebar-menu {
   position: relative;
   padding: 8px;
@@ -319,7 +319,7 @@
   color: var(--text-muted);
   flex-shrink: 0;
 }
-/* Dropup — same style as workspace dropdown */
+/* Dropup — same style as company dropdown */
 .pm-dropup {
   position: absolute;
   left: 8px;

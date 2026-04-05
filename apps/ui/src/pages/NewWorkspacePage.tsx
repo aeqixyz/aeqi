@@ -7,7 +7,7 @@ import "@/styles/welcome.css";
 
 export default function NewWorkspacePage() {
   const navigate = useNavigate();
-  const setActiveWorkspace = useUIStore((s) => s.setActiveWorkspace);
+  const setActiveCompany = useUIStore((s) => s.setActiveCompany);
 
   const [name, setName] = useState("");
   const [tagline, setTagline] = useState("");
@@ -22,13 +22,13 @@ export default function NewWorkspacePage() {
     setError("");
     try {
       await api.createCompany({ name: name.trim() });
-      setActiveWorkspace(name.trim());
+      setActiveCompany(name.trim());
       if (tagline.trim()) {
-        localStorage.setItem("aeqi_workspace_tagline", tagline.trim());
+        localStorage.setItem("aeqi_company_tagline", tagline.trim());
       }
       navigate("/agents");
     } catch (e: any) {
-      setError(e?.message || "Failed to create workspace");
+      setError(e?.message || "Failed to create company");
       setCreating(false);
     }
   };
@@ -71,7 +71,7 @@ export default function NewWorkspacePage() {
             <div className="new-ws-identity-fields">
               <input
                 className="new-ws-name-input"
-                placeholder="Workspace name"
+                placeholder="Company name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) handleCreate(); }}
@@ -96,12 +96,12 @@ export default function NewWorkspacePage() {
           disabled={!name.trim() || creating}
         >
           {creating ? "Creating..." : (
-            <>Create workspace <kbd className="new-ws-kbd">↵</kbd></>
+            <>Create company <kbd className="new-ws-kbd">↵</kbd></>
           )}
         </button>
 
         <p className="new-ws-hint">
-          You can change the name, logo, and tagline anytime from your workspace settings.
+          You can change the name, logo, and tagline anytime from your company settings.
         </p>
       </div>
     </div>
