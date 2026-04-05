@@ -212,7 +212,7 @@ function Footer() {
         </div>
 
         <motion.div {...fadeView(0.2)} className="mt-14 pt-6 border-t border-black/[0.04] flex items-center justify-between">
-          <span className="text-[22px] font-bold tracking-tighter text-black/25 leading-none">æ</span>
+          <a href="/" className="text-[18px] font-bold tracking-tighter text-black/25 hover:text-black/40 transition-colors">æqi</a>
           <p className="text-[12px] text-black/20">
             &copy; {new Date().getFullYear()} aeqi.ai
           </p>
