@@ -92,12 +92,6 @@
   border-top: 1px solid var(--border);
   padding: 4px 8px 8px;
 }
-.sidebar-nav-right {
-  flex-direction: row-reverse;
-}
-.sidebar-nav-right .sidebar-nav-label {
-  text-align: right;
-}
 
 /* Workspace switcher */
 .ws-switcher {
