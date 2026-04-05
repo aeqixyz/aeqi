@@ -6,7 +6,7 @@
   ],
   "last_commit": "b9bc6f2227aca291f6622ce723377fdd351371ae",
   "branch": "main",
-  "worktree_path": "/home/claudedev/sigil",
+  "worktree_path": "/home/claudedev/aeqi",
   "timestamp": "2026-04-02T07:56:14.401939765Z",
   "session_id": null,
   "progress_notes": "DONE: I'll implement the final 4 phases of the orchestration redesign. Let me start by exploring the current codebase structure and understanding what needs to be done."

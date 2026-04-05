@@ -8,7 +8,7 @@
   ],
   "last_commit": "abbf42cdf058b6a1dde97e83e6d62bb2db339724",
   "branch": "main",
-  "worktree_path": "/home/claudedev/sigil",
+  "worktree_path": "/home/claudedev/aeqi",
   "timestamp": "2026-03-25T23:52:55.999528379Z",
   "session_id": null,
   "progress_notes": "DONE: No. Fees aren't the problem. Not even close.\n\n**Total fees paid: $53.74.** Against **-$28,479.81** in realized losses. That's 0.19% of the bleed. You could eliminate every fee on every exchange and you'd still be down $28,426.\n\nThe losses are directional. The model is consistently taking positions that move against it — 435K fills, steady drawdown. Another $1,100 bled in just the last 24 hours alone.\n\nChasing fee optimization here is like adjusting the rearview mirror while the engine's on fire. The alpha signal itself is misfiring. That's where the fix needs to happen — the strategy logic, the entry/exit conditions, the market regime detection. Until the model stops picking the wrong side of trades, nothing else moves the needle."

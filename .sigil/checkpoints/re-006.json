@@ -9,7 +9,7 @@
   ],
   "last_commit": "db664ee0586b60e5fa12a638df20642b8267e03e",
   "branch": "main",
-  "worktree_path": "/home/claudedev/sigil",
+  "worktree_path": "/home/claudedev/aeqi",
   "timestamp": "2026-04-01T13:59:15.452044259Z",
   "session_id": null,
   "progress_notes": "DONE: Looking at the current state, I have a functional but basic TUI implementation. The previous worker noted it's \"thinner than it should be.\" I need to enhance it with the priority features, starting with P0 items that are missing:\n\n1. **Markdown rendering** (headers, bold, italic, code blocks with syntax highlighting)\n2. **Slash command support** (/new, /model, /compress, /status, /skills, /exit)\n3. **Enhanced status bar** (already exists but could be improved)\n\nLet me add markdown rendering first using the already-included `pulldown-cmark` and `syntect` dependencies."

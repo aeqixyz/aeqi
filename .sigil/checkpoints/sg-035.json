@@ -7,7 +7,7 @@
   ],
   "last_commit": "c1409dd9827e8bd9867a6c45aa148eee9e53b018",
   "branch": "main",
-  "worktree_path": "/home/claudedev/sigil",
+  "worktree_path": "/home/claudedev/aeqi",
   "timestamp": "2026-04-01T14:42:43.334400633Z",
   "session_id": null,
   "progress_notes": "DONE: I'll rebuild the sigil-ui sidebar as a living org chart with live indicators, adopting the Paperclip patterns. Let me start by exploring the current UI structure."

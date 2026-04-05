@@ -7,7 +7,7 @@
   ],
   "last_commit": "dbde9c22018b6ba978f71241a0a922c29159565c",
   "branch": "main",
-  "worktree_path": "/home/claudedev/sigil",
+  "worktree_path": "/home/claudedev/aeqi",
   "timestamp": "2026-04-02T13:08:39.155193440Z",
   "session_id": null,
   "progress_notes": "DONE: I'll fix the remaining architectural audit findings: dispatch consumption for non-leader agents, IPC blackboard scoping, and response mode routing. Let me start by exploring the codebase to understand the current implementation."

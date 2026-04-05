@@ -481,7 +481,7 @@ crates/aeqi-orchestrator/src/middleware/        — Middleware chain (9 layers)
 
 In a fresh Claude Code session:
 
-1. "Read `/home/claudedev/sigil/docs/agent-loop-parity.md` for context"
+1. "Read `/home/claudedev/aeqi/docs/agent-loop-parity.md` for context"
 2. "Execute Phase 1: deep read Claude Code's query.ts and related files"
 3. "Execute Phase 2: deep read AEQI's agent.rs"
 4. "Execute Phase 3: produce the side-by-side comparison"

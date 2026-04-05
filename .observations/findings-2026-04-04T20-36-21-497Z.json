@@ -4,17 +4,17 @@
   "observations": [
     {
       "type": "screenshot",
-      "path": "/home/claudedev/sigil/.observations/full-2026-04-04T20-36-21-497Z.png",
+      "path": "/home/claudedev/aeqi/.observations/full-2026-04-04T20-36-21-497Z.png",
       "variant": "full"
     },
     {
       "type": "screenshot",
-      "path": "/home/claudedev/sigil/.observations/viewport-2026-04-04T20-36-21-497Z.png",
+      "path": "/home/claudedev/aeqi/.observations/viewport-2026-04-04T20-36-21-497Z.png",
       "variant": "viewport"
     },
     {
       "type": "screenshot",
-      "path": "/home/claudedev/sigil/.observations/mobile-2026-04-04T20-36-21-497Z.png",
+      "path": "/home/claudedev/aeqi/.observations/mobile-2026-04-04T20-36-21-497Z.png",
       "variant": "mobile"
     }
   ],

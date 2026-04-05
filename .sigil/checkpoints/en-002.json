@@ -4,7 +4,7 @@
   "modified_files": [],
   "last_commit": "eddf92931258d83ceadc081a0946ba8f9a3b2600",
   "branch": "main",
-  "worktree_path": "/home/claudedev/sigil",
+  "worktree_path": "/home/claudedev/aeqi",
   "timestamp": "2026-03-26T00:07:08.861106680Z",
   "session_id": null,
   "progress_notes": "DONE: *eyes scan the code without looking up*\n\nThree issues found. Two structural, one fatal.\n\n**Fatal**: `weight_store_engine.rs:206` — FNO inference does `tanh * vol` instead of `tanh * base_vol_mult * sqrt(horizon) * vol`. The proper scaling in `transform.rs` is never called. FNO contribution to `magnitude_pct` is ~50× smaller than intended, so LTC output dominates entirely. The system is running on untrained LTC predictions, not FNO alpha.\n\n**Structural**: `manifold.rs:8–11` — 12 of 48 LTC input dimensions are dead zeros (`retracement_vals`, `entry_distance_vals`). The LTC is learning on 75% of the intended signal space. Garbage in.\n\n**Structural**: `weight_store_engine.rs:67` — `base_vol_mult: 1.41` in `from_config`, `InferenceWorkerConfig` uses `10.0`. Training labels and inference scale are inconsistent across services.\n\n*turns page*\n\nThe losses aren't a calculation bug in accounting. P&L math at `position_book.rs:95` and `paper.rs:147` is correct. The bleed is the LTC generating primary signals from an undertrained network with degraded inputs. Until the LTC converges, expect noise biased by random weight initialization — which by chance drifts directionally negative."

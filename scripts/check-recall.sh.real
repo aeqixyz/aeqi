@@ -35,8 +35,8 @@ if [ -n "$FILE_PATH" ] && ! is_project_path "$FILE_PATH"; then
 fi
 
 # --- Graceful degradation ---
-SIGIL_BIN="/home/claudedev/sigil/target/release/sigil"
-[ -x "$SIGIL_BIN" ] || SIGIL_BIN="/home/claudedev/sigil/target/debug/sigil"
+SIGIL_BIN="/home/claudedev/aeqi/target/release/sigil"
+[ -x "$SIGIL_BIN" ] || SIGIL_BIN="/home/claudedev/aeqi/target/debug/sigil"
 if [ ! -x "$SIGIL_BIN" ]; then
     log_hook "check-recall" "allow" "binary-missing"
     echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"sigil_recall skipped: sigil binary not found"}}'

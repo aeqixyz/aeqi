@@ -1,3 +1,4 @@
+use aeqi_core::config::AuthMode;
 use axum::{
     extract::{Request, State},
     http::StatusCode,
@@ -14,18 +15,26 @@ pub struct Claims {
     pub sub: String,
     pub iat: usize,
     pub exp: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
 }
 
-/// Create a JWT token.
+/// Create a JWT token with optional user identity.
 pub fn create_token(
     secret: &str,
     expiry_hours: u64,
+    user_id: Option<&str>,
+    email: Option<&str>,
 ) -> Result<String, jsonwebtoken::errors::Error> {
     let now = chrono::Utc::now().timestamp() as usize;
     let claims = Claims {
-        sub: "operator".to_string(),
+        sub: user_id.unwrap_or("operator").to_string(),
         iat: now,
         exp: now + (expiry_hours * 3600) as usize,
+        user_id: user_id.map(|s| s.to_string()),
+        email: email.map(|s| s.to_string()),
     };
     encode(
         &Header::default(),
@@ -53,19 +62,28 @@ fn extract_bearer(req: &Request) -> Option<&str> {
         .strip_prefix("Bearer ")
 }
 
-/// Axum middleware that validates JWT using auth_secret from AppState.
-pub async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -> Response {
-    let secret = match state.auth_secret.as_deref() {
+fn signing_secret(state: &AppState) -> &str {
+    match state.auth_secret.as_deref() {
         Some(s) if !s.is_empty() => s,
         _ => "aeqi-dev",
-    };
+    }
+}
 
-    let Some(token) = extract_bearer(&req) else {
-        return (StatusCode::UNAUTHORIZED, "missing authorization header").into_response();
-    };
-
-    match validate_token(token, secret) {
-        Ok(_) => next.run(req).await,
-        Err(_) => (StatusCode::UNAUTHORIZED, "invalid or expired token").into_response(),
+/// Axum middleware — dispatches by auth mode.
+pub async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    match state.auth_mode {
+        AuthMode::None => next.run(req).await,
+        AuthMode::Secret | AuthMode::Accounts => {
+            let secret = signing_secret(&state);
+            let Some(token) = extract_bearer(&req) else {
+                return (StatusCode::UNAUTHORIZED, "missing authorization header").into_response();
+            };
+            match validate_token(token, secret) {
+                Ok(_) => next.run(req).await,
+                Err(_) => {
+                    (StatusCode::UNAUTHORIZED, "invalid or expired token").into_response()
+                }
+            }
+        }
     }
 }

@@ -33,7 +33,7 @@
   ],
   "last_commit": "d653f511ec79c99cb7db005eca7cae598c651a0e",
   "branch": "master",
-  "worktree_path": "/home/claudedev/sigil",
+  "worktree_path": "/home/claudedev/aeqi",
   "timestamp": "2026-02-23T20:59:24.522877198Z",
   "session_id": null,
   "progress_notes": "DONE: ...three technical differentiators worth naming precisely.\n\nFirst: **budget-gated execution** — `can_afford_domain()` blocks every spirit spawn. Gastown has no concept of cost visibility. OpenClaw has no concept of limits. This framework enforces both. Second: the memory stack is not a RAG wrapper — it's BM25 + vector + temporal decay + MMR reranking, scoped per companion, per domain, per realm. That's the competitive moat. Third: the binary is 7MB, statically linked, zero CVEs. Python agent frameworks ship 400+ transitive dependencies.\n\n*turns page* ...lead with the gacha hook. Bury the Rust footnote. Technical readers will find it."

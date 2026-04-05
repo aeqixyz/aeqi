@@ -6,7 +6,7 @@
   ],
   "last_commit": "a012a33ee8fc7aaf3b5444b9e95cfe780e4e6325",
   "branch": "fix/dispatch-consumption",
-  "worktree_path": "/home/claudedev/sigil",
+  "worktree_path": "/home/claudedev/aeqi",
   "timestamp": "2026-04-02T13:39:07.358562240Z",
   "session_id": null,
   "progress_notes": "DONE: I'll redesign the navigation with Discord-style project rail + floating nav, adopting Paperclip UI patterns. Let me start by exploring the current UI structure to understand what exists."

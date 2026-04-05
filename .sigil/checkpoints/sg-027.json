@@ -7,7 +7,7 @@
   ],
   "last_commit": "32d2f2ab0f159a6053478bc2748a1fd0d7b4965e",
   "branch": "sg-022/context-pipeline",
-  "worktree_path": "/home/claudedev/sigil",
+  "worktree_path": "/home/claudedev/aeqi",
   "timestamp": "2026-03-31T21:19:12.458816326Z",
   "session_id": null,
   "progress_notes": "FAILED: FAILED: claude code exited with code 1"

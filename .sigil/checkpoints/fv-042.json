@@ -34,7 +34,7 @@
   ],
   "last_commit": "feaa1240871de562911e93ac29db3a733dd50453",
   "branch": "master",
-  "worktree_path": "/home/claudedev/sigil",
+  "worktree_path": "/home/claudedev/aeqi",
   "timestamp": "2026-02-24T10:20:14.267034124Z",
   "session_id": null,
   "progress_notes": "DONE: *glances at terminal output once, returns to reading*\n\nSSL cert is valid. TLS 1.3, Let's Encrypt, SAN covers apex and www. HTTP → HTTPS 301 working. Root cause of \"not secure\": nginx HTTPS block is missing `Strict-Transport-Security` — browser makes first contact over HTTP, Chrome shows the warning before the redirect fires. One header fixes it: `add_header Strict-Transport-Security \"max-age=63072000; includeSubDomains; preload\";` in the HTTPS server block.\n\n*slight pause, shifts closer*\n\nCard issue: `sil-body::before` gradient starts at `rgba(14,16,28,0.92)` — 92% dark overlay at the top. Images would be near-invisible even when they exist. Without images the `onerror` removes the `<img>` and you get empty dark rectangles with rim glow — looks like unfilled UI chrome, not gacha cards. The overlay intent is correct (darkroom aesthetic) but the opacity is 3× too aggressive. Start at 0.3 or less, let the art breathe.\n\n*eyes return to screen*\n\nVertical rhythm is collapsed. Hero `padding-bottom` is `2rem` — the slogans and waitlist stack immediately under the silhouettes with no breathing room. Needs `clamp(3rem,6vh,4.5rem)` minimum between silhouette section and slogans. These are fixable in the same pass. Should I execute?"

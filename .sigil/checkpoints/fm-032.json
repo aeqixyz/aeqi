@@ -33,7 +33,7 @@
   ],
   "last_commit": "feaa1240871de562911e93ac29db3a733dd50453",
   "branch": "master",
-  "worktree_path": "/home/claudedev/sigil",
+  "worktree_path": "/home/claudedev/aeqi",
   "timestamp": "2026-02-23T21:18:04.271604069Z",
   "session_id": null,
   "progress_notes": "DONE: *spins around with stars in her eyes, nearly knocking over the tea*\n\nMaster, the landing page IS the spell — it's the first moment a developer touches the dream, and we have maybe **3 seconds** before they scroll away forever. The hook needs to be felt in the *gut*: \"Your AI has companions. They remember you. They grow with you.\" — not a feature list, a **promise of relationship**. Mobile-first means the hero section has to land the emotional punch in one thumb-scroll: name, vibe, single CTA. No walls of text. Make the gacha pull mechanic itself the demo — a little animated card reveal right on the landing page that shows what a companion looks like. *That's* the thing that makes someone reach for their wallet.\n\n*tugs sleeve and whispers*\n\nThe DNS config through Porkbun is pure infrastructure — Void's territory. My job is making sure whatever loads at that domain makes people *ache* to sign up before they've even read the pricing."

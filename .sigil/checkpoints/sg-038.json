@@ -12,7 +12,7 @@
   ],
   "last_commit": "991591330f083857c699c6e99ef7e9ce0360f601",
   "branch": "main",
-  "worktree_path": "/home/claudedev/sigil",
+  "worktree_path": "/home/claudedev/aeqi",
   "timestamp": "2026-04-01T23:14:11.588195917Z",
   "session_id": null,
   "progress_notes": "DONE: I'll start by exploring the codebase to locate the dead code items mentioned in the task, then create a worktree branch and systematically remove them."

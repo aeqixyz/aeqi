@@ -12,7 +12,7 @@
   ],
   "last_commit": "afc475ccaaf4be8eddd8a29bbc9e5d26d06895c6",
   "branch": "sg-031/execute-plan",
-  "worktree_path": "/home/claudedev/sigil",
+  "worktree_path": "/home/claudedev/aeqi",
   "timestamp": "2026-04-01T10:36:35.180278982Z",
   "session_id": null,
   "progress_notes": "FAILED: FAILED: claude code exited with code 1"

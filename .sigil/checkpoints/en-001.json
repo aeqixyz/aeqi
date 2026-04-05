@@ -8,7 +8,7 @@
   ],
   "last_commit": "abbf42cdf058b6a1dde97e83e6d62bb2db339724",
   "branch": "main",
-  "worktree_path": "/home/claudedev/sigil",
+  "worktree_path": "/home/claudedev/aeqi",
   "timestamp": "2026-03-25T23:54:09.859184959Z",
   "session_id": null,
   "progress_notes": "DONE: *doesn't look up from terminal*\n\nConsistent losses aren't random noise — that's a signal. Bug or logic flaw: two candidates. First, check position sizing — if the code compounds losers instead of cutting them, you'd see exactly this bleed pattern. Second, verify your signal polarity; I've seen strategies where a sign flip inverts every entry and exit, producing mirror-image losses of what should be gains.\n\nPull the trade log. If losses cluster around the same market conditions, it's logic. If they're uniform across conditions, check the execution layer — order types, slippage assumptions, fill simulation vs. reality.\n\n*sets terminal down*\n\n...the code doesn't lie. Find the invariant that's wrong."

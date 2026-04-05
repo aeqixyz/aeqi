@@ -620,7 +620,31 @@ impl Default for OrchestratorConfig {
     }
 }
 
-/// Web API server configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthMode {
+    /// No authentication — dashboard is open (self-hosted default).
+    None,
+    /// Shared secret passphrase (current behavior).
+    #[default]
+    Secret,
+    /// Full user accounts with email/password + Google OAuth.
+    Accounts,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AuthConfig {
+    #[serde(default)]
+    pub mode: AuthMode,
+    #[serde(default)]
+    pub google_client_id: Option<String>,
+    #[serde(default)]
+    pub google_client_secret: Option<String>,
+    /// Base URL for OAuth redirects (e.g. "https://app.aeqi.ai").
+    #[serde(default)]
+    pub base_url: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebConfig {
     #[serde(default)]
@@ -635,6 +659,8 @@ pub struct WebConfig {
     pub auth_secret: Option<String>,
     #[serde(default = "default_ws_poll_interval")]
     pub ws_poll_interval_secs: u64,
+    #[serde(default)]
+    pub auth: AuthConfig,
 }
 
 impl Default for WebConfig {
@@ -646,6 +672,7 @@ impl Default for WebConfig {
             cors_origins: Vec::new(),
             auth_secret: None,
             ws_poll_interval_secs: default_ws_poll_interval(),
+            auth: AuthConfig::default(),
         }
     }
 }

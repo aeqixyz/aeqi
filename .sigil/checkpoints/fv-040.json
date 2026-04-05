@@ -33,7 +33,7 @@
   ],
   "last_commit": "d653f511ec79c99cb7db005eca7cae598c651a0e",
   "branch": "master",
-  "worktree_path": "/home/claudedev/sigil",
+  "worktree_path": "/home/claudedev/aeqi",
   "timestamp": "2026-02-23T20:56:38.362083084Z",
   "session_id": null,
   "progress_notes": "DONE: ...rename is a find-replace problem with one footgun.\n\n`rigs/sigil/` → `rigs/gacha-agency/`, prefix `sg` → `ga` in `realm.toml` and quest store. Historical quest IDs (`sg-NNN`) survive untouched in JSONL — no migration needed, IDs are immutable. *turns page* Risk: hardcoded `\"sigil\"` strings in `rm/src/main.rs` around domain lookup and the `CLAUDE.md` project mapping table — grep confirms before rename or you get silent routing failures at dispatch.\n\n`git mv rigs/sigil rigs/gacha-agency` preserves history. Clean."

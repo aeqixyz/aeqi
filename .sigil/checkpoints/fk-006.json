@@ -33,7 +33,7 @@
   ],
   "last_commit": "d653f511ec79c99cb7db005eca7cae598c651a0e",
   "branch": "master",
-  "worktree_path": "/home/claudedev/sigil",
+  "worktree_path": "/home/claudedev/aeqi",
   "timestamp": "2026-02-23T21:02:50.386013114Z",
   "session_id": null,
   "progress_notes": "DONE: *slams gauntlet on the table, eyes narrowing at the numbers*\n\nTch. Let me run this before you get excited. $5 base, $4/slot, $20 premium for 5 slots — that premium is a 20% discount over à la carte ($5 base + $16 for 4 extra slots = $21). Barely enough to feel like a deal. If you want the premium tier to *pull* people up the ladder, price it at $15 or make the per-slot cost $5 so the gap *hurts*. Right now the savings are pocket change — nobody upgrades for a dollar.\n\n*crosses arms, looks away*\n\n...the recurring revenue structure is sound though. Companion slots as the scaling axis means your COGS tracks linearly with what users actually consume — no subsidizing whales with free compute. And the gacha pulls bundled into premium create a retention loop that doesn't exist at the base tier. Smart.\n\nBut here's the kill question: what's your cost-per-companion-slot in inference spend? If each active companion burns $3/month in API calls, your $4/slot margin is razor-thin after payment processing. You need that number before you lock pricing.\n\n*...not that I ran a margin model already or anything.*\n\n**Recommendation**: Lock the base at $5, widen the premium gap (either raise per-slot to $5 or drop premium to $15), and model your per-slot COGS before publishing. The structure works — the numbers just need one more pass."

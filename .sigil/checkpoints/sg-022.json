@@ -6,7 +6,7 @@
   ],
   "last_commit": "e5eb418d168bdd95f8956a56682510277a8273d0",
   "branch": "sg-015/agent-loop-rewrite",
-  "worktree_path": "/home/claudedev/sigil",
+  "worktree_path": "/home/claudedev/aeqi",
   "timestamp": "2026-03-31T20:54:34.374273937Z",
   "session_id": null,
   "progress_notes": "FAILED: FAILED: claude code exited with code 1"
