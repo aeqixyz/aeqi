@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useUIStore } from "@/store/ui";
 import BlockAvatar from "@/components/BlockAvatar";
@@ -37,6 +37,10 @@ export default function WelcomePage() {
   );
   const [editingTagline, setEditingTagline] = useState(false);
   const [taglineDraft, setTaglineDraft] = useState(tagline);
+  const [avatarUrl, setAvatarUrl] = useState(
+    () => localStorage.getItem("aeqi_company_avatar") || "",
+  );
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const saveName = () => {
     if (nameDraft.trim()) setActiveCompany(nameDraft.trim());
@@ -55,8 +59,35 @@ export default function WelcomePage() {
     <div className="welcome">
       <div className="welcome-inner new-ws-animate">
         {/* Identity — same pattern as /new */}
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+              const url = reader.result as string;
+              setAvatarUrl(url);
+              localStorage.setItem("aeqi_company_avatar", url);
+            };
+            reader.readAsDataURL(file);
+            e.target.value = "";
+          }}
+        />
         <div className="welcome-identity">
-          <BlockAvatar name={displayName} size={56} />
+          <div className="new-ws-avatar" onClick={() => fileRef.current?.click()} title="Upload logo">
+            {avatarUrl ? (
+              <img src={avatarUrl} alt="" className="new-ws-avatar-img" />
+            ) : (
+              <BlockAvatar name={displayName} size={56} />
+            )}
+            <span className="new-ws-avatar-overlay">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2 11l3.5-3.5L8 10l3-4 3 3M2 14h12" /></svg>
+            </span>
+          </div>
           <div className="welcome-identity-text">
             {editingName ? (
               <input
