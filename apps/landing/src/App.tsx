@@ -74,7 +74,7 @@ function Hero() {
           className="mt-5 text-lg md:text-xl text-black/40 tracking-wide"
           {...fade(0.35)}
         >
-          intelligence from first principles
+          companies that run via agents + programmable ownership
         </motion.p>
 
         <motion.div className="mt-10" {...fade(0.5)}>
