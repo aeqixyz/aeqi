@@ -277,9 +277,11 @@
   flex-direction: column;
   overflow: hidden;
 }
-.sidebar-tree-nav {
-  padding: 8px 8px 4px;
-  flex-shrink: 0;
+.sidebar-nav-no-border { border-bottom: none; }
+.sidebar-nav-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 8px;
 }
 
 /* ── Profile bar (sidebar bottom) ── */
