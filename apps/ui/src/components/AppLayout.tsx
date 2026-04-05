@@ -87,6 +87,7 @@ export default function AppLayout() {
             </a>
           </nav>
           <div className="left-sidebar-body">
+            <div className="sidebar-tree-title">Agents</div>
             <AgentTree />
           </div>
           <nav className="sidebar-nav sidebar-nav-bottom">

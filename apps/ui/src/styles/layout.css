@@ -277,6 +277,15 @@
   flex-direction: column;
   overflow: hidden;
 }
+.sidebar-tree-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  padding: 10px 16px 4px;
+  flex-shrink: 0;
+}
 
 /* ── Profile bar (sidebar bottom) ── */
 /* Profile menu — reuses sidebar-menu patterns */
