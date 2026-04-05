@@ -298,7 +298,7 @@
 .sidebar-tree-header-link:hover { color: var(--text-secondary); background: var(--bg-elevated); }
 .sidebar-tree-header-link.active { color: var(--text-primary); font-weight: 500; }
 .sidebar-tree-header-link > svg {
-  width: 14px;
+  width: 22px;
   flex-shrink: 0;
 }
 .sidebar-tree-action {
