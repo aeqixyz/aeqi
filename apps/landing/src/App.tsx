@@ -138,20 +138,20 @@ function Hero() {
 
 /* ─── Value props ─── */
 const props = [
-  { title: "Agent orchestration", desc: "A full company operating on agents — engineering, growth, operations, finance — coordinating in real time. No employees. No overhead. You set the mission. They run the company." },
+  { title: "Agent orchestration", desc: "A full company operating on agents. Engineering, growth, operations, finance. Coordinating in real time. No employees. No overhead. You set the mission. They run the company." },
   { title: "Autonomous compounding", desc: "The company gets smarter every day. Agents remember everything, learn from every outcome, and discover new ways to grow. The longer it runs, the more it's worth." },
-  { title: "Instant capital formation", desc: "Equity is tokenized from day one. Investors fund a company in one transaction — no term sheets, no legal quarters, no gates. Real-time revenue and burn, visible on-chain." },
+  { title: "Instant capital formation", desc: "Equity is tokenized from day one. Investors fund a company in one transaction. No term sheets, no legal quarters, no gates. Real-time revenue and burn, visible on-chain." },
 ];
 
 function ValueProps() {
   return (
-    <section className="py-24 px-6">
-      <div className="max-w-5xl mx-auto">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-12 md:gap-16">
+    <section className="py-32 px-6">
+      <div className="max-w-4xl mx-auto">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-10 md:gap-14">
           {props.map((p, i) => (
             <motion.div key={p.title} {...fadeView(0.1 * i)}>
-              <h3 className="text-[15px] font-semibold text-black/70 mb-2">{p.title}</h3>
-              <p className="text-[14px] leading-relaxed text-black/35">{p.desc}</p>
+              <h3 className="text-[14px] font-semibold tracking-wide uppercase text-black/50 mb-3">{p.title}</h3>
+              <p className="text-[15px] leading-[1.7] text-black/40">{p.desc}</p>
             </motion.div>
           ))}
         </div>
