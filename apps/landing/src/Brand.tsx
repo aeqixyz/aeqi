@@ -2,54 +2,24 @@ import { useRef, useEffect, useCallback } from "react";
 import Nav from "./Nav";
 import Footer from "./Footer";
 
-function drawParticles(
+function drawText(
   ctx: CanvasRenderingContext2D,
   w: number,
   h: number,
   text: string,
   fontSize: number,
-  particleCount: number,
-  particleSize: number
+  align: "center" | "right" = "center",
+  offsetX: number = 0
 ) {
-  // Sample glyph
-  const tmp = document.createElement("canvas");
-  tmp.width = w;
-  tmp.height = h;
-  const tc = tmp.getContext("2d")!;
-  tc.fillStyle = "#000";
-  tc.textAlign = "center";
-  tc.textBaseline = "middle";
-  tc.font = `bold ${fontSize}px Inter, -apple-system, system-ui, sans-serif`;
-  tc.fillText(text, w / 2, h / 2);
-
-  const imageData = tc.getImageData(0, 0, w, h);
-  const filled: [number, number][] = [];
-  for (let y = 0; y < h; y += 1) {
-    for (let x = 0; x < w; x += 1) {
-      if (imageData.data[(y * w + x) * 4 + 3] > 128) {
-        filled.push([x, y]);
-      }
-    }
-  }
-
-  // Draw background
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, w, h);
 
-  // Draw particles
-  for (let i = 0; i < particleCount; i++) {
-    const pt = filled[Math.floor(Math.random() * filled.length)];
-    if (!pt) continue;
-    const x = pt[0] + (Math.random() - 0.5) * 2;
-    const y = pt[1] + (Math.random() - 0.5) * 2;
-    const size = particleSize * (0.5 + Math.random());
-    const opacity = 0.15 + Math.random() * 0.55;
-
-    ctx.beginPath();
-    ctx.arc(x, y, size, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(0, 0, 0, ${opacity})`;
-    ctx.fill();
-  }
+  const x = align === "right" ? w * 0.7 + offsetX : w / 2 + offsetX;
+  ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+  ctx.textAlign = align === "right" ? "center" : "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `bold ${fontSize}px Inter, -apple-system, system-ui, sans-serif`;
+  ctx.fillText(text, x, h / 2);
 }
 
 function BrandCanvas({
@@ -58,8 +28,8 @@ function BrandCanvas({
   height,
   text,
   fontSize,
-  particles,
-  particleSize,
+  align = "center",
+  offsetX = 0,
   label,
   dimensions,
 }: {
@@ -68,8 +38,8 @@ function BrandCanvas({
   height: number;
   text: string;
   fontSize: number;
-  particles: number;
-  particleSize: number;
+  align?: "center" | "right";
+  offsetX?: number;
   label: string;
   dimensions: string;
 }) {
@@ -82,17 +52,16 @@ function BrandCanvas({
     canvas.height = height;
     const ctx = canvas.getContext("2d")!;
 
-    // Wait for font
     if (document.fonts?.ready) {
       document.fonts.ready.then(() => {
-        drawParticles(ctx, width, height, text, fontSize, particles, particleSize);
+        drawText(ctx, width, height, text, fontSize, align, offsetX);
       });
     } else {
       setTimeout(() => {
-        drawParticles(ctx, width, height, text, fontSize, particles, particleSize);
+        drawText(ctx, width, height, text, fontSize, align, offsetX);
       }, 200);
     }
-  }, [width, height, text, fontSize, particles, particleSize]);
+  }, [width, height, text, fontSize, align, offsetX]);
 
   const download = useCallback(() => {
     const canvas = canvasRef.current;
@@ -141,11 +110,10 @@ export default function Brand() {
               width={1584}
               height={396}
               text="æqi"
-              fontSize={220}
-              particles={8000}
-              particleSize={2.5}
+              fontSize={180}
+              align="right"
               label="LinkedIn Banner"
-              dimensions="1584 × 396px"
+              dimensions="1584 × 396px — text right-aligned, space for profile photo on the left"
             />
 
             <BrandCanvas
@@ -153,9 +121,7 @@ export default function Brand() {
               width={400}
               height={400}
               text="æqi"
-              fontSize={140}
-              particles={4000}
-              particleSize={2}
+              fontSize={120}
               label="Company Logo"
               dimensions="400 × 400px"
             />
@@ -165,9 +131,7 @@ export default function Brand() {
               width={512}
               height={512}
               text="æ"
-              fontSize={380}
-              particles={5000}
-              particleSize={2.5}
+              fontSize={340}
               label="Icon / Favicon"
               dimensions="512 × 512px"
             />
@@ -177,9 +141,7 @@ export default function Brand() {
               width={1200}
               height={630}
               text="æqi"
-              fontSize={280}
-              particles={10000}
-              particleSize={2.5}
+              fontSize={240}
               label="Open Graph Image"
               dimensions="1200 × 630px"
             />
