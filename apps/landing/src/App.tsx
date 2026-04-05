@@ -163,7 +163,7 @@ function ClosingCTA() {
   return (
     <section className="py-20 px-6">
       <motion.div className="max-w-xl mx-auto text-center" {...fadeView()}>
-        <h2 className="text-[20px] md:text-[24px] font-semibold tracking-tight text-black/60 leading-snug">
+        <h2 className="text-[20px] md:text-[24px] font-semibold tracking-tight text-black/80 leading-snug">
           Launch a company that never sleeps.
         </h2>
         <div className="mt-6">
