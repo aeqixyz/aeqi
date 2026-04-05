@@ -1457,6 +1457,57 @@
   color: var(--text-secondary);
   background: var(--bg-base);
 }
+/* Tag filter bar */
+.asv-attach-picker-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.asv-tag-btn {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 1px 6px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.asv-tag-btn:hover { color: var(--text-secondary); border-color: var(--border-hover); }
+.asv-tag-btn--active {
+  background: var(--text-primary);
+  color: var(--bg-base);
+  border-color: var(--text-primary);
+}
+/* Section headers in picker */
+.asv-attach-picker-section {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 6px 10px 2px;
+}
+/* Hover preview */
+.asv-attach-picker-preview {
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-base);
+  border-top: 1px solid var(--border);
+  max-height: 80px;
+  overflow-y: auto;
+  line-height: 1.4;
+}
+/* Keyboard shortcut hint */
+.asv-attach-shortcut {
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-left: 2px;
+  font-family: var(--font-mono);
+}
 
 /* Composer */
 .asv-composer {

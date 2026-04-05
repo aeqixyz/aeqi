@@ -251,6 +251,8 @@ export default function AgentSessionView({
     { name: string; content: string; size: number }[]
   >([]);
   const [dragOver, setDragOver] = useState(false);
+  const [activeTagFilters, setActiveTagFilters] = useState<string[]>([]);
+  const [hoveredPrompt, setHoveredPrompt] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
@@ -325,6 +327,48 @@ export default function AgentSessionView({
   }, []);
 
   const handleDragLeave = useCallback(() => setDragOver(false), []);
+
+  // Keyboard shortcuts: Cmd+P → prompt picker, Cmd+Q → quest picker
+  useEffect(() => {
+    if (activeSessionId) return; // only before first message
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key === "p") {
+        e.preventDefault();
+        setShowAttachPicker((prev) => (prev === "prompt" ? null : "prompt"));
+        setAttachSearch("");
+        setActiveTagFilters([]);
+      } else if (e.key === "q") {
+        e.preventDefault();
+        setShowAttachPicker((prev) => (prev === "task" ? null : "task"));
+        setAttachSearch("");
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [activeSessionId]);
+
+  // Recent prompts (stored in localStorage)
+  const recentPromptNames = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem("aeqi:recent-prompts") || "[]") as string[];
+    } catch { return []; }
+  }, [showAttachPicker]);
+
+  const trackRecentPrompt = useCallback((name: string) => {
+    try {
+      const recent = JSON.parse(localStorage.getItem("aeqi:recent-prompts") || "[]") as string[];
+      const updated = [name, ...recent.filter((n) => n !== name)].slice(0, 8);
+      localStorage.setItem("aeqi:recent-prompts", JSON.stringify(updated));
+    } catch {}
+  }, []);
+
+  // All unique tags from available prompts
+  const allTags = useMemo(() => {
+    const tags = new Set<string>();
+    availablePrompts.forEach((p) => p.tags.forEach((t) => tags.add(t)));
+    return Array.from(tags).sort();
+  }, [availablePrompts]);
 
   // Load sessions for this agent
   useEffect(() => {
@@ -1180,18 +1224,70 @@ export default function AgentSessionView({
                   ×
                 </button>
               </div>
+              {/* Tag filters */}
+              {showAttachPicker === "prompt" && allTags.length > 0 && (
+                <div className="asv-attach-picker-tags">
+                  {allTags.map((tag) => (
+                    <button
+                      key={tag}
+                      className={`asv-tag-btn ${activeTagFilters.includes(tag) ? "asv-tag-btn--active" : ""}`}
+                      onClick={() =>
+                        setActiveTagFilters((prev) =>
+                          prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag],
+                        )
+                      }
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="asv-attach-picker-list">
                 {showAttachPicker === "prompt" && (
                   <>
+                    {/* Recent section */}
+                    {!attachSearch && activeTagFilters.length === 0 && recentPromptNames.length > 0 && (
+                      <>
+                        <div className="asv-attach-picker-section">Recent</div>
+                        {recentPromptNames
+                          .filter((name) => !sessionPrompts.includes(name))
+                          .filter((name) => availablePrompts.some((p) => p.name === name))
+                          .slice(0, 4)
+                          .map((name) => {
+                            const p = availablePrompts.find((pr) => pr.name === name)!;
+                            return (
+                              <div
+                                key={`recent-${p.name}`}
+                                className="asv-attach-picker-item"
+                                onClick={() => {
+                                  setSessionPrompts((prev) => [...prev, p.name]);
+                                  trackRecentPrompt(p.name);
+                                  setAttachSearch("");
+                                  setShowAttachPicker(null);
+                                }}
+                                onMouseEnter={() => setHoveredPrompt(p.description)}
+                                onMouseLeave={() => setHoveredPrompt(null)}
+                              >
+                                <span className="asv-attach-picker-item-name">{p.name}</span>
+                                <span className="asv-attach-picker-item-tags">{p.tags.join(", ")}</span>
+                              </div>
+                            );
+                          })}
+                        <div className="asv-attach-picker-section">All</div>
+                      </>
+                    )}
                     {availablePrompts
                       .filter((p) => {
                         const q = attachSearch.toLowerCase();
-                        return (
+                        const textMatch =
                           !q ||
                           p.name.toLowerCase().includes(q) ||
                           p.description.toLowerCase().includes(q) ||
-                          p.tags.some((t) => t.includes(q))
-                        );
+                          p.tags.some((t) => t.includes(q));
+                        const tagMatch =
+                          activeTagFilters.length === 0 ||
+                          activeTagFilters.every((tf) => p.tags.includes(tf));
+                        return textMatch && tagMatch;
                       })
                       .filter((p) => !sessionPrompts.includes(p.name))
                       .map((p) => (
@@ -1200,9 +1296,13 @@ export default function AgentSessionView({
                           className="asv-attach-picker-item"
                           onClick={() => {
                             setSessionPrompts((prev) => [...prev, p.name]);
+                            trackRecentPrompt(p.name);
                             setAttachSearch("");
                             setShowAttachPicker(null);
+                            setActiveTagFilters([]);
                           }}
+                          onMouseEnter={() => setHoveredPrompt(p.description)}
+                          onMouseLeave={() => setHoveredPrompt(null)}
                         >
                           <span className="asv-attach-picker-item-name">
                             {p.name}
@@ -1266,8 +1366,14 @@ export default function AgentSessionView({
                 target="_blank"
                 rel="noreferrer"
               >
-                + create new {showAttachPicker}
+                + create new {showAttachPicker === "task" ? "quest" : showAttachPicker}
               </a>
+              {/* Hover preview */}
+              {hoveredPrompt && (
+                <div className="asv-attach-picker-preview">
+                  {hoveredPrompt}
+                </div>
+              )}
             </div>
           )}
 
@@ -1276,15 +1382,15 @@ export default function AgentSessionView({
             <div className="asv-attach-toggles">
               <button
                 className="asv-attach-toggle"
-                onClick={() => setShowAttachPicker("prompt")}
+                onClick={() => { setShowAttachPicker("prompt"); setActiveTagFilters([]); }}
               >
-                + prompt
+                + prompt <span className="asv-attach-shortcut">⌘P</span>
               </button>
               <button
                 className="asv-attach-toggle"
                 onClick={() => setShowAttachPicker("task")}
               >
-                + quest
+                + quest <span className="asv-attach-shortcut">⌘Q</span>
               </button>
               <button
                 className="asv-attach-toggle"
