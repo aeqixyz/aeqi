@@ -178,6 +178,20 @@ export default function AppLayout() {
           </div>
           <nav className="sidebar-nav sidebar-nav-bottom">
             <a
+              className={`sidebar-nav-item ${isActive("/company") ? "active" : ""}`}
+              href="/company"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate("/company");
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round">
+                <rect x="2" y="4" width="10" height="8" rx="1" />
+                <path d="M5 4V3a2 2 0 014 0v1" />
+              </svg>
+              Company
+            </a>
+            <a
               className={`sidebar-nav-item ${isActive("/drive") ? "active" : ""}`}
               href="/drive"
               onClick={(e) => {
