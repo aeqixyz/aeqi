@@ -1,7 +1,5 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import { FontLoader } from "three/addons/loaders/FontLoader.js";
-import { TextGeometry } from "three/addons/geometries/TextGeometry.js";
 
 const PARTICLE_COUNT = 800;
 const DRIFT_SPEED = 0.3;
