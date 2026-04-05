@@ -43,7 +43,7 @@ function Nav() {
             href="https://app.aeqi.ai"
             className="bg-black text-white rounded-full px-5 py-2 text-[14px] font-medium hover:bg-black/85 transition-colors"
           >
-            Get Started
+            Create a Company
           </a>
         </div>
       </div>
@@ -107,7 +107,7 @@ function Footer() {
           <motion.div {...fadeView(0.05)}>
             <p className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-4">Product</p>
             <div className="space-y-2.5 text-[13px]">
-              <a href="https://app.aeqi.ai" className="block text-black/40 hover:text-black transition-colors">Get Started</a>
+              <a href="https://app.aeqi.ai" className="block text-black/40 hover:text-black transition-colors">Create a Company</a>
               <a href="https://aeqi.ai/enterprise" className="block text-black/40 hover:text-black transition-colors">Enterprise</a>
               <a href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md" className="block text-black/40 hover:text-black transition-colors">Docs</a>
             </div>
