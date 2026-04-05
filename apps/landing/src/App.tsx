@@ -102,11 +102,11 @@ const fadeView = (delay = 0) => ({
 function Footer() {
   return (
     <footer className="bg-black/[0.02]">
-      {/* Brand story — the name reveal */}
+      {/* Vision — the name reveal */}
       <div className="max-w-5xl mx-auto px-6 pt-24 pb-16">
         <motion.div className="max-w-2xl" {...fadeView()}>
           <p className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-8">
-            why aeqi
+            vision
           </p>
           <div className="flex items-baseline gap-1 text-[48px] md:text-[64px] font-bold tracking-tighter leading-none text-black/10">
             <motion.span className="text-black" {...fadeView(0.05)}>a</motion.span>
@@ -115,10 +115,10 @@ function Footer() {
             <motion.span className="text-black" {...fadeView(0.1)}>e</motion.span>
             <motion.span {...fadeView(0.1)}>conomy</motion.span>
           </div>
-          <motion.p className="mt-6 text-[15px] text-black/35 leading-relaxed max-w-md" {...fadeView(0.15)}>
-            What&apos;s the smallest system that produces intelligence? Four building blocks. Everything else emerges.
+          <motion.p className="mt-8 text-[16px] text-black/40 leading-relaxed max-w-lg" {...fadeView(0.15)}>
+            Intelligence from first principles. Four building blocks &mdash; agents, events, quests, insights &mdash; and everything else emerges.
           </motion.p>
-          <motion.div className="mt-6 flex items-center gap-6 text-[13px] font-mono text-black/25" {...fadeView(0.2)}>
+          <motion.div className="mt-8 flex items-center gap-8 text-[14px] font-mono text-black/20" {...fadeView(0.2)}>
             <span><span className="font-bold text-black/50">a</span>gent</span>
             <span><span className="font-bold text-black/50">e</span>vent</span>
             <span><span className="font-bold text-black/50">q</span>uest</span>

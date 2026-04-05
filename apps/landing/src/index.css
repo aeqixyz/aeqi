@@ -10,7 +10,7 @@ html {
 }
 
 body {
-  background: #ffffff;
+  background: rgba(0, 0, 0, 0.02);
   color: #000000;
   font-family: "Inter", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
