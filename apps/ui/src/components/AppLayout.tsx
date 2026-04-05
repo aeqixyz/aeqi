@@ -56,7 +56,7 @@ export default function AppLayout() {
         {/* Left sidebar */}
         <div className="left-sidebar">
           <WorkspaceSwitcher />
-          <nav className="sidebar-nav sidebar-nav-no-border">
+          <nav className="sidebar-nav">
             <a className={`sidebar-nav-item ${isActive("/events") ? "active" : ""}`} href="/events" onClick={(e) => { e.preventDefault(); navigate("/events"); }}>
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"><rect x="2" y="2" width="10" height="10" rx="1.5" /><path d="M2 8.5h3l1 1.5h2l1-1.5h3" /></svg>
               <span className="sidebar-nav-label">Events</span>
@@ -78,7 +78,8 @@ export default function AppLayout() {
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M6 2.5v7M2.5 6h7" /></svg>
               </span>
             </a>
-            <div className="sidebar-nav-divider" />
+          </nav>
+          <nav className="sidebar-nav sidebar-nav-agents">
             <a className={`sidebar-nav-item ${isActive("/agents") ? "active" : ""}`} href="/agents" onClick={(e) => { e.preventDefault(); navigate("/agents"); }}>
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3"><circle cx="7" cy="5" r="2.5" /><path d="M3 12.5c0-2.2 1.8-4 4-4s4 1.8 4 4" /></svg>
               <span className="sidebar-nav-label">Agents</span>

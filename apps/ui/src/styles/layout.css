@@ -92,6 +92,10 @@
   background: var(--accent);
   margin-left: auto;
 }
+.sidebar-nav-agents {
+  border-bottom: none;
+  padding: 4px 8px 8px;
+}
 .sidebar-nav-bottom {
   border-bottom: none;
   border-top: 1px solid var(--border);
@@ -277,7 +281,6 @@
   flex-direction: column;
   overflow: hidden;
 }
-.sidebar-nav-no-border { border-bottom: none; }
 .sidebar-nav-divider {
   height: 1px;
   background: var(--border);
