@@ -67,7 +67,7 @@ function Hero() {
           className="mt-5 text-lg md:text-xl text-black/40 tracking-wide"
           {...fade(0.35)}
         >
-          agent economy
+          unlock the agent economy
         </motion.p>
 
         <motion.div className="mt-10" {...fade(0.5)}>
@@ -99,79 +99,85 @@ const fadeView = (delay = 0) => ({
 });
 
 /* ─── Primitives ─── */
-function Primitives() {
-  return (
-    <section className="pb-32 px-6">
-      <div className="max-w-3xl mx-auto text-center">
-        <motion.p
-          className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-6"
-          {...fadeView()}
-        >
-          unlock the agent economy
-        </motion.p>
-        <motion.p
-          className="text-[17px] tracking-[0.06em] text-black/30"
-          {...fadeView(0.1)}
-        >
-          <span className="font-bold text-black">a</span>gent&ensp;&middot;&ensp;<span className="font-bold text-black">e</span>vent&ensp;&middot;&ensp;<span className="font-bold text-black">q</span>uest&ensp;&middot;&ensp;<span className="font-bold text-black">i</span>nsight
-        </motion.p>
-      </div>
-    </section>
-  );
-}
+const primitives = [
+  { letter: "a", word: "gent", desc: "Nodes in a tree. Teams, specialists, departments." },
+  { letter: "e", word: "vent", desc: "One stream. Audit log, cost report, transcript." },
+  { letter: "q", word: "uest", desc: "Work decomposed from intent. Claimed. Resolved." },
+  { letter: "i", word: "nsight", desc: "Knowledge that walks the tree. Scoped. Inherited." },
+];
 
 /* ─── Footer ─── */
 function Footer() {
   return (
-    <footer className="border-t border-black/5 py-8 px-6">
-      <div className="max-w-5xl mx-auto flex items-center justify-between text-[13px] text-black/25">
-        <div className="flex items-center gap-5">
-          <a
-            href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md"
-            className="hover:text-black/50 transition-colors"
-          >
-            docs
-          </a>
-          <a
-            href="https://github.com/0xAEQI/aeqi"
-            className="hover:text-black/50 transition-colors"
-          >
-            github
-          </a>
-          <a
-            href="https://x.com/0xAEQI"
-            className="hover:text-black/50 transition-colors"
-          >
-            x
-          </a>
-          <a
-            href="https://aeqi.ai/enterprise"
-            className="hover:text-black/50 transition-colors"
-          >
-            enterprise
-          </a>
-          <a
-            href="https://app.aeqi.ai"
-            className="hover:text-black/50 transition-colors"
-          >
-            get started
-          </a>
-          <a
-            href="https://aeqi.ai/terms"
-            className="hover:text-black/50 transition-colors"
-          >
-            terms
-          </a>
-          <a
-            href="https://aeqi.ai/privacy"
-            className="hover:text-black/50 transition-colors"
-          >
-            privacy
-          </a>
+    <footer className="border-t border-black/[0.03] bg-black/[0.015]">
+      <div className="max-w-5xl mx-auto px-6 py-20">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-16">
+          {/* Left: Primitives */}
+          <div>
+            <motion.p
+              className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-10"
+              {...fadeView()}
+            >
+              four primitives
+            </motion.p>
+            <div className="space-y-6">
+              {primitives.map((p, i) => (
+                <motion.div key={p.letter} className="flex items-baseline gap-3" {...fadeView(0.06 * i)}>
+                  <span className="text-[28px] font-bold tracking-tighter text-black leading-none">
+                    {p.letter}
+                  </span>
+                  <div>
+                    <span className="text-[15px] font-medium text-black/60">
+                      {p.letter}{p.word}
+                    </span>
+                    <p className="text-[13px] text-black/30 mt-0.5">{p.desc}</p>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+
+          {/* Right: Link groups */}
+          <div className="grid grid-cols-3 gap-8">
+            <motion.div {...fadeView(0.05)}>
+              <p className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-4">Product</p>
+              <div className="space-y-2.5 text-[13px]">
+                <a href="https://app.aeqi.ai" className="block text-black/40 hover:text-black transition-colors">Get Started</a>
+                <a href="https://aeqi.ai/enterprise" className="block text-black/40 hover:text-black transition-colors">Enterprise</a>
+                <a href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md" className="block text-black/40 hover:text-black transition-colors">Docs</a>
+              </div>
+            </motion.div>
+
+            <motion.div {...fadeView(0.1)}>
+              <p className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-4">Community</p>
+              <div className="space-y-2.5 text-[13px]">
+                <a href="https://github.com/0xAEQI/aeqi" className="block text-black/40 hover:text-black transition-colors">GitHub</a>
+                <a href="https://x.com/0xAEQI" className="block text-black/40 hover:text-black transition-colors">X</a>
+              </div>
+            </motion.div>
+
+            <motion.div {...fadeView(0.15)}>
+              <p className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-4">Legal</p>
+              <div className="space-y-2.5 text-[13px]">
+                <a href="https://aeqi.ai/terms" className="block text-black/40 hover:text-black transition-colors">Terms</a>
+                <a href="https://aeqi.ai/privacy" className="block text-black/40 hover:text-black transition-colors">Privacy</a>
+              </div>
+            </motion.div>
+          </div>
         </div>
-        <span className="text-[13px] font-bold tracking-tight text-black">
-          aeqi.ai&ensp;/&ensp;æ
-        </span>
+
+        {/* Bottom bar */}
+        <motion.div
+          className="mt-16 pt-8 border-t border-black/5 flex items-center justify-between"
+          {...fadeView(0.2)}
+        >
+          <span className="text-[14px] font-bold tracking-tight text-black">
+            aeqi.ai&ensp;/&ensp;æ
+          </span>
+          <span className="text-[12px] text-black/20">
+            &copy; {new Date().getFullYear()} aeqi
+          </span>
+        </motion.div>
       </div>
     </footer>
   );
@@ -183,7 +189,6 @@ export default function App() {
     <div className="min-h-screen bg-white">
       <Nav />
       <Hero />
-      <Primitives />
       <Footer />
     </div>
   );
