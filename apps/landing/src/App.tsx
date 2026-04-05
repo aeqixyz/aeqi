@@ -3,47 +3,46 @@ import { motion, AnimatePresence } from "framer-motion";
 
 const ParticleLogo = lazy(() => import("./ParticleLogo"));
 
-/* ─── Fade-in helper ─── */
+/* ─── Animation helpers ─── */
 const fade = (delay = 0) => ({
   initial: { opacity: 0, y: 8 } as const,
   animate: { opacity: 1, y: 0 } as const,
-  transition: { duration: 0.6, ease: "easeOut" as const, delay },
+  transition: { duration: 0.7, ease: [0.25, 0.1, 0.25, 1] as const, delay },
 });
 
 const fadeView = (delay = 0) => ({
-  initial: { opacity: 0, y: 12 } as const,
+  initial: { opacity: 0, y: 16 } as const,
   whileInView: { opacity: 1, y: 0 } as const,
-  viewport: { once: true, margin: "-60px" } as const,
-  transition: { duration: 0.5, ease: "easeOut" as const, delay },
+  viewport: { once: true, margin: "-40px" } as const,
+  transition: { duration: 0.7, ease: [0.25, 0.1, 0.25, 1] as const, delay },
 });
 
 /* ─── Nav ─── */
 function Nav() {
   return (
     <motion.nav
-      className="fixed top-0 left-0 right-0 z-50 backdrop-blur-lg bg-white/80 border-b border-black/5"
-      {...fade(0.1)}
+      className="fixed top-0 left-0 right-0 z-50 backdrop-blur-xl bg-white/70 border-b border-black/[0.04]"
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: 0.2 }}
     >
-      <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
-        <a href="/" className="text-[20px] font-bold tracking-tight text-black/60">
+      <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
+        <a href="/" className="text-[18px] font-semibold tracking-tight text-black/50 hover:text-black/70 transition-colors">
           aeqi
         </a>
-        <div className="flex items-center gap-5">
-          <a
-            href="https://github.com/0xAEQI/aeqi"
-            className="text-[14px] text-black/40 hover:text-black/70 transition-colors"
-          >
+        <div className="flex items-center gap-6">
+          <a href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md" className="text-[13px] text-black/35 hover:text-black/60 transition-colors hidden md:block">
+            docs
+          </a>
+          <a href="https://github.com/0xAEQI/aeqi" className="text-[13px] text-black/35 hover:text-black/60 transition-colors">
             github
           </a>
-          <a
-            href="https://aeqi.ai/enterprise"
-            className="text-[14px] text-black/40 hover:text-black/70 transition-colors"
-          >
+          <a href="https://aeqi.ai/enterprise" className="text-[13px] text-black/35 hover:text-black/60 transition-colors hidden md:block">
             enterprise
           </a>
           <a
             href="https://app.aeqi.ai"
-            className="bg-black text-white rounded-full px-5 py-2 text-[14px] font-medium hover:bg-black/85 transition-colors"
+            className="bg-black text-white rounded-full px-5 py-1.5 text-[13px] font-medium hover:bg-black/80 transition-all hover:shadow-lg hover:shadow-black/10"
           >
             Create a Company
           </a>
@@ -70,17 +69,18 @@ function Hero() {
   };
 
   return (
-    <section className="flex-1 flex items-center justify-center px-6">
-      <div className="max-w-3xl mx-auto text-center py-32">
-        <motion.div {...fade(0.1)} className="flex justify-center" style={{ height: 300 }}>
+    <section className="flex-1 flex items-center justify-center px-6 min-h-[80vh]">
+      <div className="max-w-2xl mx-auto text-center">
+        {/* Logo */}
+        <motion.div {...fade(0.1)} className="flex justify-center" style={{ height: 280 }}>
           <AnimatePresence mode="wait">
             {!showParticles ? (
               <motion.span
                 key="solid"
-                className="text-[180px] md:text-[220px] font-bold tracking-tighter leading-none text-black/60 select-none"
-                style={{ lineHeight: "300px" }}
-                exit={{ opacity: 0, scale: 1.05 }}
-                transition={{ duration: 0.3 }}
+                className="text-[160px] md:text-[200px] font-bold tracking-tighter leading-none text-black/50 select-none"
+                style={{ lineHeight: "280px" }}
+                exit={{ opacity: 0, scale: 1.02 }}
+                transition={{ duration: 0.25 }}
               >
                 æ
               </motion.span>
@@ -89,43 +89,44 @@ function Hero() {
                 key="particles"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                transition={{ duration: 0.1 }}
+                transition={{ duration: 0.15 }}
               >
                 <Suspense fallback={null}>
-                  <ParticleLogo size={300} />
+                  <ParticleLogo size={280} />
                 </Suspense>
               </motion.div>
             )}
           </AnimatePresence>
         </motion.div>
 
-        <motion.p
-          className="mt-5 text-lg md:text-xl text-black/40 tracking-wide"
-          {...fade(0.35)}
+        {/* Headline */}
+        <motion.h1
+          className="mt-2 text-[22px] md:text-[28px] font-semibold tracking-tight text-black/80 leading-snug"
+          {...fade(0.3)}
         >
-          Companies run by agents. Ownership is programmable.
-        </motion.p>
+          Companies run by agents.
+          <br />
+          <span className="text-black/40">Ownership is programmable.</span>
+        </motion.h1>
 
-        <motion.div className="mt-8" {...fade(0.45)}>
+        {/* CTA */}
+        <motion.div className="mt-10 flex flex-col items-center gap-4" {...fade(0.45)}>
           <a
             href="https://app.aeqi.ai"
-            className="inline-block bg-black text-white rounded-full px-7 py-2.5 text-[15px] font-medium hover:bg-black/85 transition-colors"
+            className="inline-block bg-black text-white rounded-full px-8 py-3 text-[15px] font-medium hover:bg-black/80 transition-all hover:shadow-xl hover:shadow-black/10 hover:scale-[1.02] active:scale-[0.98]"
           >
             Create a Company
           </a>
-        </motion.div>
-
-        <motion.div className="mt-6" {...fade(0.5)}>
           <button
             onClick={copy}
-            className="group inline-flex items-center gap-3 bg-black/[0.03] hover:bg-black/[0.06] rounded-lg px-5 py-3 transition-colors cursor-pointer"
+            className="group inline-flex items-center gap-2.5 text-[13px] text-black/30 hover:text-black/50 transition-colors cursor-pointer"
           >
-            <code className="text-[14px] font-mono text-black/50">
-              <span className="text-black/25 select-none">$&nbsp;</span>
+            <code className="font-mono">
+              <span className="select-none opacity-50">$ </span>
               cargo install aeqi
             </code>
-            <span className="text-[12px] text-black/20 group-hover:text-black/40 transition-colors">
-              {copied ? "copied" : "copy"}
+            <span className="text-[11px] opacity-60 group-hover:opacity-100 transition-opacity">
+              {copied ? "✓" : "copy"}
             </span>
           </button>
         </motion.div>
@@ -134,42 +135,98 @@ function Hero() {
   );
 }
 
+/* ─── Value props ─── */
+const props = [
+  { title: "Agent-native", desc: "Deploy autonomous agents that coordinate, execute, and evolve. No glue code." },
+  { title: "Four primitives", desc: "Agent. Event. Quest. Insight. Everything else emerges from composition." },
+  { title: "Programmable ownership", desc: "Equity, governance, and revenue flow through smart contracts. On-chain by default." },
+];
+
+function ValueProps() {
+  return (
+    <section className="py-24 px-6">
+      <div className="max-w-5xl mx-auto">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-12 md:gap-16">
+          {props.map((p, i) => (
+            <motion.div key={p.title} {...fadeView(0.1 * i)}>
+              <h3 className="text-[15px] font-semibold text-black/70 mb-2">{p.title}</h3>
+              <p className="text-[14px] leading-relaxed text-black/35">{p.desc}</p>
+            </motion.div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ─── Closing CTA ─── */
+function ClosingCTA() {
+  return (
+    <section className="py-20 px-6">
+      <motion.div className="max-w-xl mx-auto text-center" {...fadeView()}>
+        <p className="text-[13px] uppercase tracking-[0.2em] text-black/20 mb-4">
+          Get started
+        </p>
+        <h2 className="text-[24px] md:text-[32px] font-semibold tracking-tight text-black/70 leading-snug">
+          Build the company of the future.
+        </h2>
+        <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
+          <a
+            href="https://app.aeqi.ai"
+            className="inline-block bg-black text-white rounded-full px-8 py-3 text-[15px] font-medium hover:bg-black/80 transition-all hover:shadow-xl hover:shadow-black/10 hover:scale-[1.02] active:scale-[0.98]"
+          >
+            Create a Company
+          </a>
+          <a
+            href="https://aeqi.ai/enterprise"
+            className="inline-block text-[14px] text-black/40 hover:text-black/60 transition-colors"
+          >
+            Talk to us →
+          </a>
+        </div>
+      </motion.div>
+    </section>
+  );
+}
+
 /* ─── Footer ─── */
 function Footer() {
   return (
-    <footer className="flex flex-col">
-      <div className="max-w-5xl mx-auto px-6 py-12 w-full">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+    <footer className="border-t border-black/[0.04]">
+      <div className="max-w-5xl mx-auto px-6 py-14 w-full">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-10">
           <motion.div {...fadeView(0.05)}>
-            <p className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-4">Product</p>
+            <p className="text-[11px] uppercase tracking-[0.2em] text-black/20 mb-4">Product</p>
             <div className="space-y-2.5 text-[13px]">
-              <a href="https://app.aeqi.ai" className="block text-black/40 hover:text-black transition-colors">Create a Company</a>
-              <a href="https://aeqi.ai/enterprise" className="block text-black/40 hover:text-black transition-colors">Enterprise</a>
-              <a href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md" className="block text-black/40 hover:text-black transition-colors">Docs</a>
+              <a href="https://app.aeqi.ai" className="block text-black/35 hover:text-black/60 transition-colors">Create a Company</a>
+              <a href="https://aeqi.ai/enterprise" className="block text-black/35 hover:text-black/60 transition-colors">Enterprise</a>
+              <a href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md" className="block text-black/35 hover:text-black/60 transition-colors">Docs</a>
             </div>
           </motion.div>
 
           <motion.div {...fadeView(0.1)}>
-            <p className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-4">Community</p>
+            <p className="text-[11px] uppercase tracking-[0.2em] text-black/20 mb-4">Community</p>
             <div className="space-y-2.5 text-[13px]">
-              <a href="https://github.com/0xAEQI/aeqi" className="block text-black/40 hover:text-black transition-colors">GitHub</a>
-              <a href="https://x.com/0xAEQI" className="block text-black/40 hover:text-black transition-colors">X</a>
+              <a href="https://github.com/0xAEQI/aeqi" className="block text-black/35 hover:text-black/60 transition-colors">GitHub</a>
+              <a href="https://x.com/0xAEQI" className="block text-black/35 hover:text-black/60 transition-colors">X</a>
             </div>
           </motion.div>
 
           <motion.div {...fadeView(0.15)}>
-            <p className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-4">Legal</p>
+            <p className="text-[11px] uppercase tracking-[0.2em] text-black/20 mb-4">Legal</p>
             <div className="space-y-2.5 text-[13px]">
-              <a href="https://aeqi.ai/terms" className="block text-black/40 hover:text-black transition-colors">Terms</a>
-              <a href="https://aeqi.ai/privacy" className="block text-black/40 hover:text-black transition-colors">Privacy</a>
+              <a href="https://aeqi.ai/terms" className="block text-black/35 hover:text-black/60 transition-colors">Terms</a>
+              <a href="https://aeqi.ai/privacy" className="block text-black/35 hover:text-black/60 transition-colors">Privacy</a>
             </div>
           </motion.div>
 
-          <motion.div {...fadeView(0.2)}>
-            <span className="text-[36px] font-bold tracking-tighter text-black/60 leading-none">æ</span>
-            <p className="mt-2 text-[12px] text-black/20">
-              &copy; {new Date().getFullYear()} aeqi.ai
-            </p>
+          <motion.div {...fadeView(0.2)} className="flex flex-col justify-between">
+            <div>
+              <span className="text-[28px] font-bold tracking-tighter text-black/40 leading-none">æ</span>
+              <p className="mt-3 text-[12px] text-black/15">
+                &copy; {new Date().getFullYear()} aeqi.ai
+              </p>
+            </div>
           </motion.div>
         </div>
       </div>
@@ -183,7 +240,9 @@ export default function App() {
     <div className="min-h-screen flex flex-col bg-white">
       <Nav />
       <Hero />
-      <div className="bg-black/[0.02] flex-1 flex flex-col">
+      <div className="bg-[#fafafa]">
+        <ValueProps />
+        <ClosingCTA />
         <Footer />
       </div>
     </div>
