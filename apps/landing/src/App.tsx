@@ -147,7 +147,7 @@ function ValueProps() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-10 md:gap-14">
           {props.map((p, i) => (
             <motion.div key={p.title} {...fadeView(0.1 * i)}>
-              <h3 className="text-[14px] font-semibold tracking-wide uppercase text-black/50 mb-3">{p.title}</h3>
+              <h3 className="text-[14px] font-semibold tracking-wide uppercase text-black/80 mb-3">{p.title}</h3>
               <p className="text-[15px] leading-[1.7] text-black/40">{p.desc}</p>
             </motion.div>
           ))}
@@ -162,19 +162,10 @@ function ClosingCTA() {
   return (
     <section className="py-20 px-6">
       <motion.div className="max-w-xl mx-auto text-center" {...fadeView()}>
-        <p className="text-[13px] uppercase tracking-[0.2em] text-black/20 mb-4">
-          Get started
-        </p>
-        <h2 className="text-[24px] md:text-[32px] font-semibold tracking-tight text-black/70 leading-snug">
+        <h2 className="text-[20px] md:text-[24px] font-semibold tracking-tight text-black/60 leading-snug">
           Launch a company that never sleeps.
         </h2>
-        <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
-          <a
-            href="https://app.aeqi.ai/signup"
-            className="inline-block bg-black text-white rounded-full px-8 py-3 text-[15px] font-medium hover:bg-black/80 transition-all hover:shadow-xl hover:shadow-black/10 hover:scale-[1.02] active:scale-[0.98]"
-          >
-            Launch a Company
-          </a>
+        <div className="mt-6">
           <a
             href="/pricing"
             className="inline-block text-[14px] text-black/40 hover:text-black/60 transition-colors"
