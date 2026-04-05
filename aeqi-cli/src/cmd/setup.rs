@@ -8,14 +8,38 @@ pub(crate) async fn cmd_setup(runtime: &str, service: bool, force: bool) -> Resu
     let starter = starter_runtime(runtime)
         .with_context(|| format!("unknown starter runtime preset: {runtime}"))?;
     let cwd = std::env::current_dir().context("failed to determine current directory")?;
-    let system_name = cwd
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("aeqi-workspace");
 
-    let config_dir = cwd.join("config");
-    let projects_dir = cwd.join("projects");
-    let agents_dir = cwd.join("agents");
+    // Detect workspace: if CWD has config/, agents/, Cargo.toml, or .git, use
+    // CWD as the workspace root. Otherwise default to ~/.aeqi/ so that
+    // curl-install users get a working setup without creating a directory first.
+    let is_workspace = cwd.join("config").exists()
+        || cwd.join("agents").exists()
+        || cwd.join("Cargo.toml").exists()
+        || cwd.join(".git").exists();
+
+    let root = if is_workspace {
+        cwd.clone()
+    } else {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
+        home.join(".aeqi")
+    };
+
+    let system_name = if is_workspace {
+        cwd.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("aeqi-workspace")
+            .to_string()
+    } else {
+        "aeqi".to_string()
+    };
+
+    let config_dir = if is_workspace {
+        root.join("config")
+    } else {
+        root.clone()
+    };
+    let projects_dir = root.join("projects");
+    let agents_dir = root.join("agents");
     let shared_agents_dir = agents_dir.join("shared");
     let config_path = config_dir.join("aeqi.toml");
     let data_dir = dirs::home_dir()
@@ -37,7 +61,7 @@ pub(crate) async fn cmd_setup(runtime: &str, service: bool, force: bool) -> Resu
     write_file(
         &config_path,
         &render_config(
-            system_name,
+            &system_name,
             runtime,
             worker_runtime,
             default_model,
@@ -108,9 +132,8 @@ pub(crate) async fn cmd_setup(runtime: &str, service: bool, force: bool) -> Resu
     }
 
     println!("AEQI setup complete.");
-    println!("Workspace: {}", cwd.display());
+    println!("Workspace: {}", root.display());
     println!("Config: {}", config_path.display());
-    println!("Default runtime: {runtime}");
     println!();
     println!("Next steps:");
     match starter.provider {
