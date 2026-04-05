@@ -148,7 +148,7 @@ function ValueProps() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-10 md:gap-14">
           {props.map((p, i) => (
             <motion.div key={p.title} {...fadeView(0.1 * i)}>
-              <h3 className="text-[14px] font-semibold tracking-wide uppercase text-black/80 mb-3">{p.title}</h3>
+              <h3 className="text-[15px] font-semibold text-black/80 mb-3">{p.title}</h3>
               <p className="text-[15px] leading-[1.7] text-black/50">{p.desc}</p>
             </motion.div>
           ))}
