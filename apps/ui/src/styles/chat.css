@@ -1293,6 +1293,11 @@
   border-top: 1px solid var(--border);
   flex-shrink: 0;
   width: 100%;
+  transition: background 0.15s;
+}
+.asv-attach-bar--dragover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-top-color: var(--accent);
 }
 .asv-attach-chips {
   display: flex;
@@ -1316,6 +1321,14 @@
 }
 .asv-attach-chip--task {
   border-color: color-mix(in srgb, var(--warning, #f59e0b) 30%, var(--border));
+}
+.asv-attach-chip--file {
+  border-color: color-mix(in srgb, var(--text-muted) 30%, var(--border));
+}
+.asv-attach-chip-meta {
+  font-size: 9px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
 }
 .asv-attach-chip-icon {
   font-size: 10px;

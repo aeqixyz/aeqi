@@ -247,6 +247,11 @@ export default function AgentSessionView({
   const [availableTasks, setAvailableTasks] = useState<
     { id: string; name: string; status: string }[]
   >([]);
+  const [attachedFiles, setAttachedFiles] = useState<
+    { name: string; content: string; size: number }[]
+  >([]);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
   const [liveToolEvents, setLiveToolEvents] = useState<ToolEvent[]>([]);
@@ -288,6 +293,38 @@ export default function AgentSessionView({
         .catch(() => {});
     }
   }, [showAttachPicker]);
+
+  // File attachment helpers
+  const readFiles = useCallback((files: FileList | File[]) => {
+    Array.from(files).forEach((file) => {
+      if (file.size > 512_000) return; // 512KB limit
+      const reader = new FileReader();
+      reader.onload = () => {
+        const content = reader.result as string;
+        setAttachedFiles((prev) => {
+          if (prev.some((f) => f.name === file.name)) return prev;
+          return [...prev, { name: file.name, content, size: file.size }];
+        });
+      };
+      reader.readAsText(file);
+    });
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragOver(false);
+      if (e.dataTransfer.files.length > 0) readFiles(e.dataTransfer.files);
+    },
+    [readFiles],
+  );
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback(() => setDragOver(false), []);
 
   // Load sessions for this agent
   useEffect(() => {
@@ -474,13 +511,19 @@ export default function AgentSessionView({
         agent_id: agentId || undefined,
         session_id: sessionId || undefined,
       };
-      // Include prompts and task on first message (session creation)
+      // Include prompts, task, and files on first message (session creation)
       if (!activeSessionId) {
         if (sessionPrompts.length > 0) {
           payload.session_prompts = sessionPrompts;
         }
         if (sessionTask) {
           payload.task_id = sessionTask.id;
+        }
+        if (attachedFiles.length > 0) {
+          payload.files = attachedFiles.map((f) => ({
+            name: f.name,
+            content: f.content,
+          }));
         }
       }
       ws.send(JSON.stringify(payload));
@@ -1039,11 +1082,27 @@ export default function AgentSessionView({
         <div ref={messagesEnd} />
       </div>
 
-      {/* Session attachments — prompts and task (only visible before first message) */}
+      {/* Session attachments — prompts, task, files (only visible before first message) */}
       {!activeSessionId && (
-        <div className="asv-attach-bar">
+        <div
+          className={`asv-attach-bar ${dragOver ? "asv-attach-bar--dragover" : ""}`}
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+        >
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            style={{ display: "none" }}
+            onChange={(e) => {
+              if (e.target.files) readFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
           {/* Attached chips */}
-          {(sessionPrompts.length > 0 || sessionTask) && (
+          {(sessionPrompts.length > 0 || sessionTask || attachedFiles.length > 0) && (
             <div className="asv-attach-chips">
               {sessionPrompts.map((p, i) => (
                 <div
@@ -1078,6 +1137,19 @@ export default function AgentSessionView({
                   </span>
                 </div>
               )}
+              {attachedFiles.map((f, i) => (
+                <div key={`f-${i}`} className="asv-attach-chip asv-attach-chip--file">
+                  <span className="asv-attach-chip-icon">📎</span>
+                  <span className="asv-attach-chip-text">{f.name}</span>
+                  <span className="asv-attach-chip-meta">{(f.size / 1024).toFixed(0)}K</span>
+                  <span
+                    className="asv-attach-chip-x"
+                    onClick={() => setAttachedFiles((prev) => prev.filter((_, j) => j !== i))}
+                  >
+                    ×
+                  </span>
+                </div>
+              ))}
             </div>
           )}
 
@@ -1211,6 +1283,12 @@ export default function AgentSessionView({
                 onClick={() => setShowAttachPicker("task")}
               >
                 + task
+              </button>
+              <button
+                className="asv-attach-toggle"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                + file
               </button>
             </div>
           )}
