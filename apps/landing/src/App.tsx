@@ -96,27 +96,6 @@ function Hero() {
   );
 }
 
-/* ─── Marquee ─── */
-const marqueeWords = ["agent", "event", "quest", "insight"];
-
-function Marquee() {
-  const items = [...marqueeWords, ...marqueeWords, ...marqueeWords, ...marqueeWords, ...marqueeWords, ...marqueeWords];
-
-  return (
-    <div className="overflow-hidden select-none">
-      <div className="animate-marquee flex items-center whitespace-nowrap">
-        {items.map((w, i) => (
-          <span key={i} className="flex items-center">
-            <span className="text-[56px] md:text-[80px] font-bold tracking-tighter text-black/[0.04]">
-              <span className="text-black/[0.12]">{w[0]}</span>{w.slice(1)}
-            </span>
-            <span className="mx-8 md:mx-12 text-[40px] text-black/[0.06]">&middot;</span>
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 /* ─── Footer ─── */
 function Footer() {
@@ -159,10 +138,6 @@ function Footer() {
         </div>
       </div>
 
-      {/* Marquee — fills remaining space, bleeds edge to edge */}
-      <div className="flex-1 flex items-end pb-8">
-        <Marquee />
-      </div>
     </footer>
   );
 }
