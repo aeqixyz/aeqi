@@ -15,7 +15,11 @@ if [ ! -f /etc/systemd/system/aeqi-daemon.service ] && [ ! -f "$HOME/.aeqi-produ
     exit 0
 fi
 
-echo "[deploy] Building release binary..."
+# Build dashboard UI (embedded into the binary via rust-embed).
+echo "[deploy] Building dashboard UI..."
+(cd apps/ui && npm ci --silent && npm run build --silent 2>&1 | tail -3)
+
+echo "[deploy] Building release binary (UI embedded)..."
 cargo build --release -p aeqi 2>&1 | tail -3
 
 # Build and deploy landing page.
