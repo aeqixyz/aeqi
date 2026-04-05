@@ -116,7 +116,7 @@ function Hero() {
             href="https://app.aeqi.ai"
             className="inline-block bg-black text-white rounded-full px-8 py-3 text-[15px] font-medium hover:bg-black/80 transition-all hover:shadow-xl hover:shadow-black/10 hover:scale-[1.02] active:scale-[0.98]"
           >
-            Create a Company
+            Launch a Company
           </a>
           <button
             onClick={copy}
@@ -169,14 +169,14 @@ function ClosingCTA() {
           Get started
         </p>
         <h2 className="text-[24px] md:text-[32px] font-semibold tracking-tight text-black/70 leading-snug">
-          Build the company of the future.
+          Start something that runs itself.
         </h2>
         <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
           <a
             href="https://app.aeqi.ai"
             className="inline-block bg-black text-white rounded-full px-8 py-3 text-[15px] font-medium hover:bg-black/80 transition-all hover:shadow-xl hover:shadow-black/10 hover:scale-[1.02] active:scale-[0.98]"
           >
-            Create a Company
+            Launch a Company
           </a>
           <a
             href="https://aeqi.ai/enterprise"
@@ -199,7 +199,7 @@ function Footer() {
           <motion.div {...fadeView(0.05)}>
             <p className="text-[11px] uppercase tracking-[0.2em] text-black/20 mb-4">Product</p>
             <div className="space-y-2.5 text-[13px]">
-              <a href="https://app.aeqi.ai" className="block text-black/35 hover:text-black/60 transition-colors">Create a Company</a>
+              <a href="https://app.aeqi.ai" className="block text-black/35 hover:text-black/60 transition-colors">Launch a Company</a>
               <a href="https://aeqi.ai/enterprise" className="block text-black/35 hover:text-black/60 transition-colors">Enterprise</a>
               <a href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md" className="block text-black/35 hover:text-black/60 transition-colors">Docs</a>
             </div>
