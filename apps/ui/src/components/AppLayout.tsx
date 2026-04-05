@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import AgentTree from "./Sidebar";
-import ContextPanel from "./ContextPanel";
+import ContextDrawer from "./ContextDrawer";
 import BlockAvatar from "./BlockAvatar";
 import CommandPalette from "./CommandPalette";
 import AgentSessionView from "./AgentSessionView";
@@ -89,7 +89,7 @@ export default function AppLayout() {
         </div>
 
         {/* Right context panel: visible when agent selected */}
-        {agentId && <ContextPanel />}
+        <ContextDrawer agentId={agentId} sessionId={sessionId} />
       </div>
       <CommandPalette open={searching} onClose={closeSearch} />
     </>

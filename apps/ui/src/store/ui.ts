@@ -6,12 +6,16 @@ interface UIState {
   sidebarCollapsed: boolean;
   layout: LayoutMode;
   layoutPickerOpen: boolean;
-  splitRatio: number; // 0.0 - 1.0, how much space the main panel gets
+  splitRatio: number;
+  drawerOpen: boolean;
+  drawerMode: "context" | "activity";
   toggleSidebar: () => void;
   setLayout: (mode: LayoutMode) => void;
   setSplitRatio: (ratio: number) => void;
   toggleLayoutPicker: () => void;
   closeLayoutPicker: () => void;
+  toggleDrawer: () => void;
+  setDrawerMode: (mode: "context" | "activity") => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -36,4 +40,13 @@ export const useUIStore = create<UIState>((set) => ({
   },
   toggleLayoutPicker: () => set((s) => ({ layoutPickerOpen: !s.layoutPickerOpen })),
   closeLayoutPicker: () => set({ layoutPickerOpen: false }),
+  drawerOpen: localStorage.getItem("aeqi_drawer_open") !== "false",
+  drawerMode: "context",
+  toggleDrawer: () =>
+    set((s) => {
+      const next = !s.drawerOpen;
+      localStorage.setItem("aeqi_drawer_open", String(next));
+      return { drawerOpen: next };
+    }),
+  setDrawerMode: (mode) => set({ drawerMode: mode }),
 }));
