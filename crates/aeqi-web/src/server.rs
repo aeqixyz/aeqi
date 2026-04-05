@@ -33,6 +33,8 @@ pub struct AppState {
     pub ui_dist_dir: Option<PathBuf>,
     pub user_store: Option<Arc<crate::users::UserStore>>,
     pub email_service: Option<Arc<crate::email::EmailService>>,
+    pub login_attempts:
+        Arc<std::sync::Mutex<std::collections::HashMap<String, (u32, std::time::Instant)>>>,
 }
 
 /// Start the web server using settings from AEQIConfig.
@@ -54,7 +56,10 @@ pub async fn start(config: &AEQIConfig) -> Result<()> {
 
     // Create email service if Resend API key is configured.
     // Resolve ${ENV_VAR} pattern since TOML doesn't auto-interpolate env vars.
-    let resend_key = web.auth.resend_api_key.as_deref()
+    let resend_key = web
+        .auth
+        .resend_api_key
+        .as_deref()
         .map(|k| {
             let trimmed = k.trim();
             if trimmed.starts_with("${") && trimmed.ends_with('}') {
@@ -83,7 +88,19 @@ pub async fn start(config: &AEQIConfig) -> Result<()> {
         ui_dist_dir: web.ui_dist_dir.as_ref().map(PathBuf::from),
         user_store,
         email_service,
+        login_attempts: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
+
+    // Warn if auth mode requires a secret but signing_secret resolves to the default.
+    if matches!(state.auth_mode, AuthMode::Secret | AuthMode::Accounts)
+        && auth::signing_secret(&state) == "aeqi-dev"
+    {
+        tracing::warn!(
+            "WARNING: auth_mode is {:?} but no auth_secret is configured — using insecure default 'aeqi-dev'. Set [web] auth_secret in your config!",
+            state.auth_mode
+        );
+    }
+
     let ui_dist_dir = state.ui_dist_dir.clone();
     let serve_ui = ui_dist_dir.is_some();
 
@@ -118,8 +135,14 @@ pub async fn start(config: &AEQIConfig) -> Result<()> {
         .route("/api/auth/login", axum::routing::post(login_handler))
         .route("/api/auth/signup", axum::routing::post(signup_handler))
         .route("/api/auth/verify", axum::routing::post(verify_handler))
-        .route("/api/auth/resend-code", axum::routing::post(resend_code_handler))
-        .route("/api/auth/google", axum::routing::get(google_redirect_handler))
+        .route(
+            "/api/auth/resend-code",
+            axum::routing::post(resend_code_handler),
+        )
+        .route(
+            "/api/auth/google",
+            axum::routing::get(google_redirect_handler),
+        )
         .route(
             "/api/auth/google/callback",
             axum::routing::get(google_callback_handler),
@@ -162,10 +185,30 @@ pub async fn start(config: &AEQIConfig) -> Result<()> {
     let app = app.with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&web.bind).await?;
-    info!("aeqi-web listening on {} (auth: {:?})", web.bind, web.auth.mode);
+    info!(
+        "aeqi-web listening on {} (auth: {:?})",
+        web.bind, web.auth.mode
+    );
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+// ── Input Validation ───────────────────────────────────
+
+fn validate_email(email: &str) -> bool {
+    let e = email.trim();
+    e.len() >= 5
+        && e.len() <= 255
+        && e.contains('@')
+        && e.split('@')
+            .next_back()
+            .map(|d| d.contains('.'))
+            .unwrap_or(false)
+}
+
+fn validate_name(name: &str) -> bool {
+    name.len() <= 255
 }
 
 // ── Handlers ────────────────────────────────────────────
@@ -246,33 +289,96 @@ async fn login_handler(
             if email.is_empty() || password.is_empty() {
                 return (
                     StatusCode::BAD_REQUEST,
-                    axum::Json(serde_json::json!({"ok": false, "error": "email and password required"})),
+                    axum::Json(
+                        serde_json::json!({"ok": false, "error": "email and password required"}),
+                    ),
                 )
                     .into_response();
             }
 
+            if !validate_email(email) {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    axum::Json(serde_json::json!({"ok": false, "error": "invalid email format"})),
+                )
+                    .into_response();
+            }
+
+            // Rate limiting: max 5 attempts per email per 60 seconds.
+            {
+                let mut attempts = state.login_attempts.lock().unwrap();
+                let now = std::time::Instant::now();
+                if let Some((count, first_attempt)) = attempts.get(email)
+                    && now.duration_since(*first_attempt).as_secs() < 60
+                    && *count >= 5
+                {
+                    return (
+                            StatusCode::TOO_MANY_REQUESTS,
+                            axum::Json(serde_json::json!({"ok": false, "error": "too many login attempts, please wait 60 seconds"})),
+                        )
+                            .into_response();
+                }
+                // Clean up stale entries while we hold the lock.
+                attempts.retain(|_, (_, t)| now.duration_since(*t).as_secs() < 60);
+            }
+
             let Some(ref store) = state.user_store else {
-                return (StatusCode::INTERNAL_SERVER_ERROR, "user store not available")
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "user store not available",
+                )
                     .into_response();
             };
 
             let user = match store.find_by_email(email) {
                 Some(u) => u,
                 None => {
+                    // Increment rate limit counter on failed lookup.
+                    {
+                        let mut attempts = state.login_attempts.lock().unwrap();
+                        let now = std::time::Instant::now();
+                        let entry = attempts.entry(email.to_string()).or_insert((0, now));
+                        if now.duration_since(entry.1).as_secs() >= 60 {
+                            *entry = (1, now);
+                        } else {
+                            entry.0 += 1;
+                        }
+                    }
                     return (
                         StatusCode::UNAUTHORIZED,
-                        axum::Json(serde_json::json!({"ok": false, "error": "invalid email or password"})),
+                        axum::Json(
+                            serde_json::json!({"ok": false, "error": "invalid email or password"}),
+                        ),
                     )
                         .into_response();
                 }
             };
 
             if !store.verify_password(&user, password) {
+                // Increment rate limit counter on failed password.
+                {
+                    let mut attempts = state.login_attempts.lock().unwrap();
+                    let now = std::time::Instant::now();
+                    let entry = attempts.entry(email.to_string()).or_insert((0, now));
+                    if now.duration_since(entry.1).as_secs() >= 60 {
+                        *entry = (1, now);
+                    } else {
+                        entry.0 += 1;
+                    }
+                }
                 return (
                     StatusCode::UNAUTHORIZED,
-                    axum::Json(serde_json::json!({"ok": false, "error": "invalid email or password"})),
+                    axum::Json(
+                        serde_json::json!({"ok": false, "error": "invalid email or password"}),
+                    ),
                 )
                     .into_response();
+            }
+
+            // Clear rate limit counter on successful login.
+            {
+                let mut attempts = state.login_attempts.lock().unwrap();
+                attempts.remove(email);
             }
 
             let signing_key = auth::signing_secret(&state);
@@ -283,9 +389,12 @@ async fn login_handler(
                         let es = es.clone();
                         let to = user.email.clone();
                         let n = user.name.clone();
-                        let time = chrono::Utc::now().format("%a, %d %b %Y %H:%M:%S (UTC)").to_string();
+                        let time = chrono::Utc::now()
+                            .format("%a, %d %b %Y %H:%M:%S (UTC)")
+                            .to_string();
                         tokio::spawn(async move {
-                            es.send_login_notification(&to, &n, "Web browser", "—", &time).await;
+                            es.send_login_notification(&to, &n, "Web browser", "—", &time)
+                                .await;
                         });
                     }
                     axum::Json(serde_json::json!({
@@ -328,16 +437,38 @@ async fn signup_handler(
             .into_response();
     }
 
+    if !validate_email(email) {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({"ok": false, "error": "invalid email format"})),
+        )
+            .into_response();
+    }
+
+    if !validate_name(name) {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({"ok": false, "error": "name too long"})),
+        )
+            .into_response();
+    }
+
     if password.len() < 8 {
         return (
             StatusCode::BAD_REQUEST,
-            axum::Json(serde_json::json!({"ok": false, "error": "password must be at least 8 characters"})),
+            axum::Json(
+                serde_json::json!({"ok": false, "error": "password must be at least 8 characters"}),
+            ),
         )
             .into_response();
     }
 
     let Some(ref store) = state.user_store else {
-        return (StatusCode::INTERNAL_SERVER_ERROR, "user store not available").into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "user store not available",
+        )
+            .into_response();
     };
 
     if store.find_by_email(email).is_some() {
@@ -438,7 +569,11 @@ async fn verify_handler(
     }
 
     let Some(ref store) = state.user_store else {
-        return (StatusCode::INTERNAL_SERVER_ERROR, "user store not available").into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "user store not available",
+        )
+            .into_response();
     };
 
     let Some(user) = store.verify_email(email, code) else {
@@ -491,7 +626,11 @@ async fn resend_code_handler(
     }
 
     let Some(ref store) = state.user_store else {
-        return (StatusCode::INTERNAL_SERVER_ERROR, "user store not available").into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "user store not available",
+        )
+            .into_response();
     };
 
     if !store.can_resend_code(email) {
@@ -530,7 +669,11 @@ async fn google_redirect_handler(
     };
 
     let Some(ref store) = state.user_store else {
-        return (StatusCode::INTERNAL_SERVER_ERROR, "user store not available").into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "user store not available",
+        )
+            .into_response();
     };
 
     let nonce = uuid::Uuid::new_v4().to_string();
@@ -564,8 +707,12 @@ async fn google_callback_handler(
         .unwrap_or("http://localhost:8400");
 
     let error_redirect = |msg: &str| -> Response {
-        axum::response::Redirect::temporary(&format!("{}/#/login?error={}", base, urlencoding::encode(msg)))
-            .into_response()
+        axum::response::Redirect::temporary(&format!(
+            "{}/#/login?error={}",
+            base,
+            urlencoding::encode(msg)
+        ))
+        .into_response()
     };
 
     let Some(code) = params.get("code") else {
@@ -635,6 +782,15 @@ async fn google_callback_handler(
         Err(e) => return error_redirect(&format!("userinfo parse failed: {e}")),
     };
 
+    // Reject unverified Google emails to prevent email takeover.
+    let email_verified = userinfo
+        .get("email_verified")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if !email_verified {
+        return error_redirect("Google account email not verified");
+    }
+
     let email = userinfo
         .get("email")
         .and_then(|v| v.as_str())
@@ -687,21 +843,20 @@ async fn me_handler(
     match auth::validate_token(token, secret) {
         Ok(claims) => {
             // In accounts mode, look up full user.
-            if let Some(ref store) = state.user_store {
-                if let Some(ref uid) = claims.user_id {
-                    if let Some(user) = store.find_by_id(uid) {
-                        let companies = store.get_user_companies(&user.id);
-                        return axum::Json(serde_json::json!({
-                            "id": user.id,
-                            "email": user.email,
-                            "name": user.name,
-                            "avatar_url": user.avatar_url,
-                            "provider": user.provider,
-                            "companies": companies,
-                        }))
-                        .into_response();
-                    }
-                }
+            if let Some(ref store) = state.user_store
+                && let Some(ref uid) = claims.user_id
+                && let Some(user) = store.find_by_id(uid)
+            {
+                let companies = store.get_user_companies(&user.id);
+                return axum::Json(serde_json::json!({
+                    "id": user.id,
+                    "email": user.email,
+                    "name": user.name,
+                    "avatar_url": user.avatar_url,
+                    "provider": user.provider,
+                    "companies": companies,
+                }))
+                .into_response();
             }
 
             // Fallback for secret/none mode.

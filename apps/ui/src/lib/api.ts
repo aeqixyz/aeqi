@@ -1,3 +1,5 @@
+// NOTE: HTTPS enforcement should be done at the reverse proxy layer (nginx/caddy),
+// not in this client-side code. Ensure your deployment terminates TLS upstream.
 const BASE_URL = import.meta.env.VITE_API_URL || "/api";
 
 class ApiError extends Error {
@@ -46,6 +48,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     const authMode = localStorage.getItem("aeqi_auth_mode");
     if (authMode !== "none" && !path.startsWith("/auth/")) {
       localStorage.removeItem("aeqi_token");
+      localStorage.removeItem("aeqi_auth_mode");
+      localStorage.removeItem("aeqi_pending_email");
+      localStorage.removeItem("aeqi_company");
+      localStorage.removeItem("aeqi_company_tagline");
+      localStorage.removeItem("aeqi_company_avatar");
       window.location.href = "/login";
     }
     throw new ApiError(401, "Unauthorized");

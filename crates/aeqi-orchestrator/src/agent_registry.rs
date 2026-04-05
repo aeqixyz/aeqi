@@ -1531,13 +1531,17 @@ fn row_to_company(row: &rusqlite::Row) -> rusqlite::Result<CompanyRecord> {
         repo: row.get(6)?,
         model: row.get(7)?,
         max_workers: row.get::<_, u32>(8).unwrap_or(2),
-        execution_mode: row.get::<_, String>(9).unwrap_or_else(|_| "agent".to_string()),
+        execution_mode: row
+            .get::<_, String>(9)
+            .unwrap_or_else(|_| "agent".to_string()),
         worker_timeout_secs: row.get::<_, u64>(10).unwrap_or(1800),
         worktree_root: row.get(11)?,
         max_turns: row.get(12)?,
         max_budget_usd: row.get(13)?,
         max_cost_per_day_usd: row.get(14)?,
-        source: row.get::<_, String>(15).unwrap_or_else(|_| "api".to_string()),
+        source: row
+            .get::<_, String>(15)
+            .unwrap_or_else(|_| "api".to_string()),
         agent_id: row.get(16)?,
         created_at: row.get::<_, String>(17).unwrap_or_default(),
         updated_at: row.get::<_, String>(18).unwrap_or_default(),

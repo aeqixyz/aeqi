@@ -1216,11 +1216,12 @@ impl Daemon {
 
             // Helper: validate project param against scope. Returns error JSON if forbidden.
             let check_project = |req: &serde_json::Value| -> Option<serde_json::Value> {
-                if allowed_companies.is_none() { return None; }
-                if let Some(project) = req.get("project").and_then(|v| v.as_str()) {
-                    if !project.is_empty() && !is_allowed(project) {
-                        return Some(serde_json::json!({"ok": false, "error": "access denied"}));
-                    }
+                allowed_companies.as_ref()?;
+                if let Some(project) = req.get("project").and_then(|v| v.as_str())
+                    && !project.is_empty()
+                    && !is_allowed(project)
+                {
+                    return Some(serde_json::json!({"ok": false, "error": "access denied"}));
                 }
                 None
             };
@@ -1242,6 +1243,15 @@ impl Daemon {
                         .await
                         .map(|agents| agents.iter().map(|a| a.name.clone()).collect())
                         .unwrap_or_default();
+                    // Tenancy filter: restrict visible projects.
+                    let project_names: Vec<String> = if allowed_companies.is_some() {
+                        project_names
+                            .into_iter()
+                            .filter(|n| is_allowed(n))
+                            .collect()
+                    } else {
+                        project_names
+                    };
                     let worker_count = scheduler.config.max_workers;
                     let dispatch_health = dispatch_es.dispatch_health(ACK_RETRY_AGE_SECS).await;
                     let mail_count = dispatch_health.unread;
@@ -1265,6 +1275,8 @@ impl Daemon {
                         all_projects.extend(project_costs.keys().cloned());
                         all_projects
                             .into_iter()
+                            // Tenancy filter: restrict visible project budgets.
+                            .filter(|name| is_allowed(name))
                             .map(|name| {
                                 let p_spent = project_costs.get(&name).copied().unwrap_or(0.0);
                                 let p_budget = ipc_ctx
@@ -1341,6 +1353,20 @@ impl Daemon {
 
                 "worker_progress" => {
                     let workers = scheduler.worker_status().await;
+                    // Tenancy filter: only show workers for allowed agents.
+                    let workers: Vec<serde_json::Value> = if allowed_companies.is_some() {
+                        workers
+                            .into_iter()
+                            .filter(|w| {
+                                w.get("agent_name")
+                                    .and_then(|v| v.as_str())
+                                    .map(&is_allowed)
+                                    .unwrap_or(false)
+                            })
+                            .collect()
+                    } else {
+                        workers
+                    };
                     serde_json::json!({"ok": true, "workers": workers})
                 }
 
@@ -1350,9 +1376,27 @@ impl Daemon {
                         let buffer = event_buffer.lock().await;
                         buffer.read_since(cursor)
                     };
+                    // Tenancy filter: only include events for allowed projects.
+                    let events: Vec<ExecutionEvent> = if allowed_companies.is_some() {
+                        snapshot
+                            .events
+                            .into_iter()
+                            .filter(|ev| {
+                                match ev {
+                                    ExecutionEvent::QuestStarted { project, .. } => {
+                                        is_allowed(project)
+                                    }
+                                    // Events without a project field: cannot determine tenancy, drop when scoped.
+                                    _ => false,
+                                }
+                            })
+                            .collect()
+                    } else {
+                        snapshot.events
+                    };
                     serde_json::json!({
                         "ok": true,
-                        "events": snapshot.events,
+                        "events": events,
                         "next_cursor": snapshot.next_cursor,
                         "oldest_cursor": snapshot.oldest_cursor,
                         "reset": snapshot.reset,
@@ -1362,6 +1406,15 @@ impl Daemon {
                 "companies" => {
                     // List companies from the companies table with task counts.
                     let companies = agent_registry.list_companies().await.unwrap_or_default();
+                    // Tenancy filter: only show allowed companies.
+                    let companies: Vec<_> = if allowed_companies.is_some() {
+                        companies
+                            .into_iter()
+                            .filter(|c| is_allowed(&c.name))
+                            .collect()
+                    } else {
+                        companies
+                    };
                     let mut result: Vec<serde_json::Value> = Vec::new();
                     for company in &companies {
                         let task_counts = if let Some(ref aid) = company.agent_id {
@@ -1387,9 +1440,7 @@ impl Daemon {
                                         .count();
                                     let cancelled = tasks
                                         .iter()
-                                        .filter(|t| {
-                                            t.status == aeqi_quests::QuestStatus::Cancelled
-                                        })
+                                        .filter(|t| t.status == aeqi_quests::QuestStatus::Cancelled)
                                         .count();
                                     (total, open, pending, in_progress, done, cancelled)
                                 })
@@ -1416,10 +1467,7 @@ impl Daemon {
                 }
 
                 "create_company" => {
-                    let name = request
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
+                    let name = request.get("name").and_then(|v| v.as_str()).unwrap_or("");
                     if name.is_empty() {
                         serde_json::json!({"ok": false, "error": "name is required"})
                     } else {
@@ -1428,10 +1476,7 @@ impl Daemon {
                             .and_then(|v| v.as_str())
                             .map(|s| s.to_string())
                             .unwrap_or_else(|| {
-                                name.chars()
-                                    .take(2)
-                                    .collect::<String>()
-                                    .to_lowercase()
+                                name.chars().take(2).collect::<String>().to_lowercase()
                             });
                         let tagline = request
                             .get("tagline")
@@ -1516,6 +1561,10 @@ impl Daemon {
                     let overdue_cutoff =
                         Utc::now() - chrono::Duration::seconds(ACK_RETRY_AGE_SECS as i64);
                     let mut dispatches = dispatch_es.all().await;
+                    // Tenancy filter: only show dispatches to/from allowed companies.
+                    if allowed_companies.is_some() {
+                        dispatches.retain(|d| is_allowed(&d.to) || is_allowed(&d.from));
+                    }
                     if let Some(recipient) = recipient {
                         dispatches.retain(|d| d.to == recipient);
                     }
@@ -1557,12 +1606,21 @@ impl Daemon {
                         .daily_costs_by_project()
                         .await
                         .unwrap_or_default();
+                    // Tenancy filter: restrict per-project cost data.
+                    let report: std::collections::HashMap<String, f64> =
+                        if allowed_companies.is_some() {
+                            report.into_iter().filter(|(k, _)| is_allowed(k)).collect()
+                        } else {
+                            report
+                        };
                     let project_budget_info: serde_json::Map<String, serde_json::Value> = {
                         let mut all_projects: std::collections::HashSet<String> =
                             ipc_ctx.project_budgets.keys().cloned().collect();
                         all_projects.extend(report.keys().cloned());
                         all_projects
                             .into_iter()
+                            // Tenancy filter: restrict visible project budgets.
+                            .filter(|name| is_allowed(name))
                             .map(|name| {
                                 let p_spent = report.get(&name).copied().unwrap_or(0.0);
                                 let p_budget = ipc_ctx
@@ -1607,6 +1665,11 @@ impl Daemon {
                         Ok(events) => {
                             let items: Vec<serde_json::Value> = events
                                 .iter()
+                                .filter(|e| {
+                                    // Tenancy filter: check agent field against allowed companies.
+                                    if allowed_companies.is_none() { return true; }
+                                    e.content.get("agent").and_then(|v| v.as_str()).map(&is_allowed).unwrap_or(false)
+                                })
                                 .map(|e| {
                                     serde_json::json!({
                                         "timestamp": e.created_at.to_rfc3339(),
@@ -1635,7 +1698,11 @@ impl Daemon {
                     let limit =
                         request.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
 
-                    if let Some(ref engine) = message_router {
+                    // Tenancy filter: wildcard project with scoped user returns empty
+                    // (insight entries lack a native project field for filtering).
+                    if allowed_companies.is_some() && (project == "*" || project.is_empty()) {
+                        serde_json::json!({"ok": true, "entries": []})
+                    } else if let Some(ref engine) = message_router {
                         if let Some(mem) = engine.insight_store.as_ref() {
                             let query_text = request
                                 .get("tags")
@@ -1889,6 +1956,20 @@ impl Daemon {
 
                 "expertise" => match ipc_ctx.event_store.query_expertise().await {
                     Ok(scores) => {
+                        // Tenancy filter: only show expertise for allowed agents.
+                        let scores: Vec<serde_json::Value> = if allowed_companies.is_some() {
+                            scores
+                                .into_iter()
+                                .filter(|s| {
+                                    s.get("agent")
+                                        .and_then(|v| v.as_str())
+                                        .map(&is_allowed)
+                                        .unwrap_or(false)
+                                })
+                                .collect()
+                        } else {
+                            scores
+                        };
                         serde_json::json!({"ok": true, "scores": scores})
                     }
                     Err(e) => {
@@ -1929,7 +2010,7 @@ impl Daemon {
                                     }
                                     // Task prefix (e.g. "sg-001") maps to company prefix.
                                     // Also check agent_id against company agent names.
-                                    task.assignee.as_deref().map(|a| is_allowed(a)).unwrap_or(true)
+                                    task.assignee.as_deref().map(&is_allowed).unwrap_or(true)
                                 })
                                 .map(|task| {
                                     serde_json::json!({
@@ -2253,6 +2334,16 @@ impl Daemon {
                     let channel_name = request_field(&request, "channel_name");
                     let agent_id_param = request_field(&request, "agent_id").map(|s| s.to_string());
 
+                    // Tenancy filter: when scoped, require a project hint or agent_id.
+                    // Without either, we cannot determine tenancy, so return empty.
+                    if allowed_companies.is_some()
+                        && project_hint.is_none()
+                        && agent_id_param.is_none()
+                        && channel_name.is_none()
+                        && chat_id == 0
+                    {
+                        serde_json::json!({"ok": true, "messages": []})
+                    } else
                     // If agent_id is provided, look up timeline (messages + tool events) by agent UUID.
                     if let Some(ref aid) = agent_id_param {
                         if let Some(ref ss) = ipc_ctx.session_store {
@@ -2327,34 +2418,42 @@ impl Daemon {
                     let department_hint = request_field(&request, "department");
                     let channel_name = request_field(&request, "channel_name");
 
-                    match &message_router {
-                        Some(engine) => {
-                            let resolved_chat_id = resolve_web_chat_id(
-                                if chat_id != 0 { Some(chat_id) } else { None },
-                                project_hint,
-                                department_hint,
-                                channel_name,
-                            );
-                            match engine.get_timeline(resolved_chat_id, limit, offset).await {
-                                Ok(events) => {
-                                    let mut items = Vec::with_capacity(events.len());
-                                    for event in &events {
-                                        let task_snapshot = if let Some(metadata) =
-                                            event.metadata.as_ref()
-                                        {
-                                            if let Some(task_id) = metadata
-                                                .get("task_id")
-                                                .and_then(|value| value.as_str())
-                                            {
-                                                find_task_snapshot(&agent_registry, task_id).await
-                                            } else {
-                                                None
-                                            }
-                                        } else {
-                                            None
-                                        };
+                    // Tenancy filter: when scoped, require a project hint or channel.
+                    if allowed_companies.is_some()
+                        && project_hint.is_none()
+                        && channel_name.is_none()
+                        && chat_id == 0
+                    {
+                        serde_json::json!({"ok": true, "events": []})
+                    } else {
+                        match &message_router {
+                            Some(engine) => {
+                                let resolved_chat_id = resolve_web_chat_id(
+                                    if chat_id != 0 { Some(chat_id) } else { None },
+                                    project_hint,
+                                    department_hint,
+                                    channel_name,
+                                );
+                                match engine.get_timeline(resolved_chat_id, limit, offset).await {
+                                    Ok(events) => {
+                                        let mut items = Vec::with_capacity(events.len());
+                                        for event in &events {
+                                            let task_snapshot =
+                                                if let Some(metadata) = event.metadata.as_ref() {
+                                                    if let Some(task_id) = metadata
+                                                        .get("task_id")
+                                                        .and_then(|value| value.as_str())
+                                                    {
+                                                        find_task_snapshot(&agent_registry, task_id)
+                                                            .await
+                                                    } else {
+                                                        None
+                                                    }
+                                                } else {
+                                                    None
+                                                };
 
-                                        items.push(serde_json::json!({
+                                            items.push(serde_json::json!({
                                             "id": event.id,
                                             "chat_id": event.chat_id,
                                             "event_type": event.event_type,
@@ -2364,14 +2463,17 @@ impl Daemon {
                                             "source": event.source,
                                             "metadata": merge_timeline_metadata(event.metadata.as_ref(), task_snapshot),
                                         }));
+                                        }
+                                        serde_json::json!({"ok": true, "events": items, "chat_id": resolved_chat_id})
                                     }
-                                    serde_json::json!({"ok": true, "events": items, "chat_id": resolved_chat_id})
+                                    Err(e) => {
+                                        serde_json::json!({"ok": false, "error": e.to_string()})
+                                    }
                                 }
-                                Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
                             }
-                        }
-                        None => {
-                            serde_json::json!({"ok": false, "error": "chat engine not initialized"})
+                            None => {
+                                serde_json::json!({"ok": false, "error": "chat engine not initialized"})
+                            }
                         }
                     }
                 }
@@ -2379,6 +2481,15 @@ impl Daemon {
                 "chat_channels" => match &message_router {
                     Some(engine) => match engine.list_channels().await {
                         Ok(channels) => {
+                            // Tenancy filter: only show channels whose name matches allowed companies.
+                            let channels: Vec<_> = if allowed_companies.is_some() {
+                                channels
+                                    .into_iter()
+                                    .filter(|c| is_allowed(&c.name))
+                                    .collect()
+                            } else {
+                                channels
+                            };
                             let chs: Vec<serde_json::Value> = channels
                                 .iter()
                                 .map(|c| {
@@ -2404,6 +2515,15 @@ impl Daemon {
                 "triggers" => match &trigger_store {
                     Some(store) => {
                         let triggers = store.list_all().await.unwrap_or_default();
+                        // Tenancy filter: only show triggers whose agent_id is allowed.
+                        let triggers: Vec<_> = if allowed_companies.is_some() {
+                            triggers
+                                .into_iter()
+                                .filter(|t| is_allowed(&t.agent_id))
+                                .collect()
+                        } else {
+                            triggers
+                        };
                         let items: Vec<serde_json::Value> = triggers
                             .iter()
                             .map(|t| {
@@ -2671,7 +2791,7 @@ impl Daemon {
                 }
 
                 "memories" => {
-                    let _project = request
+                    let mem_project = request
                         .get("project")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
@@ -2679,7 +2799,12 @@ impl Daemon {
                     let limit =
                         request.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
 
-                    if let Some(ref engine) = message_router {
+                    // Tenancy filter: memories lack a native project field.
+                    // When scoped and no specific project is set, return empty.
+                    if allowed_companies.is_some() && (mem_project.is_empty() || mem_project == "*")
+                    {
+                        serde_json::json!({"ok": true, "memories": [], "count": 0})
+                    } else if let Some(ref engine) = message_router {
                         if let Some(mem) = engine.insight_store.as_ref() {
                             let agent_id_param = request.get("agent_id").and_then(|v| v.as_str());
 
@@ -2717,12 +2842,17 @@ impl Daemon {
                 }
 
                 "memory_profile" => {
-                    let _project = request
+                    let mem_project = request
                         .get("project")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
 
+                    // Tenancy filter: memory_profile queries the global insights DB.
+                    // When scoped and no specific project is set, return empty.
+                    if allowed_companies.is_some() && (mem_project.is_empty() || mem_project == "*")
                     {
+                        serde_json::json!({"ok": true, "profile": {"static": [], "dynamic": []}})
+                    } else {
                         let aeqi_data_dir = std::env::var("HOME")
                             .map(|h| PathBuf::from(h).join(".aeqi"))
                             .unwrap_or_else(|_| PathBuf::from("/tmp"));
@@ -2782,14 +2912,20 @@ impl Daemon {
                 }
 
                 "memory_graph" => {
-                    let _project = request
+                    let graph_project = request
                         .get("project")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
                     let limit =
                         request.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
 
+                    // Tenancy filter: memory_graph queries the global insights DB.
+                    // When scoped and no specific project is set, return empty.
+                    if allowed_companies.is_some()
+                        && (graph_project.is_empty() || graph_project == "*")
                     {
+                        serde_json::json!({"ok": true, "nodes": [], "edges": []})
+                    } else {
                         let aeqi_data_dir = std::env::var("HOME")
                             .map(|h| PathBuf::from(h).join(".aeqi"))
                             .unwrap_or_else(|_| PathBuf::from("/tmp"));
@@ -2949,6 +3085,25 @@ impl Daemon {
                         );
                     }
 
+                    // Tenancy filter: only show skills from allowed projects.
+                    let skills: Vec<serde_json::Value> = if allowed_companies.is_some() {
+                        skills
+                            .into_iter()
+                            .filter(|s| {
+                                let source = s.get("source").and_then(|v| v.as_str()).unwrap_or("");
+                                // "shared" skills are visible to everyone; per-project skills are filtered.
+                                source == "shared"
+                                    || source == "shared/agents"
+                                    || is_allowed(source)
+                                    || {
+                                        // source may be "project/agents" — extract project part.
+                                        source.split('/').next().map(&is_allowed).unwrap_or(false)
+                                    }
+                            })
+                            .collect()
+                    } else {
+                        skills
+                    };
                     serde_json::json!({"ok": true, "skills": skills})
                 }
 
@@ -3143,7 +3298,10 @@ impl Daemon {
                                     .into_iter()
                                     .filter(|a| {
                                         company_ids.contains(&a.id)
-                                            || a.parent_id.as_ref().map(|pid| company_ids.contains(pid)).unwrap_or(false)
+                                            || a.parent_id
+                                                .as_ref()
+                                                .map(|pid| company_ids.contains(pid))
+                                                .unwrap_or(false)
                                     })
                                     .collect::<Vec<_>>()
                             } else {
@@ -3353,6 +3511,20 @@ impl Daemon {
                     let status = request_field(&request, "status");
                     match agent_registry.list_approvals(status).await {
                         Ok(approvals) => {
+                            // Tenancy filter: only show approvals for allowed agents.
+                            let approvals: Vec<serde_json::Value> = if allowed_companies.is_some() {
+                                approvals
+                                    .into_iter()
+                                    .filter(|a| {
+                                        a.get("agent_id")
+                                            .and_then(|v| v.as_str())
+                                            .map(&is_allowed)
+                                            .unwrap_or(false)
+                                    })
+                                    .collect()
+                            } else {
+                                approvals
+                            };
                             serde_json::json!({"ok": true, "approvals": approvals})
                         }
                         Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
@@ -3385,20 +3557,27 @@ impl Daemon {
                         if hint.is_empty() {
                             serde_json::json!({"ok": false, "error": "agent_id is required"})
                         } else {
-                            // Resolve hint to agent UUID if needed.
-                            let resolved_id = if hint.len() == 36 && hint.contains('-') {
-                                hint.to_string()
+                            // Tenancy filter: verify the agent hint is allowed.
+                            if allowed_companies.is_some() && !is_allowed(hint) {
+                                serde_json::json!({"ok": false, "error": "access denied"})
                             } else {
-                                match agent_registry.resolve_by_hint(hint).await {
-                                    Ok(Some(agent)) => agent.id,
-                                    _ => hint.to_string(),
+                                // Resolve hint to agent UUID if needed.
+                                let resolved_id = if hint.len() == 36 && hint.contains('-') {
+                                    hint.to_string()
+                                } else {
+                                    match agent_registry.resolve_by_hint(hint).await {
+                                        Ok(Some(agent)) => agent.id,
+                                        _ => hint.to_string(),
+                                    }
+                                };
+                                match ss.list_sessions(Some(&resolved_id), 100).await {
+                                    Ok(sessions) => {
+                                        serde_json::json!({"ok": true, "sessions": sessions})
+                                    }
+                                    Err(e) => {
+                                        serde_json::json!({"ok": false, "error": e.to_string()})
+                                    }
                                 }
-                            };
-                            match ss.list_sessions(Some(&resolved_id), 100).await {
-                                Ok(sessions) => {
-                                    serde_json::json!({"ok": true, "sessions": sessions})
-                                }
-                                Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
                             }
                         }
                     } else {
@@ -3412,7 +3591,14 @@ impl Daemon {
                     let limit =
                         request.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
 
-                    if let Some(ref ss) = ipc_ctx.session_store {
+                    // Tenancy filter: when scoped, require agent_id or return empty.
+                    if allowed_companies.is_some() && agent_id.is_none() {
+                        serde_json::json!({"ok": true, "sessions": []})
+                    } else if allowed_companies.is_some()
+                        && agent_id.as_deref().map(|a| !is_allowed(a)).unwrap_or(false)
+                    {
+                        serde_json::json!({"ok": false, "error": "access denied"})
+                    } else if let Some(ref ss) = ipc_ctx.session_store {
                         match ss.list_sessions(agent_id.as_deref(), limit).await {
                             Ok(sessions) => {
                                 serde_json::json!({"ok": true, "sessions": sessions})
@@ -3479,6 +3665,29 @@ impl Daemon {
                         let session_id = request_field(&request, "session_id").unwrap_or("");
                         let limit =
                             request.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+                        // Tenancy filter: verify the session's agent belongs to an allowed company.
+                        if allowed_companies.is_some() {
+                            let session_ok = match ss.get_session(session_id).await {
+                                Ok(Some(session)) => session
+                                    .agent_id
+                                    .as_deref()
+                                    .map(&is_allowed)
+                                    .unwrap_or(false),
+                                _ => false,
+                            };
+                            if !session_ok {
+                                let _ = writer
+                                    .write_all(
+                                        serde_json::json!({"ok": false, "error": "access denied"})
+                                            .to_string()
+                                            .as_bytes(),
+                                    )
+                                    .await;
+                                let _ = writer.write_all(b"\n").await;
+                                let _ = writer.flush().await;
+                                continue;
+                            }
+                        }
                         // Use timeline_by_session to include tool events alongside messages.
                         match ss.timeline_by_session(session_id, limit).await {
                             Ok(events) => {
@@ -3999,21 +4208,63 @@ impl Daemon {
                 // --- VFS commands ---
                 "vfs_list" => {
                     let path = request.get("path").and_then(|v| v.as_str()).unwrap_or("/");
-                    let vfs = crate::vfs::VfsTree::with_direct_deps(
-                        agent_registry.clone(),
-                        ipc_ctx.session_store.clone(),
-                    );
-                    match vfs.list(path).await {
-                        Ok(resp) => serde_json::to_value(resp)
-                            .unwrap_or_else(|_| serde_json::json!({"ok": false})),
-                        Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                    // Tenancy filter: check VFS path segments for agent/company access.
+                    let vfs_denied = if allowed_companies.is_some() {
+                        let segs: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+                        match segs.as_slice() {
+                            ["agents", name, ..] | ["companies", name, ..] => !is_allowed(name),
+                            _ => false,
+                        }
+                    } else {
+                        false
+                    };
+                    if vfs_denied {
+                        serde_json::json!({"ok": false, "error": "access denied"})
+                    } else {
+                        let vfs = crate::vfs::VfsTree::with_direct_deps(
+                            agent_registry.clone(),
+                            ipc_ctx.session_store.clone(),
+                        );
+                        match vfs.list(path).await {
+                            Ok(mut resp) => {
+                                // Tenancy filter: when listing /agents or /companies, filter nodes.
+                                if allowed_companies.is_some() {
+                                    resp.nodes.retain(|n| {
+                                        // Extract the entity name from the node path (second segment).
+                                        let p_segs: Vec<&str> =
+                                            n.path.split('/').filter(|s| !s.is_empty()).collect();
+                                        match p_segs.as_slice() {
+                                            ["agents", name, ..] | ["companies", name, ..] => {
+                                                is_allowed(name)
+                                            }
+                                            _ => true,
+                                        }
+                                    });
+                                }
+                                serde_json::to_value(resp)
+                                    .unwrap_or_else(|_| serde_json::json!({"ok": false}))
+                            }
+                            Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                        }
                     }
                 }
 
                 "vfs_read" => {
                     let path = request.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                    // Tenancy filter: check VFS path for agent/company access.
+                    let vfs_denied = if allowed_companies.is_some() && !path.is_empty() {
+                        let segs: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+                        match segs.as_slice() {
+                            ["agents", name, ..] | ["companies", name, ..] => !is_allowed(name),
+                            _ => false,
+                        }
+                    } else {
+                        false
+                    };
                     if path.is_empty() {
                         serde_json::json!({"ok": false, "error": "path required"})
+                    } else if vfs_denied {
+                        serde_json::json!({"ok": false, "error": "access denied"})
                     } else {
                         let vfs = crate::vfs::VfsTree::with_direct_deps(
                             agent_registry.clone(),
@@ -4037,8 +4288,23 @@ impl Daemon {
                             ipc_ctx.session_store.clone(),
                         );
                         match vfs.search(query).await {
-                            Ok(resp) => serde_json::to_value(resp)
-                                .unwrap_or_else(|_| serde_json::json!({"ok": false})),
+                            Ok(mut resp) => {
+                                // Tenancy filter: remove search results for disallowed agents/companies.
+                                if allowed_companies.is_some() {
+                                    resp.results.retain(|r| {
+                                        let p_segs: Vec<&str> =
+                                            r.path.split('/').filter(|s| !s.is_empty()).collect();
+                                        match p_segs.as_slice() {
+                                            ["agents", name, ..] | ["companies", name, ..] => {
+                                                is_allowed(name)
+                                            }
+                                            _ => true,
+                                        }
+                                    });
+                                }
+                                serde_json::to_value(resp)
+                                    .unwrap_or_else(|_| serde_json::json!({"ok": false}))
+                            }
                             Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
                         }
                     }

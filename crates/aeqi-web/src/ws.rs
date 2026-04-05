@@ -1,3 +1,4 @@
+use aeqi_core::config::AuthMode;
 use axum::{
     extract::{Query, State, WebSocketUpgrade},
     response::Response,
@@ -19,15 +20,18 @@ pub async fn handler(
     Query(q): Query<WsQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    // Validate token from query param.
-    let secret = state.auth_secret.as_deref().unwrap_or("");
-    if !secret.is_empty() {
-        let token = q.token.as_deref().unwrap_or("");
-        if auth::validate_token(token, secret).is_err() {
-            return axum::response::IntoResponse::into_response((
-                axum::http::StatusCode::UNAUTHORIZED,
-                "invalid or missing token",
-            ));
+    // Validate token from query param, dispatching by auth mode.
+    match state.auth_mode {
+        AuthMode::None => { /* allow without validation */ }
+        AuthMode::Secret | AuthMode::Accounts => {
+            let secret = auth::signing_secret(&state);
+            let token = q.token.as_deref().unwrap_or("");
+            if auth::validate_token(token, secret).is_err() {
+                return axum::response::IntoResponse::into_response((
+                    axum::http::StatusCode::UNAUTHORIZED,
+                    "invalid or missing token",
+                ));
+            }
         }
     }
 

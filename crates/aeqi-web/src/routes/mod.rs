@@ -78,38 +78,39 @@ async fn projects(State(state): State<AppState>, req: Request) -> Response {
     let user_id = crate::auth::extract_user_id(&state, &req);
 
     // In accounts mode with a user, filter by membership.
-    if let Some(ref uid) = user_id {
-        if let Some(ref store) = state.user_store {
-            let user_companies = store.get_user_companies(uid);
+    if let Some(ref uid) = user_id
+        && let Some(ref store) = state.user_store
+    {
+        let user_companies = store.get_user_companies(uid);
 
-            let ipc_resp = ipc_proxy(state, "companies", serde_json::Value::Null).await;
-            let body_bytes = axum::body::to_bytes(ipc_resp.into_body(), 1024 * 1024)
-                .await
-                .unwrap_or_default();
+        let ipc_resp = ipc_proxy(state, "companies", serde_json::Value::Null).await;
+        let body_bytes = axum::body::to_bytes(ipc_resp.into_body(), 1024 * 1024)
+            .await
+            .unwrap_or_default();
 
-            if let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
-                if let Some(companies) = json.get_mut("companies").and_then(|v| v.as_array_mut()) {
-                    companies.retain(|c| {
-                        c.get("name")
-                            .and_then(|n| n.as_str())
-                            .map(|n| user_companies.contains(&n.to_string()))
-                            .unwrap_or(false)
-                    });
-                }
-                return axum::Json(json).into_response();
+        if let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
+            if let Some(companies) = json.get_mut("companies").and_then(|v| v.as_array_mut()) {
+                companies.retain(|c| {
+                    c.get("name")
+                        .and_then(|n| n.as_str())
+                        .map(|n| user_companies.contains(&n.to_string()))
+                        .unwrap_or(false)
+                });
             }
-            return (StatusCode::INTERNAL_SERVER_ERROR, "failed to parse companies").into_response();
+            return axum::Json(json).into_response();
         }
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "failed to parse companies",
+        )
+            .into_response();
     }
 
     // Non-accounts mode or no user: return all.
     ipc_proxy(state, "companies", serde_json::Value::Null).await
 }
 
-async fn create_company(
-    State(state): State<AppState>,
-    req: Request,
-) -> Response {
+async fn create_company(State(state): State<AppState>, req: Request) -> Response {
     let user_id = crate::auth::extract_user_id(&state, &req);
 
     // Extract body.
@@ -122,12 +123,11 @@ async fn create_company(
     let resp = ipc_proxy(state.clone(), "create_company", body.clone()).await;
 
     // Associate company with user in accounts mode.
-    if let Some(uid) = user_id {
-        if let Some(name) = body.get("name").and_then(|n| n.as_str()) {
-            if let Some(ref store) = state.user_store {
-                store.add_user_company(&uid, name, "owner");
-            }
-        }
+    if let Some(uid) = user_id
+        && let Some(name) = body.get("name").and_then(|n| n.as_str())
+        && let Some(ref store) = state.user_store
+    {
+        store.add_user_company(&uid, name, "owner");
     }
 
     resp
@@ -141,7 +141,11 @@ struct TasksQuery {
     status: Option<String>,
 }
 
-async fn tasks(State(state): State<AppState>, scope: RequestScope, Query(q): Query<TasksQuery>) -> Response {
+async fn tasks(
+    State(state): State<AppState>,
+    scope: RequestScope,
+    Query(q): Query<TasksQuery>,
+) -> Response {
     let mut params = serde_json::json!({});
     if let Some(project) = &q.project {
         params["project"] = serde_json::Value::String(project.clone());
@@ -268,7 +272,11 @@ struct AuditQuery {
     last: Option<u32>,
 }
 
-async fn audit(State(state): State<AppState>, scope: RequestScope, Query(q): Query<AuditQuery>) -> Response {
+async fn audit(
+    State(state): State<AppState>,
+    scope: RequestScope,
+    Query(q): Query<AuditQuery>,
+) -> Response {
     let mut params = serde_json::json!({});
     if let Some(project) = &q.project {
         params["project"] = serde_json::Value::String(project.clone());
@@ -287,7 +295,11 @@ struct NotesQuery {
     limit: Option<u32>,
 }
 
-async fn notes(State(state): State<AppState>, scope: RequestScope, Query(q): Query<NotesQuery>) -> Response {
+async fn notes(
+    State(state): State<AppState>,
+    scope: RequestScope,
+    Query(q): Query<NotesQuery>,
+) -> Response {
     let mut params = serde_json::json!({});
     if let Some(project) = &q.project {
         params["project"] = serde_json::Value::String(project.clone());
@@ -305,7 +317,11 @@ struct ExpertiseQuery {
     domain: Option<String>,
 }
 
-async fn expertise(State(state): State<AppState>, scope: RequestScope, Query(q): Query<ExpertiseQuery>) -> Response {
+async fn expertise(
+    State(state): State<AppState>,
+    scope: RequestScope,
+    Query(q): Query<ExpertiseQuery>,
+) -> Response {
     let mut params = serde_json::json!({});
     if let Some(domain) = &q.domain {
         params["domain"] = serde_json::Value::String(domain.clone());
@@ -367,7 +383,11 @@ struct MemoriesQuery {
     limit: Option<u64>,
 }
 
-async fn memories(State(state): State<AppState>, scope: RequestScope, Query(q): Query<MemoriesQuery>) -> Response {
+async fn memories(
+    State(state): State<AppState>,
+    scope: RequestScope,
+    Query(q): Query<MemoriesQuery>,
+) -> Response {
     let mut params = serde_json::json!({});
     if let Some(project) = &q.project {
         params["project"] = serde_json::json!(project);
@@ -501,7 +521,13 @@ async fn agent_identity(
     scope: RequestScope,
     axum::extract::Path(name): axum::extract::Path<String>,
 ) -> Response {
-    scoped_ipc(state, &scope, "agent_identity", serde_json::json!({"name": name})).await
+    scoped_ipc(
+        state,
+        &scope,
+        "agent_identity",
+        serde_json::json!({"name": name}),
+    )
+    .await
 }
 
 async fn agent_prompts(
@@ -509,7 +535,13 @@ async fn agent_prompts(
     scope: RequestScope,
     axum::extract::Path(name): axum::extract::Path<String>,
 ) -> Response {
-    scoped_ipc(state, &scope, "agent_info", serde_json::json!({"name": name})).await
+    scoped_ipc(
+        state,
+        &scope,
+        "agent_info",
+        serde_json::json!({"name": name}),
+    )
+    .await
 }
 
 async fn save_agent_file(
@@ -531,11 +563,19 @@ async fn rate_limit(State(state): State<AppState>, scope: RequestScope) -> Respo
 
 // --- Chat ---
 
-async fn chat(State(state): State<AppState>, scope: RequestScope, Json(body): Json<serde_json::Value>) -> Response {
+async fn chat(
+    State(state): State<AppState>,
+    scope: RequestScope,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
     scoped_ipc(state, &scope, "chat", body).await
 }
 
-async fn chat_full(State(state): State<AppState>, scope: RequestScope, Json(body): Json<serde_json::Value>) -> Response {
+async fn chat_full(
+    State(state): State<AppState>,
+    scope: RequestScope,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
     scoped_ipc(state, &scope, "chat_full", body).await
 }
 
@@ -552,7 +592,13 @@ async fn chat_poll(
     scope: RequestScope,
     axum::extract::Path(task_id): axum::extract::Path<String>,
 ) -> Response {
-    scoped_ipc(state, &scope, "chat_poll", serde_json::json!({"task_id": task_id})).await
+    scoped_ipc(
+        state,
+        &scope,
+        "chat_poll",
+        serde_json::json!({"task_id": task_id}),
+    )
+    .await
 }
 
 #[derive(Deserialize, Default)]
@@ -675,7 +721,11 @@ struct ApprovalsQuery {
     status: Option<String>,
 }
 
-async fn approvals(State(state): State<AppState>, scope: RequestScope, Query(q): Query<ApprovalsQuery>) -> Response {
+async fn approvals(
+    State(state): State<AppState>,
+    scope: RequestScope,
+    Query(q): Query<ApprovalsQuery>,
+) -> Response {
     let mut params = serde_json::json!({});
     if let Some(status) = &q.status {
         params["status"] = serde_json::Value::String(status.clone());
@@ -700,7 +750,11 @@ struct SessionsQuery {
     agent_id: Option<String>,
 }
 
-async fn sessions(State(state): State<AppState>, scope: RequestScope, Query(q): Query<SessionsQuery>) -> Response {
+async fn sessions(
+    State(state): State<AppState>,
+    scope: RequestScope,
+    Query(q): Query<SessionsQuery>,
+) -> Response {
     let mut params = serde_json::json!({});
     if let Some(agent_id) = &q.agent_id {
         params["agent_id"] = serde_json::Value::String(agent_id.clone());
@@ -826,7 +880,11 @@ struct VfsListQuery {
     path: Option<String>,
 }
 
-async fn vfs_list(State(state): State<AppState>, scope: RequestScope, Query(q): Query<VfsListQuery>) -> Response {
+async fn vfs_list(
+    State(state): State<AppState>,
+    scope: RequestScope,
+    Query(q): Query<VfsListQuery>,
+) -> Response {
     let path = q.path.unwrap_or_else(|| "/".to_string());
     scoped_ipc(state, &scope, "vfs_list", serde_json::json!({"path": path})).await
 }
@@ -844,14 +902,29 @@ struct VfsSearchQuery {
     query: String,
 }
 
-async fn vfs_search(State(state): State<AppState>, scope: RequestScope, Query(q): Query<VfsSearchQuery>) -> Response {
-    scoped_ipc(state, &scope, "vfs_search", serde_json::json!({"query": q.query})).await
+async fn vfs_search(
+    State(state): State<AppState>,
+    scope: RequestScope,
+    Query(q): Query<VfsSearchQuery>,
+) -> Response {
+    scoped_ipc(
+        state,
+        &scope,
+        "vfs_search",
+        serde_json::json!({"query": q.query}),
+    )
+    .await
 }
 
 // --- Helper ---
 
 /// IPC proxy with tenancy scope injection. All new endpoints should use this.
-async fn scoped_ipc(state: AppState, scope: &RequestScope, cmd: &str, mut params: serde_json::Value) -> Response {
+async fn scoped_ipc(
+    state: AppState,
+    scope: &RequestScope,
+    cmd: &str,
+    mut params: serde_json::Value,
+) -> Response {
     scope.inject(&mut params);
     ipc_proxy(state, cmd, params).await
 }

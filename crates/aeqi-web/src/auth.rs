@@ -84,20 +84,46 @@ pub fn extract_user_id(state: &AppState, req: &Request) -> Option<String> {
 pub async fn require_auth(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     match state.auth_mode {
         AuthMode::None => next.run(req).await,
-        AuthMode::Secret | AuthMode::Accounts => {
+        AuthMode::Secret => {
             let secret = signing_secret(&state);
             let Some(token) = extract_bearer(&req) else {
                 return (StatusCode::UNAUTHORIZED, "missing authorization header").into_response();
             };
             match validate_token(token, secret) {
                 Ok(claims) => {
-                    // Stash claims in request extensions for downstream extractors.
                     req.extensions_mut().insert(claims);
                     next.run(req).await
                 }
-                Err(_) => {
-                    (StatusCode::UNAUTHORIZED, "invalid or expired token").into_response()
+                Err(_) => (StatusCode::UNAUTHORIZED, "invalid or expired token").into_response(),
+            }
+        }
+        AuthMode::Accounts => {
+            let secret = signing_secret(&state);
+            let Some(token) = extract_bearer(&req) else {
+                return (StatusCode::UNAUTHORIZED, "missing authorization header").into_response();
+            };
+            match validate_token(token, secret) {
+                Ok(claims) => {
+                    // Check email_verified for accounts mode.
+                    if let Some(ref uid) = claims.user_id
+                        && let Some(ref store) = state.user_store
+                        && !store.is_email_verified(uid)
+                    {
+                        // Allow only auth endpoints and companies for unverified users.
+                        let path = req.uri().path();
+                        // Nested routers strip /api prefix, so check both forms.
+                        let allowed = path.starts_with("/api/auth/")
+                            || path.starts_with("/auth/")
+                            || path.starts_with("/api/companies")
+                            || path.starts_with("/companies");
+                        if !allowed {
+                            return (StatusCode::FORBIDDEN, "email not verified").into_response();
+                        }
+                    }
+                    req.extensions_mut().insert(claims);
+                    next.run(req).await
                 }
+                Err(_) => (StatusCode::UNAUTHORIZED, "invalid or expired token").into_response(),
             }
         }
     }

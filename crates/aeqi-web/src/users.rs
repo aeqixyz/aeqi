@@ -78,7 +78,9 @@ impl UserStore {
     }
 
     pub fn create_user(&self, email: &str, password: &str, name: &str) -> Result<User> {
-        use argon2::{Argon2, PasswordHasher, password_hash::SaltString, password_hash::rand_core::OsRng};
+        use argon2::{
+            Argon2, PasswordHasher, password_hash::SaltString, password_hash::rand_core::OsRng,
+        };
 
         let salt = SaltString::generate(&mut OsRng);
         let hash = Argon2::default()
@@ -160,9 +162,24 @@ impl UserStore {
         provider: &str,
         provider_id: &str,
     ) -> User {
-        // Try by email first (may have signed up with password, now linking Google).
+        // Try by email first.
         if let Some(user) = self.find_by_email(email) {
-            // Update avatar if not set.
+            // Security: if the existing user is a local account with a password,
+            // do NOT auto-link the OAuth provider. The user must log in with their
+            // password first and link OAuth from settings. Return the existing user
+            // but don't overwrite their provider_id.
+            if user.provider == "local" && user.password_hash.is_some() {
+                // Only update avatar if not set (cosmetic, not a security field).
+                if user.avatar_url.is_none() && !avatar.is_empty() {
+                    let db = self.db.lock().unwrap();
+                    let _ = db.execute(
+                        "UPDATE users SET avatar_url = ?1 WHERE id = ?2",
+                        rusqlite::params![avatar, user.id],
+                    );
+                }
+                return user;
+            }
+            // For OAuth-created accounts (no password), safe to update provider info.
             if user.avatar_url.is_none() && !avatar.is_empty() {
                 let db = self.db.lock().unwrap();
                 let _ = db.execute(
@@ -201,7 +218,7 @@ impl UserStore {
     }
 
     pub fn verify_password(&self, user: &User, password: &str) -> bool {
-        use argon2::{Argon2, PasswordVerifier, PasswordHash};
+        use argon2::{Argon2, PasswordHash, PasswordVerifier};
 
         let Some(ref hash) = user.password_hash else {
             return false;
@@ -264,7 +281,9 @@ impl UserStore {
 
     /// Create user with email_verified = false (for email verification flow).
     pub fn create_user_unverified(&self, email: &str, password: &str, name: &str) -> Result<User> {
-        use argon2::{Argon2, PasswordHasher, password_hash::SaltString, password_hash::rand_core::OsRng};
+        use argon2::{
+            Argon2, PasswordHasher, password_hash::SaltString, password_hash::rand_core::OsRng,
+        };
 
         let salt = SaltString::generate(&mut OsRng);
         let hash = Argon2::default()
@@ -314,8 +333,9 @@ impl UserStore {
     }
 
     /// Verify code and mark user as verified. Returns user if valid.
+    /// Uses a transaction to ensure check + update + delete are atomic.
     pub fn verify_email(&self, email: &str, code: &str) -> Option<User> {
-        let db = self.db.lock().unwrap();
+        let mut db = self.db.lock().unwrap();
         // Check code matches.
         let stored: Option<(String, String)> = db
             .query_row(
@@ -325,23 +345,42 @@ impl UserStore {
             )
             .ok();
 
-        let Some((stored_code, user_id)) = stored else {
-            return None;
-        };
+        let (stored_code, user_id) = stored?;
 
         if stored_code != code {
             return None;
         }
 
-        // Mark verified and clean up.
-        let _ = db.execute(
-            "UPDATE users SET email_verified = 1, updated_at = ?1 WHERE id = ?2",
-            rusqlite::params![chrono::Utc::now().to_rfc3339(), user_id],
-        );
-        let _ = db.execute(
-            "DELETE FROM email_verifications WHERE email = ?1",
-            rusqlite::params![email],
-        );
+        // Wrap update + delete in a transaction (unchecked since we hold the Mutex).
+        let tx = match db.transaction() {
+            Ok(tx) => tx,
+            Err(_) => return None,
+        };
+
+        let now = chrono::Utc::now().to_rfc3339();
+        if tx
+            .execute(
+                "UPDATE users SET email_verified = 1, updated_at = ?1 WHERE id = ?2",
+                rusqlite::params![now, user_id],
+            )
+            .is_err()
+        {
+            return None;
+        }
+
+        if tx
+            .execute(
+                "DELETE FROM email_verifications WHERE email = ?1",
+                rusqlite::params![email],
+            )
+            .is_err()
+        {
+            return None;
+        }
+
+        if tx.commit().is_err() {
+            return None;
+        }
 
         // Return the user.
         drop(db);

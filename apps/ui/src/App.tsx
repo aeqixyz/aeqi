@@ -18,12 +18,21 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const authMode = useAuthStore((s) => s.authMode);
   const token = useAuthStore((s) => s.token);
   const fetchAuthMode = useAuthStore((s) => s.fetchAuthMode);
+  const pendingEmail = useAuthStore((s) => s.pendingEmail);
 
   useEffect(() => {
     fetchAuthMode();
   }, [fetchAuthMode]);
 
-  if (!authMode) return null;
+  // Loading mode discovery
+  if (!authMode) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+        <div style={{ color: "rgba(0,0,0,0.3)", fontSize: 13 }}>Loading...</div>
+      </div>
+    );
+  }
+
   if (authMode === "none") return <>{children}</>;
   if (!token) return <Navigate to="/login" replace />;
   return <>{children}</>;

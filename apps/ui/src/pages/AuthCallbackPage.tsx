@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/store/auth";
+import { api } from "@/lib/api";
 
 export default function AuthCallbackPage() {
   const navigate = useNavigate();
@@ -13,7 +14,16 @@ export default function AuthCallbackPage() {
 
     if (token) {
       handleOAuthCallback(token);
-      navigate("/", { replace: true });
+      // Check if user needs onboarding
+      api.getMe().then((me) => {
+        if (!me.companies || me.companies.length === 0) {
+          navigate("/onboarding", { replace: true });
+        } else {
+          navigate("/", { replace: true });
+        }
+      }).catch(() => {
+        navigate("/", { replace: true });
+      });
     } else {
       navigate("/login", { replace: true });
     }

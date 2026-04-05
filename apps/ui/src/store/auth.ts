@@ -19,6 +19,7 @@ interface AuthState {
   loading: boolean;
   error: string | null;
   pendingEmail: string | null; // email awaiting verification
+  authModeLoaded: boolean;
 
   fetchAuthMode: () => Promise<void>;
   login: (secret: string) => Promise<boolean>;
@@ -41,13 +42,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   loading: false,
   error: null,
   pendingEmail: null,
+  authModeLoaded: false,
 
   fetchAuthMode: async () => {
+    if (get().authModeLoaded) return;
     try {
       const resp = await api.getAuthMode();
       const mode = (resp.mode || "secret") as AuthMode;
       localStorage.setItem("aeqi_auth_mode", mode || "secret");
-      set({ authMode: mode, googleOAuth: resp.google_oauth });
+      set({ authMode: mode, googleOAuth: resp.google_oauth, authModeLoaded: true });
 
       if (mode === "none" && !get().token) {
         try {
@@ -61,7 +64,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         }
       }
     } catch {
-      set({ authMode: "secret" });
+      set({ authMode: "secret", authModeLoaded: true });
     }
   },
 
@@ -169,7 +172,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: () => {
     localStorage.removeItem("aeqi_token");
-    set({ token: null, user: null, pendingEmail: null });
+    localStorage.removeItem("aeqi_auth_mode");
+    localStorage.removeItem("aeqi_pending_email");
+    localStorage.removeItem("aeqi_company");
+    localStorage.removeItem("aeqi_company_tagline");
+    localStorage.removeItem("aeqi_company_avatar");
+    set({ token: null, user: null, pendingEmail: null, authMode: null, authModeLoaded: false });
   },
 
   isAuthenticated: () => {

@@ -149,17 +149,13 @@ fn welcome_email(name: &str, base_url: &str) -> String {
 }
 
 fn login_notification_email(
-    name: &str,
+    _name: &str,
     device: &str,
     ip: &str,
     time: &str,
     base_url: &str,
 ) -> String {
-    let greeting = if name.is_empty() {
-        "New login to aeqi".to_string()
-    } else {
-        format!("New login to aeqi")
-    };
+    let greeting = "New login to aeqi".to_string();
     email_wrapper(&format!(
         r#"<h1 class="heading">{greeting}</h1>
 <p class="subtext">We noticed a login to your aeqi account from a new device.</p>
