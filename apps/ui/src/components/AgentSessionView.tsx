@@ -325,7 +325,8 @@ export default function AgentSessionView({
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-  }, []);
+    if (!dragOver) setDragOver(true);
+  }, [dragOver]);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
