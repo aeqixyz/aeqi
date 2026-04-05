@@ -53,16 +53,26 @@ pub async fn start(config: &AEQIConfig) -> Result<()> {
     };
 
     // Create email service if Resend API key is configured.
-    let email_service = web.auth.resend_api_key.as_deref()
-        .filter(|k| !k.is_empty())
-        .map(|key| {
-            info!("email service initialized (Resend)");
-            Arc::new(crate::email::EmailService::new(
-                key,
-                web.auth.from_email.as_deref(),
-                web.auth.base_url.as_deref(),
-            ))
-        });
+    // Resolve ${ENV_VAR} pattern since TOML doesn't auto-interpolate env vars.
+    let resend_key = web.auth.resend_api_key.as_deref()
+        .map(|k| {
+            let trimmed = k.trim();
+            if trimmed.starts_with("${") && trimmed.ends_with('}') {
+                let var_name = &trimmed[2..trimmed.len() - 1];
+                std::env::var(var_name).unwrap_or_default()
+            } else {
+                trimmed.to_string()
+            }
+        })
+        .filter(|k| !k.is_empty());
+    let email_service = resend_key.map(|key| {
+        info!("email service initialized (Resend)");
+        Arc::new(crate::email::EmailService::new(
+            &key,
+            web.auth.from_email.as_deref(),
+            web.auth.base_url.as_deref(),
+        ))
+    });
 
     let state = AppState {
         ipc: ipc.clone(),
