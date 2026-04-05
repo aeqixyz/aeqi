@@ -124,9 +124,10 @@ function Pricing() {
 
           {/* Growth */}
           <motion.div
-            className="rounded-2xl border border-black/[0.12] bg-white p-8 flex flex-col ring-1 ring-black/[0.04]"
+            className="rounded-2xl border-2 border-black/20 bg-white p-8 flex flex-col relative"
             {...fade(0.3)}
           >
+            <span className="absolute -top-3 left-6 bg-black text-white text-[11px] font-medium tracking-wide uppercase px-3 py-0.5 rounded-full">Most popular</span>
             <p className="text-[11px] uppercase tracking-[0.2em] text-black/30 mb-6">Growth</p>
             <div className="mb-1">
               <span className="text-[36px] font-semibold tracking-tight text-black/80">$100</span>
