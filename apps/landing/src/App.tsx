@@ -31,13 +31,10 @@ function Nav() {
           aeqi
         </a>
         <div className="flex items-center gap-1">
-          <a href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md" className="text-[13px] text-black/40 hover:text-black/70 hover:bg-black/[0.04] rounded-lg px-3 py-1.5 transition-all hidden md:block">
-            Docs
+          <a href="https://aeqi.ai/economy" className="text-[13px] text-black/40 hover:text-black/70 hover:bg-black/[0.04] rounded-lg px-3 py-1.5 transition-all">
+            Economy
           </a>
-          <a href="https://github.com/0xAEQI/aeqi" className="text-[13px] text-black/40 hover:text-black/70 hover:bg-black/[0.04] rounded-lg px-3 py-1.5 transition-all">
-            GitHub
-          </a>
-          <a href="https://aeqi.ai/enterprise" className="text-[13px] text-black/40 hover:text-black/70 hover:bg-black/[0.04] rounded-lg px-3 py-1.5 transition-all hidden md:block">
+          <a href="https://aeqi.ai/enterprise" className="text-[13px] text-black/40 hover:text-black/70 hover:bg-black/[0.04] rounded-lg px-3 py-1.5 transition-all">
             Enterprise
           </a>
           <div className="w-px h-5 bg-black/[0.08] mx-1.5" />
