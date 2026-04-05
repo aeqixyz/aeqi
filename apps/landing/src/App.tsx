@@ -70,13 +70,13 @@ function Hero() {
     <section className="flex-1 flex items-center justify-center px-6 min-h-[80vh]">
       <div className="max-w-2xl mx-auto text-center">
         {/* Logo */}
-        <motion.div {...fade(0.1)} className="flex justify-center" style={{ height: 280 }}>
+        <motion.div {...fade(0.1)} className="flex justify-center" style={{ height: 200 }}>
           <AnimatePresence mode="wait">
             {!showParticles ? (
               <motion.span
                 key="solid"
                 className="text-[110px] md:text-[140px] font-bold tracking-tighter leading-none text-black/50 select-none"
-                style={{ lineHeight: "280px" }}
+                style={{ lineHeight: "200px" }}
                 exit={{ opacity: 0, scale: 1.02 }}
                 transition={{ duration: 0.25 }}
               >
@@ -90,7 +90,7 @@ function Hero() {
                 transition={{ duration: 0.15 }}
               >
                 <Suspense fallback={null}>
-                  <ParticleLogo size={280} />
+                  <ParticleLogo width={500} height={200} />
                 </Suspense>
               </motion.div>
             )}

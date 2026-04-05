@@ -1,31 +1,42 @@
 import { useEffect, useRef, useCallback } from "react";
 import * as THREE from "three";
 
-const PARTICLE_COUNT = 2500;
 const RETURN_FORCE = 0.04;
 const DAMPING = 0.88;
 const MOUSE_RADIUS = 60;
 const MOUSE_FORCE = 8;
 
+function isMobile() {
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768;
+}
+
 export default function ParticleLogo({
-  size = 300,
+  width = 500,
+  height = 200,
+  size,
   onReady,
 }: {
+  width?: number;
+  height?: number;
   size?: number;
   onReady?: () => void;
 }) {
+  const w = size ?? width;
+  const h = size ?? height;
   const containerRef = useRef<HTMLDivElement>(null);
   const mouseRef = useRef({ x: 9999, y: 9999 });
 
-  const handleMouseMove = useCallback((e: MouseEvent) => {
+  const handlePointerMove = useCallback((e: MouseEvent | TouchEvent) => {
     const el = containerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    mouseRef.current.x = e.clientX - rect.left - rect.width / 2;
-    mouseRef.current.y = -(e.clientY - rect.top - rect.height / 2);
+    const clientX = "touches" in e ? e.touches[0]?.clientX ?? 9999 : e.clientX;
+    const clientY = "touches" in e ? e.touches[0]?.clientY ?? 9999 : e.clientY;
+    mouseRef.current.x = clientX - rect.left - rect.width / 2;
+    mouseRef.current.y = -(clientY - rect.top - rect.height / 2);
   }, []);
 
-  const handleMouseLeave = useCallback(() => {
+  const handlePointerLeave = useCallback(() => {
     mouseRef.current.x = 9999;
     mouseRef.current.y = 9999;
   }, []);
@@ -34,25 +45,32 @@ export default function ParticleLogo({
     const container = containerRef.current;
     if (!container) return;
 
+    const mobile = isMobile();
+    const PARTICLE_COUNT = mobile ? 1200 : 2500;
+    const dpr = Math.min(window.devicePixelRatio, mobile ? 2 : 2);
+
     const scene = new THREE.Scene();
     const camera = new THREE.OrthographicCamera(
-      -size / 2, size / 2, size / 2, -size / 2, 1, 1000
+      -w / 2, w / 2, h / 2, -h / 2, 1, 1000
     );
     camera.position.z = 100;
 
-    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-    renderer.setSize(size, size);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ alpha: true, antialias: !mobile });
+    } catch {
+      return;
+    }
+    renderer.setSize(w, h);
+    renderer.setPixelRatio(dpr);
     container.appendChild(renderer.domElement);
 
-    // State arrays
     const positions = new Float32Array(PARTICLE_COUNT * 3);
     const targets = new Float32Array(PARTICLE_COUNT * 3);
     const velocities = new Float32Array(PARTICLE_COUNT * 3);
     const sizes = new Float32Array(PARTICLE_COUNT);
     const opacities = new Float32Array(PARTICLE_COUNT);
 
-    // Init — will be placed on glyph after sampling
     for (let i = 0; i < PARTICLE_COUNT; i++) {
       positions[i * 3] = 0;
       positions[i * 3 + 1] = 0;
@@ -101,26 +119,32 @@ export default function ParticleLogo({
     const points = new THREE.Points(geometry, material);
     scene.add(points);
 
-    // Sample glyph
     function sampleGlyph(): Float32Array {
       const canvas = document.createElement("canvas");
-      const s = size;
-      canvas.width = s;
-      canvas.height = s;
+      canvas.width = w;
+      canvas.height = h;
       const ctx = canvas.getContext("2d")!;
       ctx.fillStyle = "#000";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.font = `bold ${s * 0.52}px Inter, system-ui, sans-serif`;
-      ctx.fillText("æqi", s / 2, s / 2 + s * 0.03);
+      ctx.font = `bold ${h * 0.7}px Inter, -apple-system, BlinkMacSystemFont, system-ui, sans-serif`;
+      ctx.fillText("æqi", w / 2, h / 2 + h * 0.03);
 
-      const imageData = ctx.getImageData(0, 0, s, s);
+      const imageData = ctx.getImageData(0, 0, w, h);
       const filled: [number, number][] = [];
-      for (let y = 0; y < s; y += 1) {
-        for (let x = 0; x < s; x += 1) {
-          if (imageData.data[(y * s + x) * 4 + 3] > 128) {
-            filled.push([x - s / 2, -(y - s / 2)]);
+      for (let y = 0; y < h; y += 1) {
+        for (let x = 0; x < w; x += 1) {
+          if (imageData.data[(y * w + x) * 4 + 3] > 128) {
+            filled.push([x - w / 2, -(y - h / 2)]);
           }
+        }
+      }
+
+      if (filled.length < 10) {
+        for (let i = 0; i < 500; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const r = Math.random() * h * 0.3;
+          filled.push([Math.cos(angle) * r, Math.sin(angle) * r]);
         }
       }
 
@@ -134,15 +158,22 @@ export default function ParticleLogo({
       return result;
     }
 
-    const glyphTargets = sampleGlyph();
-    // Start particles ON the glyph (solid æ)
-    for (let i = 0; i < PARTICLE_COUNT * 3; i++) {
-      targets[i] = glyphTargets[i];
-      positions[i] = glyphTargets[i];
+    // Wait for fonts then sample, with a timeout fallback
+    function initParticles(glyphTargets: Float32Array) {
+      for (let i = 0; i < PARTICLE_COUNT * 3; i++) {
+        targets[i] = glyphTargets[i];
+        positions[i] = glyphTargets[i];
+      }
+      (geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
     }
-    (geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
 
-    // Burst immediately — the solid text already held
+    if (document.fonts?.ready) {
+      document.fonts.ready.then(() => initParticles(sampleGlyph()));
+    } else {
+      // Fallback for browsers without font loading API
+      setTimeout(() => initParticles(sampleGlyph()), 100);
+    }
+
     let hasBurst = false;
     const BURST_FRAME = 3;
     const BURST_FORCE = 20;
@@ -150,17 +181,18 @@ export default function ParticleLogo({
     let frame = 0;
     let animId: number;
 
-    // Mouse events
-    container.addEventListener("mousemove", handleMouseMove);
-    container.addEventListener("mouseleave", handleMouseLeave);
-    window.addEventListener("mousemove", handleMouseMove);
+    // Pointer events — mouse + touch
+    container.addEventListener("mousemove", handlePointerMove);
+    container.addEventListener("mouseleave", handlePointerLeave);
+    container.addEventListener("touchmove", handlePointerMove, { passive: true });
+    container.addEventListener("touchend", handlePointerLeave);
+    window.addEventListener("mousemove", handlePointerMove);
 
     function animate() {
       animId = requestAnimationFrame(animate);
       frame++;
       const time = frame * 0.008;
 
-      // Before burst: render static, skip all physics
       if (!hasBurst) {
         if (frame === BURST_FRAME) {
           hasBurst = true;
@@ -183,19 +215,16 @@ export default function ParticleLogo({
       for (let i = 0; i < PARTICLE_COUNT; i++) {
         const i3 = i * 3;
 
-        // Breathing noise kicks in after reform
         const breathe = frame > BURST_FRAME + 60;
         const nx = breathe ? Math.sin(time * 0.6 + i * 0.07) * 0.15 : 0;
         const ny = breathe ? Math.cos(time * 0.5 + i * 0.09) * 0.15 : 0;
 
-        // Spring to target
         const dx = targets[i3] - positions[i3];
         const dy = targets[i3 + 1] - positions[i3 + 1];
 
         velocities[i3] += dx * RETURN_FORCE + nx;
         velocities[i3 + 1] += dy * RETURN_FORCE + ny;
 
-        // Mouse repulsion
         const mdx = positions[i3] - mx;
         const mdy = positions[i3 + 1] - my;
         const mDist = Math.sqrt(mdx * mdx + mdy * mdy);
@@ -212,7 +241,6 @@ export default function ParticleLogo({
         positions[i3 + 1] += velocities[i3 + 1];
       }
 
-
       pos.needsUpdate = true;
       renderer.render(scene, camera);
     }
@@ -221,9 +249,11 @@ export default function ParticleLogo({
 
     return () => {
       cancelAnimationFrame(animId);
-      container.removeEventListener("mousemove", handleMouseMove);
-      container.removeEventListener("mouseleave", handleMouseLeave);
-      window.removeEventListener("mousemove", handleMouseMove);
+      container.removeEventListener("mousemove", handlePointerMove);
+      container.removeEventListener("mouseleave", handlePointerLeave);
+      container.removeEventListener("touchmove", handlePointerMove);
+      container.removeEventListener("touchend", handlePointerLeave);
+      window.removeEventListener("mousemove", handlePointerMove);
       renderer.dispose();
       geometry.dispose();
       material.dispose();
@@ -231,7 +261,7 @@ export default function ParticleLogo({
         container.removeChild(renderer.domElement);
       }
     };
-  }, [size, onReady, handleMouseMove, handleMouseLeave]);
+  }, [w, h, onReady, handlePointerMove, handlePointerLeave]);
 
   return <div ref={containerRef} className="inline-block cursor-none" />;
 }
