@@ -9,6 +9,7 @@ interface UIState {
   splitRatio: number;
   drawerOpen: boolean;
   drawerMode: "context" | "activity";
+  activeWorkspace: string;
   toggleSidebar: () => void;
   setLayout: (mode: LayoutMode) => void;
   setSplitRatio: (ratio: number) => void;
@@ -16,6 +17,7 @@ interface UIState {
   closeLayoutPicker: () => void;
   toggleDrawer: () => void;
   setDrawerMode: (mode: "context" | "activity") => void;
+  setActiveWorkspace: (name: string) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -42,6 +44,11 @@ export const useUIStore = create<UIState>((set) => ({
   closeLayoutPicker: () => set({ layoutPickerOpen: false }),
   drawerOpen: localStorage.getItem("aeqi_drawer_open") !== "false",
   drawerMode: "context",
+  activeWorkspace: localStorage.getItem("aeqi_workspace") || "",
+  setActiveWorkspace: (name) => {
+    localStorage.setItem("aeqi_workspace", name);
+    set({ activeWorkspace: name });
+  },
   toggleDrawer: () =>
     set((s) => {
       const next = !s.drawerOpen;

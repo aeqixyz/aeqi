@@ -5,6 +5,7 @@ import ContextDrawer from "./ContextDrawer";
 import BlockAvatar from "./BlockAvatar";
 import CommandPalette from "./CommandPalette";
 import AgentSessionView from "./AgentSessionView";
+import WorkspaceSwitcher from "./WorkspaceSwitcher";
 import { useDaemonStore } from "@/store/daemon";
 import { useDaemonSocket } from "@/hooks/useDaemonSocket";
 
@@ -56,34 +57,7 @@ export default function AppLayout() {
       <div className="shell">
         {/* Left sidebar */}
         <div className="left-sidebar">
-          <div className="sidebar-profile sidebar-profile-top">
-            <a href="/" className="sidebar-brand-mark">
-              æ
-            </a>
-            <div className="sidebar-profile-info">
-              <span className="sidebar-profile-name">aeqi.ai</span>
-              <span className="sidebar-profile-plan">hosted</span>
-            </div>
-            <span
-              className="sidebar-profile-settings"
-              onClick={openSearch}
-              title="Search (Cmd+K)"
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="7" cy="7" r="4.5" />
-                <path d="M10.5 10.5L14 14" />
-              </svg>
-            </span>
-          </div>
+          <WorkspaceSwitcher />
           <nav className="sidebar-nav">
             <a
               className={`sidebar-nav-item ${isActive("/agents") ? "active" : ""}`}
