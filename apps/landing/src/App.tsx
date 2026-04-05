@@ -33,6 +33,12 @@ function Nav() {
             github
           </a>
           <a
+            href="https://x.com/0xAEQI"
+            className="text-[14px] text-black/40 hover:text-black/70 transition-colors"
+          >
+            x
+          </a>
+          <a
             href="https://aeqi.ai/enterprise"
             className="text-[14px] text-black/40 hover:text-black/70 transition-colors"
           >
@@ -123,6 +129,12 @@ function Footer() {
             github
           </a>
           <a
+            href="https://x.com/0xAEQI"
+            className="hover:text-black/50 transition-colors"
+          >
+            x
+          </a>
+          <a
             href="https://aeqi.ai/enterprise"
             className="hover:text-black/50 transition-colors"
           >
@@ -138,12 +150,6 @@ function Footer() {
         <span className="text-[13px] font-bold tracking-tight text-black">
           aeqi.ai&ensp;/&ensp;æ
         </span>
-        <a
-          href="https://x.com/0xAEQI"
-          className="hover:text-black/50 transition-colors"
-        >
-          x
-        </a>
       </div>
     </footer>
   );
