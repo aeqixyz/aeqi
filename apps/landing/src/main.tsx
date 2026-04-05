@@ -6,6 +6,7 @@ import App from "./App";
 import Enterprise from "./Enterprise";
 import Terms from "./Terms";
 import Privacy from "./Privacy";
+import Brand from "./Brand";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -15,6 +16,7 @@ createRoot(document.getElementById("root")!).render(
         <Route path="/pricing" element={<Enterprise />} />
         <Route path="/terms" element={<Terms />} />
         <Route path="/privacy" element={<Privacy />} />
+        <Route path="/brand" element={<Brand />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>
