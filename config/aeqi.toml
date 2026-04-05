@@ -33,6 +33,12 @@ ui_dist_dir = "/home/claudedev/aeqi/apps/ui/dist"
 cors_origins = ["https://aeqi.ai", "https://app.aeqi.ai", "http://localhost:5173"]
 auth_secret = "${AEQI_WEB_SECRET}"
 
+[web.auth]
+mode = "accounts"
+base_url = "https://app.aeqi.ai"
+# google_client_id = ""
+# google_client_secret = ""
+
 [providers.openrouter]
 api_key = "${OPENROUTER_API_KEY}"
 default_model = "xiaomi/mimo-v2-pro"
