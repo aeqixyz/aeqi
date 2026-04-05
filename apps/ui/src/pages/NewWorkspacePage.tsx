@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useUIStore } from "@/store/ui";
+import BlockAvatar from "@/components/BlockAvatar";
 import "@/styles/welcome.css";
 
 export default function NewWorkspacePage() {
@@ -10,8 +11,10 @@ export default function NewWorkspacePage() {
 
   const [name, setName] = useState("");
   const [tagline, setTagline] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const handleCreate = async () => {
     if (!name.trim() || creating) return;
@@ -42,6 +45,33 @@ export default function NewWorkspacePage() {
           A workspace is your company, project, or team — a self-contained
           environment with its own agents, quests, and knowledge.
         </p>
+
+        <div className="new-ws-avatar-field">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = () => setImageUrl(reader.result as string);
+              reader.readAsDataURL(file);
+              e.target.value = "";
+            }}
+          />
+          <div className="new-ws-avatar" onClick={() => fileRef.current?.click()} title="Upload image">
+            {imageUrl ? (
+              <img src={imageUrl} alt="" className="new-ws-avatar-img" />
+            ) : (
+              <BlockAvatar name={name || "W"} size={64} />
+            )}
+            <span className="new-ws-avatar-overlay">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2 11l3.5-3.5L8 10l3-4 3 3M2 14h12M13 2l1 1" /></svg>
+            </span>
+          </div>
+        </div>
 
         <div className="new-ws-field">
           <label className="new-ws-label">Name</label>
