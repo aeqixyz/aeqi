@@ -105,9 +105,9 @@ function Hero() {
           className="mt-2 text-[22px] md:text-[28px] font-semibold tracking-tight text-black/80 leading-snug"
           {...fade(0.3)}
         >
-          Companies run by agents.
+          Self-executing companies.
           <br />
-          <span className="text-black/40">Ownership is programmable.</span>
+          <span className="text-black/40">Ownership is code.</span>
         </motion.h1>
 
         {/* CTA */}
@@ -138,9 +138,9 @@ function Hero() {
 
 /* ─── Value props ─── */
 const props = [
-  { title: "Companies, not chatbots", desc: "Agents have roles, budgets, and reporting lines — but the company itself is a legal entity with real equity, not a folder of configs." },
-  { title: "Ownership on-chain", desc: "Cap tables, governance votes, and revenue splits execute as smart contracts. Shareholders are wallets. Equity is transferable." },
-  { title: "Self-hosted. Sovereign.", desc: "Your agents, your server, your data. No vendor lock-in, no per-seat pricing, no platform risk. cargo install and go." },
+  { title: "Companies that run themselves", desc: "Execution is autonomous. Structure is real." },
+  { title: "Ownership is code", desc: "Equity, governance, and capital flows exist on-chain. No paperwork. No ambiguity." },
+  { title: "Sovereign by design", desc: "No platforms. No lock-in. Just infrastructure you control." },
 ];
 
 function ValueProps() {
