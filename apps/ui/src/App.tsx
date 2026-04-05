@@ -18,8 +18,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const fetchAuthMode = useAuthStore((s) => s.fetchAuthMode);
 
   useEffect(() => {
-    if (!authMode) fetchAuthMode();
-  }, [authMode, fetchAuthMode]);
+    fetchAuthMode();
+  }, [fetchAuthMode]);
 
   // Still loading mode — show nothing briefly.
   if (!authMode) return null;

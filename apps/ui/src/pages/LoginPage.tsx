@@ -20,8 +20,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
 
   useEffect(() => {
-    if (!authMode) fetchAuthMode();
-  }, [authMode, fetchAuthMode]);
+    fetchAuthMode();
+  }, [fetchAuthMode]);
 
   useEffect(() => {
     if (isAuthenticated()) navigate("/", { replace: true });
