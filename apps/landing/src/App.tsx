@@ -4,12 +4,6 @@ import { motion, AnimatePresence } from "framer-motion";
 const ParticleLogo = lazy(() => import("./ParticleLogo"));
 
 /* ─── Fade-in helper ─── */
-const fade = (delay = 0) => ({
-  initial: { opacity: 0, y: 8 } as const,
-  animate: { opacity: 1, y: 0 } as const,
-  transition: { duration: 0.6, ease: "easeOut" as const, delay },
-});
-
 const fadeView = (delay = 0) => ({
   initial: { opacity: 0, y: 12 } as const,
   whileInView: { opacity: 1, y: 0 } as const,
