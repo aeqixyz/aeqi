@@ -373,6 +373,42 @@
   transition: background 0.1s;
 }
 .pm-item:hover { background: var(--bg-elevated); color: var(--text-primary); }
+.pm-header {
+  padding: 8px 12px;
+}
+.pm-header-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.pm-header-email {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+.pm-credits {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+}
+.pm-credits-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.pm-credits-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.pm-item-accent {
+  color: var(--accent);
+  font-weight: 500;
+}
+.pm-item-accent:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); }
 .pm-item-danger { color: var(--error); }
 .pm-item-danger:hover { background: color-mix(in srgb, var(--error) 8%, transparent); color: var(--error); }
 
