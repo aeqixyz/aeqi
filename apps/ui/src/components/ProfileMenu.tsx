@@ -65,7 +65,7 @@ export default function ProfileMenu() {
       )}
 
       <div className="pm-trigger">
-        <div className="pm-trigger-profile" onClick={() => navigate("/settings")}>
+        <div className="pm-trigger-profile" onClick={() => { setOpen(false); navigate("/settings"); }}>
           <BlockAvatar name={userName} size={22} />
           <div className="pm-trigger-text">
             <span className="pm-trigger-name">{userName}</span>

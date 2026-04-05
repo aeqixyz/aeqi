@@ -299,10 +299,8 @@
   width: 100%;
   padding: 6px 8px;
   border-radius: var(--radius-md);
-  cursor: pointer;
   transition: background 0.1s;
 }
-.pm-trigger:hover { background: var(--bg-elevated); }
 .pm-trigger-profile {
   display: flex;
   align-items: center;
