@@ -57,12 +57,12 @@
   gap: 8px;
   padding: 6px 8px;
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   text-decoration: none;
   border-radius: var(--radius-md);
   transition: all 0.1s;
 }
-.sidebar-nav-item:hover { color: var(--text-secondary); background: var(--bg-elevated); }
+.sidebar-nav-item:hover { color: var(--text-primary); background: var(--bg-elevated); }
 .sidebar-nav-item.active { color: var(--text-primary); background: var(--bg-elevated); font-weight: 500; }
 .sidebar-nav-item > svg {
   width: 22px;
