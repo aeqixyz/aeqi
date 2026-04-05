@@ -1,37 +1,71 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "@/styles/quests.css";
-import Header from "@/components/Header";
+
 import { useDaemonStore } from "@/store/daemon";
 import { useChatStore } from "@/store/chat";
 import { api } from "@/lib/api";
 import { timeAgo } from "@/lib/format";
-import type { QuestStatus, QuestPriority } from "@/lib/types";
+import type { Quest, QuestStatus, QuestPriority } from "@/lib/types";
+
+/* ── Icons ───────────────────────────────────────────── */
+
+function StatusDot({ status }: { status: QuestStatus }) {
+  return <span className={`q-status-dot q-status-${status}`} />;
+}
+
+function PriorityIcon({ priority }: { priority: QuestPriority }) {
+  if (priority === "critical")
+    return (
+      <svg className="q-priority-icon q-priority-critical" viewBox="0 0 16 16" fill="none">
+        <path d="M8 3v6M8 11.5v1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      </svg>
+    );
+  if (priority === "high")
+    return (
+      <svg className="q-priority-icon q-priority-high" viewBox="0 0 16 16" fill="none">
+        <path d="M4 10l4-4 4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  if (priority === "low")
+    return (
+      <svg className="q-priority-icon q-priority-low" viewBox="0 0 16 16" fill="none">
+        <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  // normal — horizontal bars
+  return (
+    <svg className="q-priority-icon q-priority-normal" viewBox="0 0 16 16" fill="none">
+      <path d="M4 6h8M4 10h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 /* ── Helpers ──────────────────────────────────────────── */
 
-const PRIORITY_BORDER: Record<string, string> = {
-  critical: "var(--error)",
-  high: "var(--warning, #f59e0b)",
-  normal: "var(--accent)",
-  low: "var(--text-muted)",
+const STATUS_ORDER: QuestStatus[] = ["in_progress", "pending", "blocked", "done", "cancelled"];
+
+const STATUS_LABELS: Record<QuestStatus, string> = {
+  in_progress: "In Progress",
+  pending: "Pending",
+  blocked: "Blocked",
+  done: "Done",
+  cancelled: "Cancelled",
 };
 
-const COLUMNS: { status: QuestStatus; label: string }[] = [
-  { status: "pending", label: "Pending" },
-  { status: "in_progress", label: "In Progress" },
-  { status: "blocked", label: "Blocked" },
-  { status: "done", label: "Done" },
-];
+interface QuestGroup {
+  status: QuestStatus;
+  label: string;
+  quests: Quest[];
+}
 
 /* ── Create Quest Modal ───────────────────────────────── */
 
 interface CreateModalProps {
   open: boolean;
-  defaultStatus?: QuestStatus;
   onClose: () => void;
 }
 
-function CreateQuestModal({ open, defaultStatus, onClose }: CreateModalProps) {
+function CreateQuestModal({ open, onClose }: CreateModalProps) {
   const agents = useDaemonStore((s) => s.agents);
   const fetchQuests = useDaemonStore((s) => s.fetchQuests);
   const selectedAgent = useChatStore((s) => s.selectedAgent);
@@ -44,7 +78,6 @@ function CreateQuestModal({ open, defaultStatus, onClose }: CreateModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const subjectRef = useRef<HTMLInputElement>(null);
 
-  // Reset form when opened
   useEffect(() => {
     if (open) {
       setSubject("");
@@ -72,7 +105,6 @@ function CreateQuestModal({ open, defaultStatus, onClose }: CreateModalProps) {
       await fetchQuests();
       onClose();
     } catch {
-      // allow retry
       setSubmitting(false);
     }
   };
@@ -92,95 +124,159 @@ function CreateQuestModal({ open, defaultStatus, onClose }: CreateModalProps) {
   const priorities: QuestPriority[] = ["critical", "high", "normal", "low"];
 
   return (
-    <div className="cq-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="cq-modal" onKeyDown={handleKeyDown}>
-        <div className="cq-title">
-          New Quest{defaultStatus && defaultStatus !== "pending" ? ` — ${defaultStatus.replace("_", " ")}` : ""}
-        </div>
+    <div className="q-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="q-modal" onKeyDown={handleKeyDown}>
+        <div className="q-modal-header">New Quest</div>
 
-        <div className="cq-field">
-          <label className="cq-label">Subject</label>
+        <div className="q-modal-body">
           <input
             ref={subjectRef}
-            className="cq-input"
-            placeholder="What needs to be done?"
+            className="q-modal-title-input"
+            placeholder="Quest title"
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
           />
-        </div>
 
-        <div className="cq-field">
-          <label className="cq-label">Description</label>
           <textarea
-            className="cq-textarea"
-            placeholder="Optional details..."
+            className="q-modal-desc-input"
+            placeholder="Add description..."
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            rows={2}
+            rows={3}
           />
-        </div>
 
-        <div className="cq-field">
-          <label className="cq-label">Priority</label>
-          <div className="cq-priority-group">
-            {priorities.map((p) => (
-              <button
-                key={p}
-                className={`cq-priority-btn${priority === p ? " selected" : ""}`}
-                style={priority === p ? { borderColor: PRIORITY_BORDER[p] } : undefined}
-                onClick={() => setPriority(p)}
-                type="button"
+          <div className="q-modal-fields">
+            <div className="q-modal-field">
+              <span className="q-modal-field-label">Priority</span>
+              <div className="q-modal-priority-group">
+                {priorities.map((p) => (
+                  <button
+                    key={p}
+                    className={`q-modal-priority-btn${priority === p ? " active" : ""}`}
+                    data-priority={p}
+                    onClick={() => setPriority(p)}
+                    type="button"
+                  >
+                    <PriorityIcon priority={p} />
+                    <span>{p}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="q-modal-field">
+              <span className="q-modal-field-label">Assignee</span>
+              <select
+                className="q-modal-select"
+                value={agentName}
+                onChange={(e) => setAgentName(e.target.value)}
               >
-                {p}
-              </button>
-            ))}
+                <option value="">Unassigned</option>
+                {agents.map((a) => (
+                  <option key={a.id} value={a.name}>
+                    {a.display_name || a.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="q-modal-field">
+              <span className="q-modal-field-label">Acceptance criteria</span>
+              <textarea
+                className="q-modal-desc-input"
+                placeholder="Define what done looks like..."
+                value={acceptance}
+                onChange={(e) => setAcceptance(e.target.value)}
+                rows={2}
+              />
+            </div>
           </div>
         </div>
 
-        <div className="cq-field">
-          <label className="cq-label">Assign to agent</label>
-          <select
-            className="cq-select"
-            value={agentName}
-            onChange={(e) => setAgentName(e.target.value)}
-          >
-            <option value="">Unassigned</option>
-            {agents.map((a) => (
-              <option key={a.id} value={a.name}>
-                {a.display_name || a.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="cq-field">
-          <label className="cq-label">Acceptance criteria</label>
-          <textarea
-            className="cq-textarea"
-            placeholder="Define what done looks like..."
-            value={acceptance}
-            onChange={(e) => setAcceptance(e.target.value)}
-            rows={2}
-          />
-        </div>
-
-        <div className="cq-actions">
-          <button className="cq-btn cq-btn-cancel" onClick={onClose} type="button">
+        <div className="q-modal-footer">
+          <button className="q-btn q-btn-ghost" onClick={onClose} type="button">
             Cancel
           </button>
           <button
-            className="cq-btn cq-btn-create"
+            className="q-btn q-btn-primary"
             onClick={handleCreate}
             disabled={!subject.trim() || submitting}
             type="button"
           >
-            {submitting ? "Creating..." : "Create"}
+            {submitting ? "Creating..." : "Create quest"}
           </button>
         </div>
       </div>
     </div>
   );
 }
+
+/* ── Quest Row ───────────────────────────────────────── */
+
+function QuestRow({ quest }: { quest: Quest }) {
+  const isClosed = quest.status === "done" || quest.status === "cancelled";
+
+  return (
+    <div className={`q-row${isClosed ? " q-row-closed" : ""}`}>
+      <div className="q-row-status">
+        <StatusDot status={quest.status} />
+      </div>
+      <div className="q-row-priority">
+        <PriorityIcon priority={quest.priority} />
+      </div>
+      <div className="q-row-id">{quest.id}</div>
+      <div className="q-row-subject">
+        <span className={`q-row-title${quest.status === "cancelled" ? " q-struck" : ""}`}>
+          {quest.subject}
+        </span>
+      </div>
+      {quest.labels && quest.labels.length > 0 && (
+        <div className="q-row-labels">
+          {quest.labels.map((l) => (
+            <span key={l} className="q-label">{l}</span>
+          ))}
+        </div>
+      )}
+      <div className="q-row-spacer" />
+      {quest.assignee && (
+        <div className="q-row-assignee">{quest.assignee}</div>
+      )}
+      <div className="q-row-time">{timeAgo(quest.updated_at || quest.created_at)}</div>
+    </div>
+  );
+}
+
+/* ── Collapsible Group ───────────────────────────────── */
+
+function QuestGroupSection({ group, defaultOpen }: { group: QuestGroup; defaultOpen: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  if (group.quests.length === 0) return null;
+
+  return (
+    <div className="q-group">
+      <button className="q-group-header" onClick={() => setOpen((v) => !v)} type="button">
+        <svg className={`q-group-chevron${open ? " open" : ""}`} viewBox="0 0 16 16" fill="none">
+          <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <StatusDot status={group.status} />
+        <span className="q-group-label">{group.label}</span>
+        <span className="q-group-count">{group.quests.length}</span>
+      </button>
+      {open && (
+        <div className="q-group-body">
+          {group.quests.map((q) => (
+            <QuestRow key={q.id} quest={q} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Filter Bar ──────────────────────────────────────── */
+
+type ViewFilter = "all" | "active" | "closed";
 
 /* ── Main Page ────────────────────────────────────────── */
 
@@ -191,26 +287,22 @@ export default function QuestsPage() {
 
   const [search, setSearch] = useState("");
   const [agentFilter, setAgentFilter] = useState("");
-  const [showDone, setShowDone] = useState(true);
+  const [viewFilter, setViewFilter] = useState<ViewFilter>("active");
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalDefaultStatus, setModalDefaultStatus] = useState<QuestStatus>("pending");
 
-  // Keyboard shortcut: c or Cmd+N to open modal
+  // Keyboard shortcut: c or Cmd+N
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Ignore if user is typing in an input/textarea
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
       if (e.key === "c" && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
-        setModalDefaultStatus("pending");
         setModalOpen(true);
         return;
       }
       if (e.key === "n" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        setModalDefaultStatus("pending");
         setModalOpen(true);
       }
     };
@@ -218,89 +310,162 @@ export default function QuestsPage() {
     return () => document.removeEventListener("keydown", handler);
   }, []);
 
-  // Filter quests
+  // Filter
   const filtered = useMemo(() => {
-    let result = quests;
+    let result = quests as Quest[];
 
-    // Agent filter (dropdown or sidebar selection)
     const effectiveAgent = agentFilter || (selectedAgent ? selectedAgent.name : "");
     if (effectiveAgent) {
       result = result.filter(
-        (q: any) =>
-          q.assignee === effectiveAgent ||
-          q.agent_id === effectiveAgent
+        (q) => q.assignee === effectiveAgent || q.agent_id === effectiveAgent,
       );
     }
 
-    // Search filter
     if (search.trim()) {
       const term = search.toLowerCase();
-      result = result.filter((q: any) =>
-        q.subject?.toLowerCase().includes(term)
+      result = result.filter((q) =>
+        q.subject?.toLowerCase().includes(term) ||
+        q.id?.toLowerCase().includes(term),
       );
+    }
+
+    if (viewFilter === "active") {
+      result = result.filter((q) => q.status !== "done" && q.status !== "cancelled");
+    } else if (viewFilter === "closed") {
+      result = result.filter((q) => q.status === "done" || q.status === "cancelled");
     }
 
     return result;
-  }, [quests, agentFilter, selectedAgent, search]);
+  }, [quests, agentFilter, selectedAgent, search, viewFilter]);
 
-  // Group into columns
-  const columns = useMemo(() => {
-    const groups: Record<string, any[]> = {
-      pending: [],
-      in_progress: [],
-      blocked: [],
-      done: [],
-    };
+  // Group by status
+  const groups: QuestGroup[] = useMemo(() => {
+    const map = new Map<QuestStatus, Quest[]>();
+    for (const s of STATUS_ORDER) map.set(s, []);
 
     for (const q of filtered) {
-      const status = q.status as string;
-      if (status === "cancelled" || status === "done") {
-        groups.done.push(q);
-      } else if (groups[status]) {
-        groups[status].push(q);
-      } else {
-        groups.pending.push(q);
-      }
+      const list = map.get(q.status);
+      if (list) list.push(q);
+      else map.get("pending")!.push(q);
     }
 
-    // Sort done by updated_at/created_at desc, limit to 10
-    groups.done.sort((a: any, b: any) => {
-      const ta = new Date(a.updated_at || a.created_at).getTime();
-      const tb = new Date(b.updated_at || b.created_at).getTime();
-      return tb - ta;
-    });
-    groups.done = groups.done.slice(0, 10);
+    // Sort within groups: priority desc, then created_at desc
+    const priorityWeight: Record<string, number> = { critical: 3, high: 2, normal: 1, low: 0 };
+    for (const [, list] of map) {
+      list.sort((a, b) => {
+        const pw = (priorityWeight[b.priority] ?? 1) - (priorityWeight[a.priority] ?? 1);
+        if (pw !== 0) return pw;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+    }
 
-    return groups;
+    // Limit done/cancelled
+    const done = map.get("done")!;
+    if (done.length > 20) map.set("done", done.slice(0, 20));
+    const cancelled = map.get("cancelled")!;
+    if (cancelled.length > 10) map.set("cancelled", cancelled.slice(0, 10));
+
+    return STATUS_ORDER.map((s) => ({
+      status: s,
+      label: STATUS_LABELS[s],
+      quests: map.get(s) || [],
+    })).filter((g) => g.quests.length > 0);
   }, [filtered]);
 
-  const openCreateForStatus = useCallback((status: QuestStatus) => {
-    setModalDefaultStatus(status);
-    setModalOpen(true);
-  }, []);
+  const totalActive = useMemo(
+    () => (quests as Quest[]).filter((q) => q.status !== "done" && q.status !== "cancelled").length,
+    [quests],
+  );
+
+  // Stats
+  const stats = useMemo(() => {
+    const all = quests as Quest[];
+    const inProgress = all.filter((q) => q.status === "in_progress").length;
+    const pending = all.filter((q) => q.status === "pending").length;
+    const blocked = all.filter((q) => q.status === "blocked").length;
+    const completed = all.filter((q) => q.status === "done").length;
+    return { total: all.length, inProgress, pending, blocked, completed };
+  }, [quests]);
+
+  const openModal = useCallback(() => setModalOpen(true), []);
+
+  const viewFilters: { key: ViewFilter; label: string }[] = [
+    { key: "active", label: "Active" },
+    { key: "all", label: "All" },
+    { key: "closed", label: "Closed" },
+  ];
 
   return (
-    <div className="page-content kb-page">
-      <Header
-        title="Quests"
-        actions={
-          <button className="kb-btn-new" onClick={() => openCreateForStatus("pending")}>
-            + New Quest<span className="kb-kbd">C</span>
-          </button>
-        }
-      />
+    <div className="page-content q-page">
+      {/* Hero */}
+      <div className="q-hero">
+        <div className="q-hero-left">
+          <h1 className="q-hero-title">Quests</h1>
+          <p className="q-hero-subtitle">Track and manage work across all agents</p>
+        </div>
+        <button className="q-btn q-btn-primary" onClick={openModal}>
+          New Quest
+          <kbd className="q-kbd">C</kbd>
+        </button>
+      </div>
 
-      {/* Filter bar */}
-      <div className="kb-toolbar">
-        <div className="kb-toolbar-left">
-          <input
-            className="kb-search"
-            placeholder="Search quests..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+      {/* Stats */}
+      <div className="q-stats">
+        <div className="q-stat">
+          <span className="q-stat-value">{stats.inProgress}</span>
+          <span className="q-stat-label">In Progress</span>
+        </div>
+        <div className="q-stat-divider" />
+        <div className="q-stat">
+          <span className="q-stat-value">{stats.pending}</span>
+          <span className="q-stat-label">Pending</span>
+        </div>
+        <div className="q-stat-divider" />
+        <div className="q-stat">
+          <span className="q-stat-value q-stat-warning">{stats.blocked}</span>
+          <span className="q-stat-label">Blocked</span>
+        </div>
+        <div className="q-stat-divider" />
+        <div className="q-stat">
+          <span className="q-stat-value q-stat-success">{stats.completed}</span>
+          <span className="q-stat-label">Completed</span>
+        </div>
+      </div>
+
+      {/* Toolbar */}
+      <div className="q-toolbar">
+        <div className="q-filter-tabs">
+          {viewFilters.map((f) => (
+            <button
+              key={f.key}
+              className={`q-filter-tab${viewFilter === f.key ? " active" : ""}`}
+              onClick={() => setViewFilter(f.key)}
+              type="button"
+            >
+              {f.label}
+              {f.key === "active" && totalActive > 0 && (
+                <span className="q-filter-tab-count">{totalActive}</span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        <div className="q-toolbar-right">
+          <div className="q-search-wrap">
+            <svg className="q-search-icon" viewBox="0 0 16 16" fill="none">
+              <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+            <input
+              className="q-search"
+              placeholder="Filter..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
           <select
-            className="kb-filter-select"
+            className="q-agent-filter"
             value={agentFilter}
             onChange={(e) => setAgentFilter(e.target.value)}
           >
@@ -311,78 +476,26 @@ export default function QuestsPage() {
               </option>
             ))}
           </select>
-          <button
-            className={`kb-toggle${showDone ? " active" : ""}`}
-            onClick={() => setShowDone((v) => !v)}
-            type="button"
-          >
-            {showDone ? "Hide" : "Show"} Done
-          </button>
         </div>
       </div>
 
-      {/* Kanban board */}
-      <div className="kb-board">
-        {COLUMNS.map((col) => {
-          if (col.status === "done" && !showDone) return null;
-          const cards = columns[col.status] || [];
-          return (
-            <div className="kb-column" key={col.status}>
-              <div className="kb-col-header">
-                <span className="kb-col-title">{col.label}</span>
-                <span className="kb-col-count">{cards.length}</span>
-                <button
-                  className="kb-col-add"
-                  title={`Create quest in ${col.label}`}
-                  onClick={() => openCreateForStatus(col.status)}
-                  type="button"
-                >
-                  +
-                </button>
-              </div>
-              <div className="kb-col-body">
-                {cards.length === 0 && (
-                  <div className="kb-col-empty">No quests</div>
-                )}
-                {cards.map((q: any) => (
-                  <div
-                    key={q.id}
-                    className={`kb-card${q.status === "cancelled" ? " cancelled" : ""}`}
-                    style={{ borderLeftColor: PRIORITY_BORDER[q.priority] || "var(--text-muted)" }}
-                  >
-                    <div className="kb-card-subject">{q.subject}</div>
-                    <div className="kb-card-meta">
-                      {q.assignee && (
-                        <span className="kb-card-assignee">{q.assignee}</span>
-                      )}
-                      {q.assignee && q.created_at && (
-                        <span className="kb-card-dot">&middot;</span>
-                      )}
-                      {q.created_at && (
-                        <span className="kb-card-time">{timeAgo(q.created_at)}</span>
-                      )}
-                    </div>
-                    {q.labels && q.labels.length > 0 && (
-                      <div className="kb-card-labels">
-                        {q.labels.map((l: string) => (
-                          <span key={l} className="kb-card-label">{l}</span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        })}
+      {/* List */}
+      <div className="q-list">
+        {groups.length === 0 && (
+          <div className="q-empty">
+            <span className="q-empty-text">No quests</span>
+          </div>
+        )}
+        {groups.map((g) => (
+          <QuestGroupSection
+            key={g.status}
+            group={g}
+            defaultOpen={g.status !== "done" && g.status !== "cancelled"}
+          />
+        ))}
       </div>
 
-      {/* Create modal */}
-      <CreateQuestModal
-        open={modalOpen}
-        defaultStatus={modalDefaultStatus}
-        onClose={() => setModalOpen(false)}
-      />
+      <CreateQuestModal open={modalOpen} onClose={() => setModalOpen(false)} />
     </div>
   );
 }
