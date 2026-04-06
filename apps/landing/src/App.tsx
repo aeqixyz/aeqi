@@ -75,7 +75,7 @@ function Hero() {
 
         {/* Headline */}
         <h1 className="text-[24px] md:text-[32px] font-semibold tracking-tight text-black/85 leading-snug">
-          Companies run by agents.
+          Unlock the agent economy.
           <br />
           <motion.span
             className="text-black/50"
@@ -83,7 +83,7 @@ function Hero() {
             animate={{ opacity: showParticles ? 1 : 0, y: showParticles ? 0 : 4 }}
             transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1] }}
           >
-            Engineering, growth, and operations — on autopilot.
+            AI agents that run your company, learn, grow, and fund themselves.
           </motion.span>
         </h1>
 
