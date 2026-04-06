@@ -284,96 +284,48 @@ function BuiltInTheOpen() {
 
   return (
     <section className="py-24 px-6">
-      <div className="max-w-3xl mx-auto">
-        <motion.div {...fadeView()} className="text-center mb-16">
+      <div className="max-w-xl mx-auto text-center">
+        <motion.div {...fadeView()}>
           <p className="text-[11px] font-medium tracking-[0.2em] uppercase text-black/20 mb-4">Source Available</p>
-          <h2 className="text-[24px] md:text-[30px] font-semibold tracking-tight text-black/85 leading-snug">
-            Built in the open.<br />
-            <span className="text-black/50">Run it yourself. Own your infrastructure.</span>
+          <h2 className="text-[24px] md:text-[30px] font-semibold tracking-tight text-black/85 leading-snug mb-4">
+            Built in the open.
           </h2>
+          <p className="text-[15px] text-black/40 mb-10">
+            Run it yourself. Own your infrastructure.
+          </p>
         </motion.div>
 
-        <motion.div {...fadeView(0.1)} className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-14">
-          {/* Architecture */}
-          <div className="bg-[#fafafa] rounded-2xl border border-black/[0.06] p-6">
-            <pre className="text-[12px] font-mono text-black/50 leading-relaxed whitespace-pre overflow-x-auto">
-{`aeqi (single binary, ~24MB)
-├── daemon     orchestration, workers, patrol
-├── web        REST API + WebSocket + dashboard
-├── mcp        IDE integration (Claude Code, VS Code)
-├── sqlite     agents, tasks, memory, sessions
-└── embedded   React dashboard (rust-embed)
-
-$ aeqi setup   # configure provider
-$ aeqi start   # everything on :8400`}
-            </pre>
-          </div>
-
-          {/* Stats + GitHub */}
-          <div className="flex flex-col gap-4">
-            <a
-              href="https://github.com/0xAEQI/aeqi"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-4 bg-[#fafafa] rounded-2xl border border-black/[0.06] p-5 hover:border-black/15 transition-all group"
-            >
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" className="text-black/70 flex-shrink-0">
-                <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
-              </svg>
-              <div className="flex-1">
-                <span className="text-[14px] font-medium text-black/80 group-hover:text-black transition-colors">0xAEQI/aeqi</span>
-                <p className="text-[12px] text-black/40 mt-0.5">10 Rust crates · 600+ tests · BSL 1.1</p>
-              </div>
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="text-black/20 group-hover:text-black/50 transition-colors">
-                <path d="M6 3l5 5-5 5" />
-              </svg>
-            </a>
-
-            <div className="grid grid-cols-3 gap-3">
-              <div className="bg-[#fafafa] rounded-xl border border-black/[0.06] p-4 text-center">
-                <div className="text-[20px] font-bold text-black/80 font-mono">10</div>
-                <div className="text-[11px] text-black/30 mt-1">crates</div>
-              </div>
-              <div className="bg-[#fafafa] rounded-xl border border-black/[0.06] p-4 text-center">
-                <div className="text-[20px] font-bold text-black/80 font-mono">1</div>
-                <div className="text-[11px] text-black/30 mt-1">binary</div>
-              </div>
-              <div className="bg-[#fafafa] rounded-xl border border-black/[0.06] p-4 text-center">
-                <div className="text-[20px] font-bold text-black/80 font-mono">0</div>
-                <div className="text-[11px] text-black/30 mt-1">dependencies*</div>
-              </div>
+        <motion.div {...fadeView(0.1)} className="flex flex-col items-center gap-4 mb-10">
+          <a
+            href="https://github.com/0xAEQI/aeqi"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-4 bg-[#fafafa] rounded-2xl border border-black/[0.06] px-6 py-4 hover:border-black/15 transition-all group w-full max-w-sm"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" className="text-black/70 flex-shrink-0">
+              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
+            </svg>
+            <div className="flex-1 text-left">
+              <span className="text-[14px] font-medium text-black/80 group-hover:text-black transition-colors">0xAEQI/aeqi</span>
+              <p className="text-[12px] text-black/35 mt-0.5">Star on GitHub</p>
             </div>
-            <p className="text-[11px] text-black/20 text-center">*No Docker, no Postgres, no Redis. Just the binary + an LLM key.</p>
-          </div>
-        </motion.div>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="text-black/20 group-hover:text-black/50 transition-colors">
+              <path d="M6 3l5 5-5 5" />
+            </svg>
+          </a>
 
-        {/* Install commands */}
-        <motion.div {...fadeView(0.2)} className="flex flex-col items-center gap-3">
           <button
             onClick={() => { navigator.clipboard.writeText("curl -fsSL https://raw.githubusercontent.com/0xAEQI/aeqi/main/scripts/install.sh | sh"); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
-            className="group inline-flex items-center gap-3 bg-[#fafafa] border border-black/[0.08] hover:border-black/15 rounded-xl px-5 py-3 text-[13px] text-black/60 hover:text-black/80 transition-all cursor-pointer"
-          >
-            <code className="font-mono font-medium">
-              <span className="select-none text-black/25">$ </span>
-              curl -fsSL https://aeqi.ai/install.sh | sh
-            </code>
-            <span className="text-[11px] text-black/30 group-hover:text-black/50 transition-colors">
-              {copied ? "✓ copied" : "copy"}
-            </span>
-          </button>
-          <button
-            onClick={() => { navigator.clipboard.writeText("cargo install aeqi"); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
-            className="group inline-flex items-center gap-3 bg-[#fafafa] border border-black/[0.08] hover:border-black/15 rounded-xl px-5 py-2.5 text-[13px] text-black/40 hover:text-black/60 transition-all cursor-pointer"
+            className="group inline-flex items-center gap-3 bg-[#fafafa] border border-black/[0.08] hover:border-black/15 rounded-xl px-5 py-3 text-[13px] text-black/50 hover:text-black/70 transition-all cursor-pointer"
           >
             <code className="font-mono font-medium">
               <span className="select-none text-black/20">$ </span>
-              cargo install aeqi
+              curl -fsSL https://aeqi.ai/install.sh | sh
             </code>
-            <span className="text-[11px] text-black/20 group-hover:text-black/40 transition-colors">
-              {copied ? "✓ copied" : "copy"}
+            <span className="text-[11px] text-black/25 group-hover:text-black/40 transition-colors">
+              {copied ? "✓" : "copy"}
             </span>
           </button>
-          <p className="text-[11px] text-black/20 mt-1">Linux, macOS, WSL · No Docker required</p>
         </motion.div>
       </div>
     </section>
