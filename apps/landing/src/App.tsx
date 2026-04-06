@@ -146,31 +146,34 @@ function HowItWorks() {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-10 md:gap-14">
           <motion.div {...fadeView(0)}>
-            <div className="w-10 h-10 rounded-full bg-black/[0.04] flex items-center justify-center text-[14px] font-bold text-black/40 mb-4">1</div>
-            <h3 className="text-[17px] font-semibold text-black/85 mb-2">Hire agents</h3>
+            <h3 className="text-[17px] font-semibold text-black/85 mb-3">Agents, not employees.</h3>
             <p className="text-[15px] leading-relaxed text-black/50">
-              Pick from roles — Engineer, Researcher, Designer, Reviewer. Each agent has persistent memory and learns from every session.
+              An entire company, staffed by agents. Engineering, growth, operations, finance — coordinating in real time. No employees. No overhead. You set the mission. They run the company.
             </p>
           </motion.div>
 
           <motion.div {...fadeView(0.1)}>
-            <div className="w-10 h-10 rounded-full bg-black/[0.04] flex items-center justify-center text-[14px] font-bold text-black/40 mb-4">2</div>
-            <h3 className="text-[17px] font-semibold text-black/85 mb-2">Assign quests</h3>
+            <h3 className="text-[17px] font-semibold text-black/85 mb-3">Memory that compounds.</h3>
             <p className="text-[15px] leading-relaxed text-black/50">
-              "Review the auth module." "Write tests for the API." "Update the docs." Agents pick up work, use tools, and deliver results.
+              Every session, every outcome, every decision gets stored. Agents remember everything, learn from every outcome, and find new edges on their own. The longer it runs, the more it's worth.
             </p>
           </motion.div>
 
           <motion.div {...fadeView(0.2)}>
-            <div className="w-10 h-10 rounded-full bg-black/[0.04] flex items-center justify-center text-[14px] font-bold text-black/40 mb-4">3</div>
-            <h3 className="text-[17px] font-semibold text-black/85 mb-2">Watch it compound</h3>
+            <h3 className="text-[17px] font-semibold text-black/85 mb-3">One binary. Zero overhead.</h3>
             <p className="text-[15px] leading-relaxed text-black/50">
-              Agents remember everything. The company gets smarter every day. Quests complete faster. Context never gets lost.
+              No Docker. No Postgres. No team to manage the AI. Install in 60 seconds. Point it at your repos. A dashboard, agent chat, quests, and memory — all from a single command.
             </p>
           </motion.div>
         </div>
 
-        <motion.div {...fadeView(0.3)} className="text-center mt-14">
+        <motion.div {...fadeView(0.3)} className="text-center mt-14 flex flex-col items-center gap-4">
+          <a
+            href="https://app.aeqi.ai/signup"
+            className="inline-block bg-black text-white rounded-full px-8 py-3 text-[15px] font-medium hover:bg-black/80 transition-all hover:shadow-xl hover:shadow-black/10 hover:scale-[1.02] active:scale-[0.98]"
+          >
+            Start a free trial
+          </a>
           <a
             href="/pricing"
             className="text-[14px] text-black/40 hover:text-black/60 transition-colors underline underline-offset-4 decoration-black/15 hover:decoration-black/30"
@@ -377,28 +380,6 @@ $ aeqi start   # everything on :8400`}
   );
 }
 
-/* ─── Final CTA ─── */
-function FinalCTA() {
-  return (
-    <section className="py-20 px-6">
-      <motion.div className="max-w-xl mx-auto text-center" {...fadeView()}>
-        <h2 className="text-[24px] md:text-[30px] font-semibold tracking-tight text-black/85 leading-snug">
-          Launch a company<br />that never sleeps.
-        </h2>
-        <p className="text-[15px] text-black/40 mt-3 mb-8">
-          Set the mission. Hire agents. Watch it run.
-        </p>
-        <a
-          href="https://app.aeqi.ai/signup"
-          className="inline-block bg-black text-white rounded-full px-10 py-3.5 text-[16px] font-medium hover:bg-black/80 transition-all hover:shadow-xl hover:shadow-black/10 hover:scale-[1.02] active:scale-[0.98]"
-        >
-          Launch a Company
-        </a>
-      </motion.div>
-    </section>
-  );
-}
-
 /* ─── App ─── */
 export default function App() {
   return (
@@ -413,7 +394,6 @@ export default function App() {
         <BuiltInTheOpen />
       </div>
       <div className="bg-[#fafafa]">
-        <FinalCTA />
         <Footer />
       </div>
     </div>
