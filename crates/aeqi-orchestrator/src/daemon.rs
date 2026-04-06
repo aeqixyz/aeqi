@@ -3003,9 +3003,75 @@ impl Daemon {
                                 })
                                 .unwrap_or_default();
 
-                            // Placeholder edges array — real edges need memory_edges table
-                            // which isn't in SQLite yet.
-                            let edges: Vec<serde_json::Value> = Vec::new();
+                            // Query real edges from memory_edges table.
+                            let node_ids: Vec<String> = nodes
+                                .iter()
+                                .filter_map(|n| {
+                                    n.get("id").and_then(|v| v.as_str()).map(String::from)
+                                })
+                                .collect();
+                            let edges: Vec<serde_json::Value> = if !node_ids.is_empty() {
+                                let id_set: std::collections::HashSet<&str> =
+                                    node_ids.iter().map(|s| s.as_str()).collect();
+                                let placeholders: String = node_ids
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, _)| format!("?{}", i + 1))
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                let sql = format!(
+                                    "SELECT source_id, target_id, relation, strength \
+                                     FROM memory_edges \
+                                     WHERE source_id IN ({placeholders}) OR target_id IN ({placeholders})"
+                                );
+                                conn.prepare(&sql)
+                                    .ok()
+                                    .map(|mut stmt| {
+                                        // Bind each ID twice (once per IN clause).
+                                        let params: Vec<&dyn rusqlite::types::ToSql> = node_ids
+                                            .iter()
+                                            .map(|id| id as &dyn rusqlite::types::ToSql)
+                                            .chain(
+                                                node_ids
+                                                    .iter()
+                                                    .map(|id| id as &dyn rusqlite::types::ToSql),
+                                            )
+                                            .collect();
+                                        stmt.query_map(params.as_slice(), |row| {
+                                            let source: String = row.get(0)?;
+                                            let target: String = row.get(1)?;
+                                            let relation: String = row.get(2)?;
+                                            let strength: f64 = row.get(3)?;
+                                            Ok(serde_json::json!({
+                                                "source": source,
+                                                "target": target,
+                                                "relation": relation,
+                                                "strength": strength,
+                                            }))
+                                        })
+                                        .ok()
+                                        .map(|iter| {
+                                            iter.filter_map(|r| r.ok())
+                                                // Only include edges where both endpoints are in our node set.
+                                                .filter(|e| {
+                                                    let s = e
+                                                        .get("source")
+                                                        .and_then(|v| v.as_str())
+                                                        .unwrap_or("");
+                                                    let t = e
+                                                        .get("target")
+                                                        .and_then(|v| v.as_str())
+                                                        .unwrap_or("");
+                                                    id_set.contains(s) && id_set.contains(t)
+                                                })
+                                                .collect()
+                                        })
+                                        .unwrap_or_default()
+                                    })
+                                    .unwrap_or_default()
+                            } else {
+                                Vec::new()
+                            };
 
                             serde_json::json!({
                                 "ok": true,

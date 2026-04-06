@@ -190,6 +190,22 @@ export const api = {
     return request<any>(`/memories${qs ? `?${qs}` : ""}`);
   },
 
+  // Memory graph & profile
+  getMemoryGraph: (params?: { company?: string; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.company) q.set("company", params.company);
+    if (params?.limit) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return request<any>(`/memory/graph${qs ? `?${qs}` : ""}`);
+  },
+
+  getMemoryProfile: (params?: { company?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.company) q.set("company", params.company);
+    const qs = q.toString();
+    return request<any>(`/memory/profile${qs ? `?${qs}` : ""}`);
+  },
+
   // Skills
   getSkills: () => request<any>("/skills"),
 

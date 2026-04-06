@@ -17,7 +17,7 @@ export default function Footer() {
             <div className="space-y-2.5 text-[14px]">
               <a href="https://app.aeqi.ai/signup" className="block text-black/60 hover:text-black/80 transition-colors">Launch a Company</a>
               <a href="/pricing" className="block text-black/60 hover:text-black/80 transition-colors">Pricing</a>
-              <a href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md" className="block text-black/60 hover:text-black/80 transition-colors">Docs</a>
+              <a href="/docs" className="block text-black/60 hover:text-black/80 transition-colors">Docs</a>
             </div>
           </motion.div>
 
