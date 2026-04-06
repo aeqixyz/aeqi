@@ -132,7 +132,7 @@ function OpenSource() {
   const [copied, setCopied] = useState(false);
 
   return (
-    <section className="py-24 px-6 border-t border-black/[0.06]">
+    <section className="py-24 px-6">
       <div className="max-w-3xl mx-auto">
         <motion.div {...fadeView()} className="text-center mb-16">
           <p className="text-[11px] font-medium tracking-[0.2em] uppercase text-black/20 mb-4">Open Source</p>
@@ -228,33 +228,25 @@ $ aeqi start   # everything on :8400`}
   );
 }
 
-/* ─── Closing CTA ─── */
-function ClosingCTA() {
+/* ─── Section heading (above value props) ─── */
+function SectionHeading() {
   return (
-    <section className="py-24 px-6 border-t border-black/[0.06]">
-      <motion.div className="max-w-xl mx-auto text-center" {...fadeView()}>
-        <h2 className="text-[26px] md:text-[32px] font-semibold tracking-tight text-black/85 leading-snug">
-          Launch a company<br />that never sleeps.
-        </h2>
-        <p className="text-[15px] text-black/40 mt-4 mb-8">
-          Set the mission. Hire agents. Watch it run.
-        </p>
-        <div className="flex flex-col items-center gap-4">
-          <a
-            href="https://app.aeqi.ai/signup"
-            className="inline-block bg-black text-white rounded-full px-10 py-4 text-[16px] font-medium hover:bg-black/80 transition-all hover:shadow-xl hover:shadow-black/10 hover:scale-[1.02] active:scale-[0.98]"
-          >
-            Get started free
-          </a>
-          <a
-            href="/pricing"
-            className="text-[14px] text-black/40 hover:text-black/60 transition-colors"
-          >
-            View pricing →
-          </a>
-        </div>
-      </motion.div>
-    </section>
+    <motion.div className="text-center pt-24 pb-8 px-6" {...fadeView()}>
+      <h2 className="text-[26px] md:text-[32px] font-semibold tracking-tight text-black/85 leading-snug">
+        Launch a company<br />that never sleeps.
+      </h2>
+      <p className="text-[15px] text-black/40 mt-4">
+        Set the mission. Hire agents. Watch it run.
+      </p>
+      <div className="mt-6">
+        <a
+          href="/pricing"
+          className="text-[14px] text-black/40 hover:text-black/60 transition-colors"
+        >
+          View pricing →
+        </a>
+      </div>
+    </motion.div>
   );
 }
 
@@ -265,9 +257,13 @@ export default function App() {
       <Nav />
       <Hero />
       <div className="bg-[#fafafa]">
+        <SectionHeading />
         <ValueProps />
+      </div>
+      <div className="bg-white">
         <OpenSource />
-        <ClosingCTA />
+      </div>
+      <div className="bg-[#fafafa]">
         <Footer />
       </div>
     </div>
