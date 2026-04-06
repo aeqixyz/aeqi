@@ -83,7 +83,7 @@ function Hero() {
             animate={{ opacity: showParticles ? 1 : 0, y: showParticles ? 0 : 4 }}
             transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1] }}
           >
-            AI agents that run your company, learn, grow, and fund themselves.
+            AI agents that run your company, grow, and fund themselves.
           </motion.span>
         </h1>
 
