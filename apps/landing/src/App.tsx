@@ -98,6 +98,24 @@ function Hero() {
             Launch a Company
           </a>
         </div>
+
+        {/* Scroll arrow */}
+        <motion.div
+          className="mt-16"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 2, duration: 0.8 }}
+        >
+          <motion.svg
+            width="20" height="20" viewBox="0 0 20 20" fill="none"
+            stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"
+            className="text-black/15 mx-auto"
+            animate={{ y: [0, 6, 0] }}
+            transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+          >
+            <path d="M4 7l6 6 6-6" />
+          </motion.svg>
+        </motion.div>
       </div>
     </section>
   );
