@@ -22,7 +22,7 @@ export default function BrandMark({
         fontSize: size,
         fontWeight: 700,
         letterSpacing: "-0.08em",
-        color: color || "inherit",
+        color: color || "rgba(0, 0, 0, 0.85)",
         lineHeight: 1,
       }}
     >

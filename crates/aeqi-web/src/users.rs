@@ -135,7 +135,7 @@ impl UserStore {
 
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
-        let trial_ends = (chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339();
+        let trial_ends = (chrono::Utc::now() + chrono::Duration::days(7)).to_rfc3339();
 
         let db = self.db.lock().unwrap();
         db.execute(
@@ -259,7 +259,7 @@ impl UserStore {
 
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
-        let trial_ends = (chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339();
+        let trial_ends = (chrono::Utc::now() + chrono::Duration::days(7)).to_rfc3339();
         let avatar_opt = if avatar.is_empty() {
             None
         } else {
@@ -374,7 +374,7 @@ impl UserStore {
 
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
-        let trial_ends = (chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339();
+        let trial_ends = (chrono::Utc::now() + chrono::Duration::days(7)).to_rfc3339();
 
         let db = self.db.lock().unwrap();
         db.execute(

@@ -105,10 +105,6 @@ export default function AppLayout() {
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"><rect x="2" y="2" width="4" height="4" rx="0.5" /><rect x="8" y="2" width="4" height="4" rx="0.5" /><rect x="2" y="8" width="4" height="4" rx="0.5" /><rect x="8" y="8" width="4" height="4" rx="0.5" /></svg>
               <span className="sidebar-nav-label">Apps</span>
             </a>
-            <a className={`sidebar-nav-item ${isActive("/billing") ? "active" : ""}`} href="/billing" onClick={(e) => { e.preventDefault(); navigate("/billing"); }}>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"><rect x="2" y="3.5" width="10" height="7" rx="1" /><path d="M2 6h10" /></svg>
-              <span className="sidebar-nav-label">Billing</span>
-            </a>
           </nav>
           <ProfileMenu />
         </div>

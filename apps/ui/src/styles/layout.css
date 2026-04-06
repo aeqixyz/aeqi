@@ -336,8 +336,17 @@
   text-overflow: ellipsis;
 }
 .pm-trigger-plan {
-  font-size: 10px;
-  color: var(--text-muted);
+  display: inline-flex;
+  align-self: flex-start;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  background: rgba(0, 0, 0, 0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-top: 2px;
 }
 .pm-trigger-icon {
   color: var(--text-muted);
@@ -360,8 +369,8 @@
 }
 .pm-header {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 2px;
   padding: 10px 12px;
 }
 .pm-header-text {

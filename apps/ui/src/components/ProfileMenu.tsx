@@ -109,7 +109,6 @@ export default function ProfileMenu() {
           )}
           <div className="pm-trigger-text">
             <span className="pm-trigger-name">{userName}</span>
-            {userEmail && <span className="pm-trigger-email">{userEmail}</span>}
             <span className="pm-trigger-plan">
               {authMode === "none"
                 ? "local"

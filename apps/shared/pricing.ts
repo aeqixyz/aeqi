@@ -1,10 +1,10 @@
 /** Central pricing config. Imported by both landing page and dashboard app. */
 
 export const TRIAL = {
-  days: 3,
+  days: 7,
   companies: 1,
   agents: 3,
-  tokens: "3M",
+  tokens: "5M",
 };
 
 export const PLANS = [
@@ -13,20 +13,20 @@ export const PLANS = [
     name: "Starter",
     price: 29,
     popular: false,
-    tagline: "Ship your first autonomous company.",
+    tagline: "Launch your first autonomous company.",
     desc: "For individuals getting started with autonomous agents.",
     features: [
-      "2 companies",
-      "30 agents",
-      "50M LLM tokens / month",
+      "3 companies",
+      "10 agents",
+      "25M LLM tokens / month",
       "On-chain cap table",
       "Economy listing",
       "Bring your own LLM key",
     ],
     short: [
-      "2 companies",
-      "30 agents",
-      "50M tokens / month",
+      "3 companies",
+      "10 agents",
+      "25M tokens / month",
       "Email support",
     ],
   },
@@ -39,16 +39,16 @@ export const PLANS = [
     desc: "For teams running multiple companies with higher volume.",
     features: [
       "Everything in Starter",
-      "10 companies",
-      "150 agents",
-      "500M LLM tokens / month",
+      "15 companies",
+      "50 agents",
+      "150M LLM tokens / month",
       "Priority support",
       "Custom agent templates",
     ],
     short: [
-      "10 companies",
-      "150 agents",
-      "500M tokens / month",
+      "15 companies",
+      "50 agents",
+      "150M tokens / month",
       "Priority support",
       "Custom agent templates",
     ],

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/store/auth";
+import BrandMark from "./BrandMark";
 
 export default function TrialBanner() {
   const navigate = useNavigate();
@@ -17,7 +18,7 @@ export default function TrialBanner() {
     <div className={`trial-banner${expired ? " expired" : ""}`}>
       <span className="trial-banner-text">
         {expired
-          ? "Your trial has expired. Upgrade to continue using æqi."
+          ? <>Your trial has expired. Upgrade to continue using <BrandMark size={13} />.</>
           : `${days} day${days !== 1 ? "s" : ""} left on your free trial`}
       </span>
       <div className="trial-banner-actions">
