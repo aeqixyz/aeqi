@@ -75,7 +75,7 @@ function Hero() {
 
         {/* Headline */}
         <h1 className="text-[24px] md:text-[32px] font-semibold tracking-tight text-black/85 leading-snug">
-          AI agents that run your company.
+          Companies run by agents.
           <br />
           <motion.span
             className="text-black/50"
@@ -83,7 +83,7 @@ function Hero() {
             animate={{ opacity: showParticles ? 1 : 0, y: showParticles ? 0 : 4 }}
             transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1] }}
           >
-            Engineering. Growth. Operations. On autopilot.
+            Engineering, growth, and operations — on autopilot.
           </motion.span>
         </h1>
 
@@ -93,7 +93,7 @@ function Hero() {
             href="https://app.aeqi.ai/signup"
             className="inline-block bg-black text-white rounded-full px-8 py-3 text-[15px] font-medium hover:bg-black/80 transition-all hover:shadow-xl hover:shadow-black/10 hover:scale-[1.02] active:scale-[0.98]"
           >
-            Start free trial
+            Launch a Company
           </a>
           <a
             href="https://github.com/0xAEQI/aeqi"
