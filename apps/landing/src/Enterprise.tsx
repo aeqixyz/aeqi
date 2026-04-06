@@ -150,12 +150,23 @@ function Pricing() {
           </motion.div>
         </div>
 
-        {/* Token note */}
-        <motion.div className="mt-16 max-w-2xl mx-auto text-center" {...fadeView(0.1)}>
-          <h3 className="text-[16px] font-semibold tracking-tight text-black/75 mb-3">Need more tokens?</h3>
-          <p className="text-[14px] leading-[1.7] text-black/55">
-            Buy additional tokens from us at bulk-sourced provider rates, or bring your own OpenRouter or Xiaomi API key.
-          </p>
+        {/* Token options */}
+        <motion.div className="mt-20 pt-16 border-t border-black/[0.06]" {...fadeView(0.1)}>
+          <p className="text-[11px] font-medium uppercase tracking-[0.15em] text-black/30 text-center mb-8">Tokens</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
+            <div className="rounded-2xl border border-black/[0.06] bg-white p-6">
+              <p className="text-[15px] font-semibold text-black/75 mb-2">Buy from us</p>
+              <p className="text-[13px] text-black/45 leading-relaxed">
+                Additional tokens at bulk-sourced provider rates. No markup. Billed monthly with your plan.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-black/[0.06] bg-white p-6">
+              <p className="text-[15px] font-semibold text-black/75 mb-2">Bring your own key</p>
+              <p className="text-[13px] text-black/45 leading-relaxed">
+                Connect your OpenRouter, Anthropic, or Ollama API key. Use your own models. Pay your provider directly.
+              </p>
+            </div>
+          </div>
         </motion.div>
       </div>
     </section>
