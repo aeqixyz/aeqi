@@ -6,12 +6,6 @@ import Footer from "./Footer";
 const ParticleLogo = lazy(() => import("./ParticleLogo"));
 
 /* ─── Animation helpers ─── */
-const fade = (delay = 0) => ({
-  initial: { opacity: 0, y: 8 } as const,
-  animate: { opacity: 1, y: 0 } as const,
-  transition: { duration: 0.7, ease: [0.25, 0.1, 0.25, 1] as const, delay },
-});
-
 const fadeView = (delay = 0) => ({
   initial: { opacity: 0, y: 16 } as const,
   whileInView: { opacity: 1, y: 0 } as const,
@@ -25,8 +19,8 @@ function Hero() {
   const [showParticles, setShowParticles] = useState(false);
 
   useEffect(() => {
-    // "i" drops at 0.5s, lands at ~1.2s. Burst 300ms after landing.
-    const timer = setTimeout(() => setShowParticles(true), 1500);
+    // "i" drops at 0.1s, lands at ~0.5s. Burst right after.
+    const timer = setTimeout(() => setShowParticles(true), 700);
     return () => clearTimeout(timer);
   }, []);
 
@@ -47,28 +41,28 @@ function Hero() {
                 key="solid"
                 className="flex items-center justify-center select-none"
                 style={{ height: 200 }}
-                exit={{ opacity: 0, scale: 1.05 }}
-                transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] }}
+                exit={{ opacity: 0, scale: 1.08 }}
+                transition={{ duration: 0.2 }}
               >
-                {/* "æq" fades in */}
+                {/* "æq" appears instantly */}
                 <motion.span
                   className="text-[110px] md:text-[140px] font-bold tracking-[-0.08em] leading-none text-black/50"
                   style={{ lineHeight: "200px" }}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  transition={{ duration: 0.5, delay: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
+                  transition={{ duration: 0.25 }}
                 >
                   æq
                 </motion.span>
-                {/* "i" drops from top of viewport */}
+                {/* "i" drops fast from top */}
                 <motion.span
                   className="text-[110px] md:text-[140px] font-bold tracking-[-0.08em] leading-none text-black/50 inline-block"
                   style={{ lineHeight: "200px", translateY: "0.04em" }}
-                  initial={{ y: "-100vh", opacity: 0 }}
+                  initial={{ y: "-50vh", opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   transition={{
-                    y: { duration: 0.7, delay: 0.5, ease: [0.22, 1, 0.36, 1] },
-                    opacity: { duration: 0.3, delay: 0.5 },
+                    y: { duration: 0.4, delay: 0.1, ease: [0.22, 1, 0.36, 1] },
+                    opacity: { duration: 0.15, delay: 0.1 },
                   }}
                 >
                   i
@@ -89,18 +83,22 @@ function Hero() {
           </AnimatePresence>
         </div>
 
-        {/* Headline — appears after particle burst */}
-        <motion.h1
-          className="mt-2 text-[26px] md:text-[34px] font-semibold tracking-tight text-black/85 leading-snug"
-          {...fade(1.7)}
-        >
+        {/* Headline — always visible, subtitle fades in with burst */}
+        <h1 className="mt-2 text-[26px] md:text-[34px] font-semibold tracking-tight text-black/85 leading-snug">
           Unlock the agent economy.
           <br />
-          <span className="text-black/60">Companies that run, learn, and fund themselves.</span>
-        </motion.h1>
+          <motion.span
+            className="text-black/60"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.5, delay: 0.7 }}
+          >
+            Companies that run, learn, and fund themselves.
+          </motion.span>
+        </h1>
 
-        {/* CTA */}
-        <motion.div className="mt-10 flex flex-col items-center gap-6" {...fade(2.0)}>
+        {/* CTA — always visible */}
+        <div className="mt-10 flex flex-col items-center gap-6">
           <a
             href="https://app.aeqi.ai/signup"
             className="inline-block bg-black text-white rounded-full px-8 py-3.5 text-[15px] font-medium hover:bg-black/80 transition-all hover:shadow-xl hover:shadow-black/10 hover:scale-[1.02] active:scale-[0.98]"
@@ -119,7 +117,7 @@ function Hero() {
               {copied ? "✓" : "copy"}
             </span>
           </button>
-        </motion.div>
+        </div>
       </div>
     </section>
   );
