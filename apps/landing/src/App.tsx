@@ -131,12 +131,6 @@ function ValueProps() {
 function OpenSource() {
   const [copied, setCopied] = useState(false);
 
-  const copy = () => {
-    navigator.clipboard.writeText("curl -fsSL https://raw.githubusercontent.com/0xAEQI/aeqi/main/scripts/install.sh | sh");
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
   return (
     <section className="py-24 px-6 border-t border-black/[0.06]">
       <div className="max-w-3xl mx-auto">
@@ -201,10 +195,10 @@ $ aeqi start   # everything on :8400`}
           </div>
         </motion.div>
 
-        {/* Install command */}
+        {/* Install commands */}
         <motion.div {...fadeView(0.2)} className="flex flex-col items-center gap-3">
           <button
-            onClick={copy}
+            onClick={() => { navigator.clipboard.writeText("curl -fsSL https://raw.githubusercontent.com/0xAEQI/aeqi/main/scripts/install.sh | sh"); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
             className="group inline-flex items-center gap-3 bg-white border border-black/[0.08] hover:border-black/15 rounded-xl px-5 py-3 text-[13px] text-black/60 hover:text-black/80 transition-all cursor-pointer"
           >
             <code className="font-mono font-medium">
@@ -215,9 +209,19 @@ $ aeqi start   # everything on :8400`}
               {copied ? "✓ copied" : "copy"}
             </span>
           </button>
-          <p className="text-[12px] text-black/30">
-            or <code className="font-mono text-black/40">cargo install aeqi</code> · works on Linux, macOS, WSL
-          </p>
+          <button
+            onClick={() => { navigator.clipboard.writeText("cargo install aeqi"); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+            className="group inline-flex items-center gap-3 bg-white border border-black/[0.08] hover:border-black/15 rounded-xl px-5 py-2.5 text-[13px] text-black/40 hover:text-black/60 transition-all cursor-pointer"
+          >
+            <code className="font-mono font-medium">
+              <span className="select-none text-black/20">$ </span>
+              cargo install aeqi
+            </code>
+            <span className="text-[11px] text-black/20 group-hover:text-black/40 transition-colors">
+              {copied ? "✓ copied" : "copy"}
+            </span>
+          </button>
+          <p className="text-[11px] text-black/20 mt-1">Linux, macOS, WSL · No Docker required</p>
         </motion.div>
       </div>
     </section>
@@ -227,15 +231,24 @@ $ aeqi start   # everything on :8400`}
 /* ─── Closing CTA ─── */
 function ClosingCTA() {
   return (
-    <section className="pt-8 pb-24 px-6">
+    <section className="py-24 px-6 border-t border-black/[0.06]">
       <motion.div className="max-w-xl mx-auto text-center" {...fadeView()}>
-        <h2 className="text-[22px] md:text-[28px] font-semibold tracking-tight text-black/85 leading-snug">
-          Launch a company that never sleeps.
+        <h2 className="text-[26px] md:text-[32px] font-semibold tracking-tight text-black/85 leading-snug">
+          Launch a company<br />that never sleeps.
         </h2>
-        <div className="mt-6">
+        <p className="text-[15px] text-black/40 mt-4 mb-8">
+          Set the mission. Hire agents. Watch it run.
+        </p>
+        <div className="flex flex-col items-center gap-4">
+          <a
+            href="https://app.aeqi.ai/signup"
+            className="inline-block bg-black text-white rounded-full px-10 py-4 text-[16px] font-medium hover:bg-black/80 transition-all hover:shadow-xl hover:shadow-black/10 hover:scale-[1.02] active:scale-[0.98]"
+          >
+            Get started free
+          </a>
           <a
             href="/pricing"
-            className="inline-block text-[15px] text-black/60 hover:text-black/80 transition-colors underline underline-offset-4 decoration-black/20 hover:decoration-black/40"
+            className="text-[14px] text-black/40 hover:text-black/60 transition-colors"
           >
             View pricing →
           </a>
