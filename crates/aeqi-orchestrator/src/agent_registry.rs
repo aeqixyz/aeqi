@@ -86,7 +86,7 @@ pub struct Agent {
     /// Execution mode: "agent" (native loop) or "claude_code" (CLI delegation).
     #[serde(default)]
     pub execution_mode: Option<String>,
-    /// Quest ID prefix (e.g., "sg" for sigil). None = derived from name.
+    /// Quest ID prefix (e.g., "cto" for the CTO agent). None = derived from name.
     #[serde(default, alias = "task_prefix")]
     pub quest_prefix: Option<String>,
     /// Worker timeout in seconds. None = inherit from parent or use global default.

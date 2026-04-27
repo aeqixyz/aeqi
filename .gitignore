@@ -13,13 +13,19 @@ agents/*/.aeqi/
 *.db-wal
 *.db-shm
 
+# node_modules anywhere
+node_modules/
+**/node_modules/
+
 # Local config
 config/platform.toml
-apps/ui/node_modules/
 apps/ui/dist/
 apps/ui/*.tsbuildinfo
 apps/ui/.env
 apps/ui/.env*.local
+
+# Audit/observation dumps
+.observations/
 
 # Agent runtime state (ignore), but track agent templates (ship with AEQI)
 agents/*/.aeqi/

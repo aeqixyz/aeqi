@@ -3,4 +3,4 @@
 # This file lives in scripts/ and is used via core.hooksPath, so it works
 # identically in both the main repo and worktrees.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-[ -x "$SCRIPT_DIR/graph-index-hook.sh" ] && "$SCRIPT_DIR/graph-index-hook.sh" sigil &
+[ -x "$SCRIPT_DIR/graph-index-hook.sh" ] && "$SCRIPT_DIR/graph-index-hook.sh" &
