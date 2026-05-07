@@ -16,4 +16,6 @@ pub enum AeqiRoleError {
     AuthorityWalkTooDeep,
     #[msg("checkpoint slot is after the requested query slot")]
     CheckpointAfterQuery,
+    #[msg("prev_checkpoint required when re-delegating away from a prior delegatee")]
+    PrevCheckpointRequired,
 }

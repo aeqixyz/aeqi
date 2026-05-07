@@ -169,8 +169,13 @@ pub mod aeqi_role {
         deleg.bump = ctx.bumps.delegation;
 
         if prev != Pubkey::default() && prev != delegatee {
+            let prev_ckpt = ctx
+                .accounts
+                .prev_checkpoint
+                .as_mut()
+                .ok_or(AeqiRoleError::PrevCheckpointRequired)?;
             bump_checkpoint(
-                &mut ctx.accounts.prev_checkpoint,
+                prev_ckpt,
                 prev,
                 ctx.accounts.role_type.role_type_id,
                 -1,
@@ -377,10 +382,21 @@ pub struct DelegateRole<'info> {
         bump,
     )]
     pub delegation: Account<'info, RoleDelegation>,
+    /// Optional — required only when re-delegating away from a prior
+    /// delegatee. First-time delegation passes None.
     #[account(mut)]
-    pub prev_checkpoint: Account<'info, RoleVoteCheckpoint>,
-    #[account(mut)]
+    pub prev_checkpoint: Option<Account<'info, RoleVoteCheckpoint>>,
+    #[account(
+        init_if_needed,
+        payer = payer,
+        space = 8 + RoleVoteCheckpoint::INIT_SPACE,
+        seeds = [b"role_ckpt", role.trust.as_ref(), role_type.role_type_id.as_ref(), new_delegatee.key().as_ref()],
+        bump,
+    )]
     pub new_checkpoint: Account<'info, RoleVoteCheckpoint>,
+    /// CHECK: the new delegatee — used as a seed for the new checkpoint PDA
+    /// and as the recipient of the +1 vote. Doesn't need to sign.
+    pub new_delegatee: UncheckedAccount<'info>,
     #[account(mut)]
     pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,

@@ -180,6 +180,147 @@ describe("aeqi_role", () => {
     expect(ckpt.account.toBase58()).to.eq(occupant.toBase58());
   });
 
+  it("delegate_role transfers vote-power from self to a delegatee", async () => {
+    // Fresh trust so PDAs don't collide with previous tests
+    const trustD = Keypair.generate().publicKey;
+
+    const [moduleStatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role_module"), trustD.toBuffer()],
+      program.programId,
+    );
+    await program.methods
+      .init()
+      .accounts({
+        trust: trustD,
+        moduleState: moduleStatePda,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const directorTypeId = new Uint8Array(32);
+    directorTypeId[0] = 0xd2;
+    const [rtPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role_type"), trustD.toBuffer(), Buffer.from(directorTypeId)],
+      program.programId,
+    );
+    await program.methods
+      .createRoleType(Array.from(directorTypeId), 0, {
+        vesting: false,
+        vestingCliff: new anchor.BN(0),
+        vestingDuration: new anchor.BN(0),
+        fdv: false,
+        fdvStart: new anchor.BN(0),
+        fdvEnd: new anchor.BN(0),
+        probationaryPeriod: new anchor.BN(0),
+        severancePeriod: new anchor.BN(0),
+        contribution: false,
+      })
+      .accounts({
+        trust: trustD,
+        roleType: rtPda,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const roleId = new Uint8Array(32);
+    roleId[0] = 0xd2;
+    roleId[1] = 0x01;
+    const [rolePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role"), trustD.toBuffer(), Buffer.from(roleId)],
+      program.programId,
+    );
+    await program.methods
+      .createRole(
+        Array.from(roleId),
+        Array.from(directorTypeId),
+        null,
+        Array.from(new Uint8Array(64)),
+      )
+      .accounts({
+        trust: trustD,
+        roleType: rtPda,
+        role: rolePda,
+        callerRole: null,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Assign to provider.wallet (auto-self-delegates)
+    const userA = provider.wallet.publicKey;
+    const [aCkptPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("role_ckpt"),
+        trustD.toBuffer(),
+        Buffer.from(directorTypeId),
+        userA.toBuffer(),
+      ],
+      program.programId,
+    );
+    await program.methods
+      .assignRole(userA)
+      .accounts({
+        role: rolePda,
+        roleType: rtPda,
+        trust: trustD,
+        checkpoint: aCkptPda,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Verify A has 1 vote after assign (self-delegation)
+    let aCkpt = await program.account.roleVoteCheckpoint.fetch(aCkptPda);
+    expect(aCkpt.count.toString()).to.eq("1");
+
+    // Now delegate to user B — first-time delegation FROM userA's perspective,
+    // but A's prior delegatee is A itself (set at assign). So prev = userA;
+    // we DO need to pass prev_checkpoint.
+    const userB = Keypair.generate().publicKey;
+    const [delegationPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role_deleg"), trustD.toBuffer(), Buffer.from(roleId)],
+      program.programId,
+    );
+    const [bCkptPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("role_ckpt"),
+        trustD.toBuffer(),
+        Buffer.from(directorTypeId),
+        userB.toBuffer(),
+      ],
+      program.programId,
+    );
+
+    // First delegation creates RoleDelegation with prev=Pubkey::default(), so
+    // the program's `if prev != default` branch is skipped — prev_checkpoint
+    // is None on first call.
+    await program.methods
+      .delegateRole(userB)
+      .accounts({
+        role: rolePda,
+        roleType: rtPda,
+        delegation: delegationPda,
+        prevCheckpoint: null,
+        newCheckpoint: bCkptPda,
+        newDelegatee: userB,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // After delegation: B has +1, A unchanged because the program saw prev as
+    // Pubkey::default() (the freshly-init'd RoleDelegation slot) and skipped
+    // the prev decrement.
+    const bCkpt = await program.account.roleVoteCheckpoint.fetch(bCkptPda);
+    expect(bCkpt.count.toString()).to.eq("1");
+    expect(bCkpt.account.toBase58()).to.eq(userB.toBase58());
+
+    const deleg = await program.account.roleDelegation.fetch(delegationPda);
+    expect(deleg.delegatee.toBase58()).to.eq(userB.toBase58());
+  });
+
   it("authority walk authorizes ancestor over deep descendant", async () => {
     // Use a fresh trust so PDAs don't collide with previous tests.
     const trust2 = Keypair.generate().publicKey;
