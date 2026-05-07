@@ -74,6 +74,112 @@ describe("aeqi_role", () => {
     );
   });
 
+  it("create_role spawns a vacant role under a role type", async () => {
+    // Reuse the director role type from the previous test
+    const directorTypeId = new Uint8Array(32);
+    directorTypeId[0] = 0x44; // 'D'
+    directorTypeId[1] = 0x49;
+    directorTypeId[2] = 0x52;
+
+    const roleId = new Uint8Array(32);
+    roleId[0] = 0x46; // 'F' for founder
+    roleId[1] = 0x4f; // 'O'
+    roleId[2] = 0x55; // 'U'
+
+    const [rtPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role_type"), fakeTrust.toBuffer(), Buffer.from(directorTypeId)],
+      program.programId,
+    );
+    const [rolePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role"), fakeTrust.toBuffer(), Buffer.from(roleId)],
+      program.programId,
+    );
+
+    const ipfsCid = new Uint8Array(64).fill(0x20); // ASCII space — placeholder
+
+    await program.methods
+      .createRole(
+        Array.from(roleId),
+        Array.from(directorTypeId),
+        null, // no parent role
+        Array.from(ipfsCid),
+      )
+      .accounts({
+        trust: fakeTrust,
+        roleType: rtPda,
+        role: rolePda,
+        callerRole: null, // permissionless skeleton path
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const role = await program.account.role.fetch(rolePda);
+    expect(role.status).to.eq(0); // RoleStatus::Vacant
+    expect(role.account.toBase58()).to.eq(PublicKey.default.toBase58());
+    expect(Buffer.from(role.roleId).toString("hex")).to.eq(
+      Buffer.from(roleId).toString("hex"),
+    );
+    expect(Buffer.from(role.roleTypeId).toString("hex")).to.eq(
+      Buffer.from(directorTypeId).toString("hex"),
+    );
+
+    const rt = await program.account.roleType.fetch(rtPda);
+    expect(rt.roleCount).to.eq(1);
+  });
+
+  it("assign_role transitions Vacant → Occupied + bumps checkpoint", async () => {
+    const directorTypeId = new Uint8Array(32);
+    directorTypeId[0] = 0x44;
+    directorTypeId[1] = 0x49;
+    directorTypeId[2] = 0x52;
+
+    const roleId = new Uint8Array(32);
+    roleId[0] = 0x46;
+    roleId[1] = 0x4f;
+    roleId[2] = 0x55;
+
+    const [rtPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role_type"), fakeTrust.toBuffer(), Buffer.from(directorTypeId)],
+      program.programId,
+    );
+    const [rolePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role"), fakeTrust.toBuffer(), Buffer.from(roleId)],
+      program.programId,
+    );
+
+    const occupant = provider.wallet.publicKey;
+    const [checkpointPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("role_ckpt"),
+        fakeTrust.toBuffer(),
+        Buffer.from(directorTypeId),
+        occupant.toBuffer(),
+      ],
+      program.programId,
+    );
+
+    await program.methods
+      .assignRole(occupant)
+      .accounts({
+        role: rolePda,
+        roleType: rtPda,
+        trust: fakeTrust,
+        checkpoint: checkpointPda,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const role = await program.account.role.fetch(rolePda);
+    expect(role.status).to.eq(1); // RoleStatus::Occupied
+    expect(role.account.toBase58()).to.eq(occupant.toBase58());
+
+    const ckpt = await program.account.roleVoteCheckpoint.fetch(checkpointPda);
+    expect(ckpt.count.toString()).to.eq("1");
+    expect(ckpt.account.toBase58()).to.eq(occupant.toBase58());
+  });
+
   it("create_role_type stores hierarchies as expected (CEO=1, EA=4)", async () => {
     const ceoId = new Uint8Array(32);
     ceoId[0] = 0x43; // 'C'

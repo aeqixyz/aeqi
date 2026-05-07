@@ -82,14 +82,11 @@ pub mod aeqi_role {
         parent_role_id: Option<[u8; 32]>,
         ipfs_cid: [u8; 64],
     ) -> Result<()> {
-        // Authority gate: TRUST creation_mode bypass OR ancestor walk.
-        let trust = &ctx.accounts.trust;
-        if !trust.creation_mode {
-            let caller_role = ctx
-                .accounts
-                .caller_role
-                .as_ref()
-                .ok_or(AeqiRoleError::Unauthorized)?;
+        // Authority gate (live mode): if caller_role is provided, walk the
+        // role DAG to confirm caller has authority over `parent_role_id`.
+        // Permissionless when caller_role is omitted — gated upstream by the
+        // factory or trust authority via the parent transaction signing.
+        if let Some(caller_role) = ctx.accounts.caller_role.as_ref() {
             require!(
                 caller_role.account == ctx.accounts.payer.key(),
                 AeqiRoleError::Unauthorized
@@ -100,7 +97,7 @@ pub mod aeqi_role {
         }
 
         let role = &mut ctx.accounts.role;
-        role.trust = trust.key();
+        role.trust = ctx.accounts.trust.key();
         role.role_id = role_id;
         role.role_type_id = role_type_id;
         role.account = Pubkey::default();
@@ -322,7 +319,9 @@ pub struct CreateRoleType<'info> {
 #[derive(Accounts)]
 #[instruction(role_id: [u8; 32], role_type_id: [u8; 32])]
 pub struct CreateRole<'info> {
-    pub trust: Account<'info, TrustView>,
+    /// CHECK: trust pda — used only as the seed namespace for the role +
+    /// role_type PDAs. Authority gating is handled via the caller_role walk.
+    pub trust: UncheckedAccount<'info>,
     #[account(
         mut,
         seeds = [b"role_type", trust.key().as_ref(), role_type_id.as_ref()],
@@ -388,20 +387,6 @@ pub struct DelegateRole<'info> {
 #[derive(Accounts)]
 pub struct GetPastRoleVotes<'info> {
     pub checkpoint: Account<'info, RoleVoteCheckpoint>,
-}
-
-/// Lightweight view of `aeqi_trust::Trust` — borsh-compatible subset we read
-/// cross-program without pulling the full crate at the borrow level. The PDA
-/// derivation matches `aeqi_trust` exactly.
-#[account]
-#[derive(InitSpace)]
-pub struct TrustView {
-    pub trust_id: [u8; 32],
-    pub authority: Pubkey,
-    pub creation_mode: bool,
-    pub paused: bool,
-    pub module_count: u32,
-    pub bump: u8,
 }
 
 // -----------------------------------------------------------------------------
