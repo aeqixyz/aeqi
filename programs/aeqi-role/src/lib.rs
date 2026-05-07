@@ -147,6 +147,42 @@ pub mod aeqi_role {
         Ok(())
     }
 
+    /// Resign from an Occupied role. Status → Resigned, decrement checkpoint
+    /// for the prior holder. Mirrors EVM `Role.module.resignRole`. The role
+    /// stays on-chain but is no longer Occupied; an authorized parent can
+    /// re-assign or remove it.
+    pub fn resign_role(ctx: Context<ResignRole>) -> Result<()> {
+        let role = &mut ctx.accounts.role;
+        require!(
+            role.status == RoleStatus::Occupied as u8,
+            AeqiRoleError::RoleNotOccupied
+        );
+        require_keys_eq!(
+            ctx.accounts.payer.key(),
+            role.account,
+            AeqiRoleError::Unauthorized
+        );
+
+        let prev_account = role.account;
+        role.status = RoleStatus::Resigned as u8;
+        role.status_since = Clock::get()?.unix_timestamp;
+        role.account = Pubkey::default();
+
+        bump_checkpoint(
+            &mut ctx.accounts.checkpoint,
+            prev_account,
+            ctx.accounts.role_type.role_type_id,
+            -1,
+        )?;
+
+        emit!(RoleResigned {
+            trust: role.trust,
+            role_id: role.role_id,
+            from: prev_account,
+        });
+        Ok(())
+    }
+
     /// Transfer an Occupied role from the current holder to a new account.
     /// Decrements the prior holder's checkpoint, increments the new holder's
     /// checkpoint. Mirrors EVM `Role.module.transferRole`.
@@ -413,6 +449,23 @@ pub struct AssignRole<'info> {
 }
 
 #[derive(Accounts)]
+pub struct ResignRole<'info> {
+    #[account(mut, has_one = trust)]
+    pub role: Account<'info, Role>,
+    pub role_type: Account<'info, RoleType>,
+    /// CHECK: trust pda — used as seed for the checkpoint.
+    pub trust: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        seeds = [b"role_ckpt", trust.key().as_ref(), role_type.role_type_id.as_ref(), role.account.as_ref()],
+        bump,
+    )]
+    pub checkpoint: Account<'info, RoleVoteCheckpoint>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+}
+
+#[derive(Accounts)]
 pub struct TransferRole<'info> {
     #[account(mut, has_one = trust)]
     pub role: Account<'info, Role>,
@@ -509,6 +562,13 @@ pub struct RoleTransferred {
     pub role_id: [u8; 32],
     pub from: Pubkey,
     pub to: Pubkey,
+}
+
+#[event]
+pub struct RoleResigned {
+    pub trust: Pubkey,
+    pub role_id: [u8; 32],
+    pub from: Pubkey,
 }
 
 #[event]

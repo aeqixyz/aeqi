@@ -180,6 +180,117 @@ describe("aeqi_role", () => {
     expect(ckpt.account.toBase58()).to.eq(occupant.toBase58());
   });
 
+  it("resign_role transitions Occupied → Resigned + decrements checkpoint", async () => {
+    const trustR = Keypair.generate().publicKey;
+
+    const [moduleStatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role_module"), trustR.toBuffer()],
+      program.programId,
+    );
+    await program.methods
+      .init()
+      .accounts({
+        trust: trustR,
+        moduleState: moduleStatePda,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const tid = new Uint8Array(32);
+    tid[0] = 0x72; // 'r'
+    const [rtPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role_type"), trustR.toBuffer(), Buffer.from(tid)],
+      program.programId,
+    );
+    await program.methods
+      .createRoleType(Array.from(tid), 2, {
+        vesting: false,
+        vestingCliff: new anchor.BN(0),
+        vestingDuration: new anchor.BN(0),
+        fdv: false,
+        fdvStart: new anchor.BN(0),
+        fdvEnd: new anchor.BN(0),
+        probationaryPeriod: new anchor.BN(0),
+        severancePeriod: new anchor.BN(0),
+        contribution: false,
+      })
+      .accounts({
+        trust: trustR,
+        roleType: rtPda,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const roleId = new Uint8Array(32);
+    roleId[0] = 0x72;
+    roleId[1] = 0x01;
+    const [rolePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role"), trustR.toBuffer(), Buffer.from(roleId)],
+      program.programId,
+    );
+    await program.methods
+      .createRole(
+        Array.from(roleId),
+        Array.from(tid),
+        null,
+        Array.from(new Uint8Array(64)),
+      )
+      .accounts({
+        trust: trustR,
+        roleType: rtPda,
+        role: rolePda,
+        callerRole: null,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const userA = provider.wallet.publicKey;
+    const [aCkpt] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("role_ckpt"),
+        trustR.toBuffer(),
+        Buffer.from(tid),
+        userA.toBuffer(),
+      ],
+      program.programId,
+    );
+    await program.methods
+      .assignRole(userA)
+      .accounts({
+        role: rolePda,
+        roleType: rtPda,
+        trust: trustR,
+        checkpoint: aCkpt,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    let pre = await program.account.roleVoteCheckpoint.fetch(aCkpt);
+    expect(pre.count.toString()).to.eq("1");
+
+    await program.methods
+      .resignRole()
+      .accounts({
+        role: rolePda,
+        roleType: rtPda,
+        trust: trustR,
+        checkpoint: aCkpt,
+        payer: provider.wallet.publicKey,
+      })
+      .rpc();
+
+    const role = await program.account.role.fetch(rolePda);
+    expect(role.status).to.eq(2); // Resigned
+    expect(role.account.toBase58()).to.eq(PublicKey.default.toBase58());
+
+    const post = await program.account.roleVoteCheckpoint.fetch(aCkpt);
+    expect(post.count.toString()).to.eq("0");
+  });
+
   it("transfer_role hands off the role + moves the vote checkpoint", async () => {
     const trustT = Keypair.generate().publicKey;
 
