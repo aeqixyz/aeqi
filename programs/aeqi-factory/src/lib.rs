@@ -16,7 +16,9 @@
 //! `instantiate_template` in the next iteration.
 
 use anchor_lang::prelude::*;
-use aeqi_trust::cpi::accounts::Initialize as TrustInitialize;
+use aeqi_trust::cpi::accounts::{
+    Finalize as TrustFinalize, Initialize as TrustInitialize, RegisterModule as TrustRegisterModule,
+};
 use aeqi_trust::program::AeqiTrust;
 
 declare_id!("7rX3fnJUy7tDSpo1EGCnUhs1XnxxbsQzXXNDCTh64v6n");
@@ -44,6 +46,84 @@ pub mod aeqi_factory {
             trust: ctx.accounts.trust.key(),
             trust_id,
             authority: ctx.accounts.authority.key(),
+        });
+        Ok(())
+    }
+
+    /// Atomic spawn — full company creation flow in one tx, skipping module
+    /// init/finalize CPIs (those land once each module program implements
+    /// its `init` cleanly). Steps:
+    ///
+    ///   1. CPI `aeqi_trust::initialize` (creates Trust PDA in creation mode).
+    ///   2. For each `ModuleSpec` in `modules`, CPI `aeqi_trust::register_module`.
+    ///      The matching module PDAs are passed in `remaining_accounts`,
+    ///      grouped pairwise as (module_pda, system_program) per module.
+    ///   3. CPI `aeqi_trust::finalize` (exits creation mode).
+    ///
+    /// `remaining_accounts` layout: for each module spec, push:
+    ///   - the module PDA (writable, will be init'd by aeqi_trust)
+    ///
+    /// The caller (the `authority`) signs all CPIs as the trust authority.
+    pub fn create_with_modules<'info>(
+        ctx: Context<'_, '_, 'info, 'info, CreateWithModules<'info>>,
+        trust_id: [u8; 32],
+        modules: Vec<ModuleSpec>,
+    ) -> Result<()> {
+        require!(!modules.is_empty(), FactoryError::EmptyModuleSet);
+        require!(modules.len() <= 16, FactoryError::TooManyModules);
+        require!(
+            ctx.remaining_accounts.len() == modules.len(),
+            FactoryError::ModuleAccountCountMismatch
+        );
+
+        // 1. initialize
+        let init_accounts = TrustInitialize {
+            trust: ctx.accounts.trust.to_account_info(),
+            authority: ctx.accounts.authority.to_account_info(),
+            system_program: ctx.accounts.system_program.to_account_info(),
+        };
+        let init_ctx = CpiContext::new(
+            ctx.accounts.aeqi_trust_program.to_account_info(),
+            init_accounts,
+        );
+        aeqi_trust::cpi::initialize(init_ctx, trust_id)?;
+
+        // 2. register every module
+        for (spec, module_acct) in modules.iter().zip(ctx.remaining_accounts.iter()) {
+            let reg_accounts = TrustRegisterModule {
+                trust: ctx.accounts.trust.to_account_info(),
+                module: module_acct.clone(),
+                authority: ctx.accounts.authority.to_account_info(),
+                system_program: ctx.accounts.system_program.to_account_info(),
+            };
+            let reg_ctx = CpiContext::new(
+                ctx.accounts.aeqi_trust_program.to_account_info(),
+                reg_accounts,
+            );
+            aeqi_trust::cpi::register_module(
+                reg_ctx,
+                spec.module_id,
+                spec.program_id,
+                spec.trust_acl,
+            )?;
+        }
+
+        // 3. finalize
+        let fin_accounts = TrustFinalize {
+            trust: ctx.accounts.trust.to_account_info(),
+            authority: ctx.accounts.authority.to_account_info(),
+        };
+        let fin_ctx = CpiContext::new(
+            ctx.accounts.aeqi_trust_program.to_account_info(),
+            fin_accounts,
+        );
+        aeqi_trust::cpi::finalize(fin_ctx)?;
+
+        emit!(CompanySpawned {
+            trust: ctx.accounts.trust.key(),
+            trust_id,
+            authority: ctx.accounts.authority.key(),
+            module_count: modules.len() as u8,
         });
         Ok(())
     }
@@ -116,6 +196,19 @@ pub struct RegisterTemplate<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(trust_id: [u8; 32])]
+pub struct CreateWithModules<'info> {
+    /// CHECK: aeqi_trust::initialize derives the PDA from
+    /// `[b"trust", trust_id]` under its own program ID.
+    #[account(mut)]
+    pub trust: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub aeqi_trust_program: Program<'info, AeqiTrust>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct InstantiateTemplate<'info> {
     #[account(mut)]
     pub creator: Signer<'info>,
@@ -137,6 +230,14 @@ pub struct TemplateRegistered {
     pub acl_edge_count: u8,
 }
 
+#[event]
+pub struct CompanySpawned {
+    pub trust: Pubkey,
+    pub trust_id: [u8; 32],
+    pub authority: Pubkey,
+    pub module_count: u8,
+}
+
 #[error_code]
 pub enum FactoryError {
     #[msg("template must declare at least one module")]
@@ -145,4 +246,6 @@ pub enum FactoryError {
     TooManyModules,
     #[msg("template ACL edges exceed maximum (64)")]
     TooManyAclEdges,
+    #[msg("remaining_accounts.len() must equal modules.len()")]
+    ModuleAccountCountMismatch,
 }

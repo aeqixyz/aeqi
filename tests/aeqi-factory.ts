@@ -81,6 +81,72 @@ describe("aeqi_factory", () => {
     expect(tmpl.admin.toBase58()).to.eq(provider.wallet.publicKey.toBase58());
   });
 
+  it("create_with_modules atomically spawns trust + N modules + finalizes", async () => {
+    const trustId = new Uint8Array(32);
+    trustId[0] = 0x77;
+
+    const [trustPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("trust"), Buffer.from(trustId)],
+      trust.programId,
+    );
+
+    const moduleIdRole = new Uint8Array(32);
+    moduleIdRole[0] = 0x52; // 'R'
+    const moduleIdGov = new Uint8Array(32);
+    moduleIdGov[0] = 0x47; // 'G'
+
+    const [modulePdaRole] = PublicKey.findProgramAddressSync(
+      [Buffer.from("module"), trustPda.toBuffer(), Buffer.from(moduleIdRole)],
+      trust.programId,
+    );
+    const [modulePdaGov] = PublicKey.findProgramAddressSync(
+      [Buffer.from("module"), trustPda.toBuffer(), Buffer.from(moduleIdGov)],
+      trust.programId,
+    );
+
+    const dummyRoleProg = anchor.web3.Keypair.generate().publicKey;
+    const dummyGovProg = anchor.web3.Keypair.generate().publicKey;
+
+    await factory.methods
+      .createWithModules(Array.from(trustId), [
+        {
+          moduleId: Array.from(moduleIdRole),
+          programId: dummyRoleProg,
+          trustAcl: new anchor.BN(0xff),
+        },
+        {
+          moduleId: Array.from(moduleIdGov),
+          programId: dummyGovProg,
+          trustAcl: new anchor.BN(0x80),
+        },
+      ])
+      .accounts({
+        trust: trustPda,
+        authority: provider.wallet.publicKey,
+        aeqiTrustProgram: trust.programId,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .remainingAccounts([
+        { pubkey: modulePdaRole, isWritable: true, isSigner: false },
+        { pubkey: modulePdaGov, isWritable: true, isSigner: false },
+      ])
+      .rpc();
+
+    // Trust state — finalized, 2 modules registered
+    const trustAcct = await trust.account.trust.fetch(trustPda);
+    expect(trustAcct.creationMode).to.eq(false); // finalized
+    expect(trustAcct.moduleCount).to.eq(2);
+
+    // Both module PDAs were created with the right program IDs and ACLs
+    const role = await trust.account.module.fetch(modulePdaRole);
+    expect(role.programId.toBase58()).to.eq(dummyRoleProg.toBase58());
+    expect(role.trustAcl.toString()).to.eq("255");
+
+    const gov = await trust.account.module.fetch(modulePdaGov);
+    expect(gov.programId.toBase58()).to.eq(dummyGovProg.toBase58());
+    expect(gov.trustAcl.toString()).to.eq("128");
+  });
+
   it("rejects register_template with empty module set", async () => {
     const templateId = new Uint8Array(32);
     templateId[0] = 0xee;
