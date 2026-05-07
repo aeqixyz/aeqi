@@ -1,0 +1,55 @@
+# Standalone workspace — the indexer pulls solana-client 3.x which conflicts
+# with anchor 0.31's solana-program 2.x in the parent workspace's resolver.
+# Keeping indexer separate avoids that.
+[workspace]
+
+[package]
+name = "aeqi-indexer"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["aeqi"]
+description = "Solana indexer for the AEQI protocol — programSubscribe live tail + signature backfill, decodes Anchor events from logs into a DB-friendly stream."
+
+[[bin]]
+name = "aeqi-indexer"
+path = "src/main.rs"
+
+[dependencies]
+# Solana RPC + pubsub clients. Use 2.x (stable, well-tested); Agave 3.x
+# validator is wire-compatible with 2.x clients.
+solana-client = "2"
+solana-sdk = "2"
+
+# Anchor for typed event decoding
+anchor-lang = "0.31.0"
+
+# Borsh for raw deserialization
+borsh = "1.5"
+borsh-derive = "1.5"
+
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+futures = "0.3"
+
+# Error handling + tracing
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# CLI args + config
+clap = { version = "4.5", features = ["derive", "env"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# DB sink (matches existing aeqi-indexer schema)
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Base64 / base58 for log decoding (Anchor events are base64'd in logs)
+base64 = "0.22"
+bs58 = "0.5"
+
+# Anchor discriminator computation (sha256("event:EventName")[..8])
+sha2 = "0.10"
+once_cell = "1.20"
