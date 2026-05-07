@@ -144,6 +144,44 @@ describe("aeqi_treasury", () => {
     expect(recPost.amount.toString()).to.eq("2000");
   });
 
+  it("deposit increases vault balance + emits typed event", async () => {
+    // Mint 3000 to recipientAta first so we have something to deposit FROM
+    await mintTo(
+      provider.connection,
+      (provider.wallet as anchor.Wallet).payer,
+      mint,
+      recipientAta,
+      provider.wallet.publicKey,
+      3000,
+      [],
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+    );
+
+    const vaultPre = await getAccount(provider.connection, vaultAta, undefined, TOKEN_2022_PROGRAM_ID);
+    const recPre = await getAccount(provider.connection, recipientAta, undefined, TOKEN_2022_PROGRAM_ID);
+
+    await program.methods
+      .deposit(new anchor.BN(1500))
+      .accounts({
+        trust: fakeTrust,
+        moduleState: modulePda,
+        vaultAuthority,
+        mint,
+        vault: vaultAta,
+        depositorTa: recipientAta,
+        depositor: provider.wallet.publicKey,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+      })
+      .rpc();
+
+    const vaultPost = await getAccount(provider.connection, vaultAta, undefined, TOKEN_2022_PROGRAM_ID);
+    const recPost = await getAccount(provider.connection, recipientAta, undefined, TOKEN_2022_PROGRAM_ID);
+
+    expect((vaultPost.amount - vaultPre.amount).toString()).to.eq("1500");
+    expect((recPre.amount - recPost.amount).toString()).to.eq("1500");
+  });
+
   it("withdraw rejects unauthorized signer", async () => {
     const intruder = Keypair.generate();
     // Fund intruder so they can pay for tx
