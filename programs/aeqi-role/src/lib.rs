@@ -209,9 +209,13 @@ pub mod aeqi_role {
     }
 }
 
-/// Walk parent_role_id chain from `caller_role` upward looking for `target`.
-/// `remaining_accounts` must contain the chain from caller's parent up to
-/// (and including) the target role, in order.
+/// Verify that `caller_role` has authority over `target_role_id`. Authority
+/// flows top-down: caller is authorized iff caller's role IS target_role_id
+/// OR caller's role is an ancestor of target_role_id.
+///
+/// Walk strategy: start at the target role, walk parent pointers UP looking
+/// for caller's role_id. `remaining_accounts` must contain the chain
+/// `[target_role_pda, target.parent_role_pda, ...up to root]`.
 fn check_authority_walk<'info>(
     caller_role: &Account<'info, Role>,
     target_role_id: &[u8; 32],
@@ -220,10 +224,7 @@ fn check_authority_walk<'info>(
     if &caller_role.role_id == target_role_id {
         return Ok(());
     }
-    let mut current_parent = caller_role.parent_role_id;
-    if current_parent == [0u8; 32] {
-        return err!(AeqiRoleError::AuthorityNotFound);
-    }
+    let mut expected_id = *target_role_id;
     for (i, acc) in remaining.iter().take(MAX_AUTHORITY_WALK).enumerate() {
         let role: Account<Role> = Account::try_from(acc)
             .map_err(|_| AeqiRoleError::InvalidAuthorityWalk)?;
@@ -232,16 +233,17 @@ fn check_authority_walk<'info>(
             AeqiRoleError::InvalidAuthorityWalk
         );
         require!(
-            role.role_id == current_parent,
+            role.role_id == expected_id,
             AeqiRoleError::InvalidAuthorityWalk
         );
-        if &role.role_id == target_role_id {
+        // Hit the caller in the target's ancestor chain → authorized.
+        if role.role_id == caller_role.role_id {
             return Ok(());
         }
         if role.parent_role_id == [0u8; 32] {
             break;
         }
-        current_parent = role.parent_role_id;
+        expected_id = role.parent_role_id;
         if i + 1 == MAX_AUTHORITY_WALK {
             return err!(AeqiRoleError::AuthorityWalkTooDeep);
         }

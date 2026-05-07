@@ -180,6 +180,184 @@ describe("aeqi_role", () => {
     expect(ckpt.account.toBase58()).to.eq(occupant.toBase58());
   });
 
+  it("authority walk authorizes ancestor over deep descendant", async () => {
+    // Use a fresh trust so PDAs don't collide with previous tests.
+    const trust2 = Keypair.generate().publicKey;
+
+    // role_module init for trust2
+    const [moduleStatePda2] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role_module"), trust2.toBuffer()],
+      program.programId,
+    );
+    await program.methods
+      .init()
+      .accounts({
+        trust: trust2,
+        moduleState: moduleStatePda2,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Define 3 role types: director (h=0), ceo (h=1), eng (h=4)
+    const types: Record<string, Uint8Array> = {
+      director: new Uint8Array(32),
+      ceo: new Uint8Array(32),
+      eng: new Uint8Array(32),
+    };
+    types.director[0] = 0xd1;
+    types.ceo[0] = 0xc1;
+    types.eng[0] = 0xe1;
+
+    for (const [name, id] of Object.entries(types)) {
+      const [pda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("role_type"), trust2.toBuffer(), Buffer.from(id)],
+        program.programId,
+      );
+      const hierarchy = name === "director" ? 0 : name === "ceo" ? 1 : 4;
+      await program.methods
+        .createRoleType(Array.from(id), hierarchy, {
+          vesting: false,
+          vestingCliff: new anchor.BN(0),
+          vestingDuration: new anchor.BN(0),
+          fdv: false,
+          fdvStart: new anchor.BN(0),
+          fdvEnd: new anchor.BN(0),
+          probationaryPeriod: new anchor.BN(0),
+          severancePeriod: new anchor.BN(0),
+          contribution: false,
+        })
+        .accounts({
+          trust: trust2,
+          roleType: pda,
+          payer: provider.wallet.publicKey,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
+    }
+
+    // Create root founder role (director type, no parent)
+    const founderId = new Uint8Array(32);
+    founderId[0] = 0xf1;
+    const [founderPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role"), trust2.toBuffer(), Buffer.from(founderId)],
+      program.programId,
+    );
+    const [directorRtPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role_type"), trust2.toBuffer(), Buffer.from(types.director)],
+      program.programId,
+    );
+    await program.methods
+      .createRole(
+        Array.from(founderId),
+        Array.from(types.director),
+        null,
+        Array.from(new Uint8Array(64)),
+      )
+      .accounts({
+        trust: trust2,
+        roleType: directorRtPda,
+        role: founderPda,
+        callerRole: null,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Assign founder to userA (provider.wallet)
+    const [founderCkpt] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("role_ckpt"),
+        trust2.toBuffer(),
+        Buffer.from(types.director),
+        provider.wallet.publicKey.toBuffer(),
+      ],
+      program.programId,
+    );
+    await program.methods
+      .assignRole(provider.wallet.publicKey)
+      .accounts({
+        role: founderPda,
+        roleType: directorRtPda,
+        trust: trust2,
+        checkpoint: founderCkpt,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Create ceo1 with parent = founder. Skeleton path: callerRole = null.
+    const ceoRoleId = new Uint8Array(32);
+    ceoRoleId[0] = 0xc1;
+    ceoRoleId[1] = 0x01;
+    const [ceoPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role"), trust2.toBuffer(), Buffer.from(ceoRoleId)],
+      program.programId,
+    );
+    const [ceoRtPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role_type"), trust2.toBuffer(), Buffer.from(types.ceo)],
+      program.programId,
+    );
+    await program.methods
+      .createRole(
+        Array.from(ceoRoleId),
+        Array.from(types.ceo),
+        Array.from(founderId), // parent = founder
+        Array.from(new Uint8Array(64)),
+      )
+      .accounts({
+        trust: trust2,
+        roleType: ceoRtPda,
+        role: ceoPda,
+        callerRole: null, // skeleton — no walk
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // NOW: create eng1 with parent = ceo, callerRole = founder.
+    // The walk MUST succeed because founder is ancestor of ceo (eng's parent).
+    // remaining_accounts = [ceo PDA, founder PDA] — chain from target up to
+    // root, the new walker semantics.
+    const engRoleId = new Uint8Array(32);
+    engRoleId[0] = 0xe1;
+    engRoleId[1] = 0x01;
+    const [engPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role"), trust2.toBuffer(), Buffer.from(engRoleId)],
+      program.programId,
+    );
+    const [engRtPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role_type"), trust2.toBuffer(), Buffer.from(types.eng)],
+      program.programId,
+    );
+    await program.methods
+      .createRole(
+        Array.from(engRoleId),
+        Array.from(types.eng),
+        Array.from(ceoRoleId), // parent = ceo
+        Array.from(new Uint8Array(64)),
+      )
+      .accounts({
+        trust: trust2,
+        roleType: engRtPda,
+        role: engPda,
+        callerRole: founderPda, // founder authorizing
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .remainingAccounts([
+        { pubkey: ceoPda, isWritable: false, isSigner: false }, // target
+        { pubkey: founderPda, isWritable: false, isSigner: false }, // ancestor (caller)
+      ])
+      .rpc();
+
+    const eng = await program.account.role.fetch(engPda);
+    expect(eng.status).to.eq(0); // Vacant
+    expect(Buffer.from(eng.parentRoleId).toString("hex")).to.eq(
+      Buffer.from(ceoRoleId).toString("hex"),
+    );
+  });
+
   it("create_role_type stores hierarchies as expected (CEO=1, EA=4)", async () => {
     const ceoId = new Uint8Array(32);
     ceoId[0] = 0x43; // 'C'
