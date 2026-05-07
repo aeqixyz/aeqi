@@ -20,11 +20,11 @@ use aeqi_trust::cpi::accounts::{
     Finalize as TrustFinalize, Initialize as TrustInitialize, RegisterModule as TrustRegisterModule,
 };
 use aeqi_trust::program::AeqiTrust;
-use aeqi_role::cpi::accounts::InitModule as RoleInit;
+use aeqi_role::cpi::accounts::{FinalizeModule as RoleFinalize, InitModule as RoleInit};
 use aeqi_role::program::AeqiRole;
-use aeqi_token::cpi::accounts::InitToken;
+use aeqi_token::cpi::accounts::{FinalizeToken, InitToken};
 use aeqi_token::program::AeqiToken;
-use aeqi_governance::cpi::accounts::InitGovernance;
+use aeqi_governance::cpi::accounts::{FinalizeGovernance, InitGovernance};
 use aeqi_governance::program::AeqiGovernance;
 
 declare_id!("7rX3fnJUy7tDSpo1EGCnUhs1XnxxbsQzXXNDCTh64v6n");
@@ -241,7 +241,31 @@ pub mod aeqi_factory {
             },
         ))?;
 
-        // 4. finalize trust
+        // 4. finalize each module — transitions Initialized → Finalized.
+        // (Module config-bytes decode flow follows when BytesConfig dispatch
+        // ships; for now finalize is a state-machine transition.)
+        aeqi_role::cpi::finalize(CpiContext::new(
+            ctx.accounts.aeqi_role_program.to_account_info(),
+            RoleFinalize {
+                trust: ctx.accounts.trust.to_account_info(),
+                module_state: ctx.accounts.role_module_state.to_account_info(),
+            },
+        ))?;
+        aeqi_token::cpi::finalize(CpiContext::new(
+            ctx.accounts.aeqi_token_program.to_account_info(),
+            FinalizeToken {
+                trust: ctx.accounts.trust.to_account_info(),
+                module_state: ctx.accounts.token_module_state.to_account_info(),
+            },
+        ))?;
+        aeqi_governance::cpi::finalize(CpiContext::new(
+            ctx.accounts.aeqi_governance_program.to_account_info(),
+            FinalizeGovernance {
+                trust: ctx.accounts.trust.to_account_info(),
+            },
+        ))?;
+
+        // 5. finalize trust
         aeqi_trust::cpi::finalize(CpiContext::new(
             ctx.accounts.aeqi_trust_program.to_account_info(),
             TrustFinalize {
