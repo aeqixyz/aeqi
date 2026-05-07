@@ -180,6 +180,141 @@ describe("aeqi_role", () => {
     expect(ckpt.account.toBase58()).to.eq(occupant.toBase58());
   });
 
+  it("transfer_role hands off the role + moves the vote checkpoint", async () => {
+    const trustT = Keypair.generate().publicKey;
+
+    // init module
+    const [moduleStatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role_module"), trustT.toBuffer()],
+      program.programId,
+    );
+    await program.methods
+      .init()
+      .accounts({
+        trust: trustT,
+        moduleState: moduleStatePda,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // role type
+    const tid = new Uint8Array(32);
+    tid[0] = 0x74; // 't'
+    const [rtPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role_type"), trustT.toBuffer(), Buffer.from(tid)],
+      program.programId,
+    );
+    await program.methods
+      .createRoleType(Array.from(tid), 1, {
+        vesting: false,
+        vestingCliff: new anchor.BN(0),
+        vestingDuration: new anchor.BN(0),
+        fdv: false,
+        fdvStart: new anchor.BN(0),
+        fdvEnd: new anchor.BN(0),
+        probationaryPeriod: new anchor.BN(0),
+        severancePeriod: new anchor.BN(0),
+        contribution: false,
+      })
+      .accounts({
+        trust: trustT,
+        roleType: rtPda,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // role
+    const roleId = new Uint8Array(32);
+    roleId[0] = 0x74;
+    roleId[1] = 0x01;
+    const [rolePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role"), trustT.toBuffer(), Buffer.from(roleId)],
+      program.programId,
+    );
+    await program.methods
+      .createRole(
+        Array.from(roleId),
+        Array.from(tid),
+        null,
+        Array.from(new Uint8Array(64)),
+      )
+      .accounts({
+        trust: trustT,
+        roleType: rtPda,
+        role: rolePda,
+        callerRole: null,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // assign to userA (provider.wallet) — auto-self-delegates, A's checkpoint = 1
+    const userA = provider.wallet.publicKey;
+    const [aCkpt] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("role_ckpt"),
+        trustT.toBuffer(),
+        Buffer.from(tid),
+        userA.toBuffer(),
+      ],
+      program.programId,
+    );
+    await program.methods
+      .assignRole(userA)
+      .accounts({
+        role: rolePda,
+        roleType: rtPda,
+        trust: trustT,
+        checkpoint: aCkpt,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Pre-transfer: A's checkpoint = 1
+    const aCkptPre = await program.account.roleVoteCheckpoint.fetch(aCkpt);
+    expect(aCkptPre.count.toString()).to.eq("1");
+
+    // Transfer role to userB
+    const userB = Keypair.generate().publicKey;
+    const [bCkpt] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("role_ckpt"),
+        trustT.toBuffer(),
+        Buffer.from(tid),
+        userB.toBuffer(),
+      ],
+      program.programId,
+    );
+
+    await program.methods
+      .transferRole(userB)
+      .accounts({
+        role: rolePda,
+        roleType: rtPda,
+        trust: trustT,
+        prevCheckpoint: aCkpt,
+        newCheckpoint: bCkpt,
+        newAccount: userB,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Post-transfer: role.account == userB, A's checkpoint = 0, B's = 1
+    const role = await program.account.role.fetch(rolePda);
+    expect(role.account.toBase58()).to.eq(userB.toBase58());
+
+    const aCkptPost = await program.account.roleVoteCheckpoint.fetch(aCkpt);
+    expect(aCkptPost.count.toString()).to.eq("0");
+
+    const bCkptPost = await program.account.roleVoteCheckpoint.fetch(bCkpt);
+    expect(bCkptPost.count.toString()).to.eq("1");
+    expect(bCkptPost.account.toBase58()).to.eq(userB.toBase58());
+  });
+
   it("delegate_role transfers vote-power from self to a delegatee", async () => {
     // Fresh trust so PDAs don't collide with previous tests
     const trustD = Keypair.generate().publicKey;
