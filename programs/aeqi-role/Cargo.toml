@@ -1,0 +1,23 @@
+[package]
+name = "aeqi-role"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "AEQI Role module — role DAG, role types, delegations, vote checkpoints"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "aeqi_role"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+anchor-lang = { workspace = true }
+aeqi-trust = { path = "../aeqi-trust", features = ["cpi"] }
