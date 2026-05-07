@@ -499,6 +499,159 @@ describe("aeqi_role", () => {
     );
   });
 
+  it("authority walk REJECTS unrelated caller (not in target's ancestor chain)", async () => {
+    const trustN = Keypair.generate().publicKey;
+
+    // init module
+    const [moduleStatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role_module"), trustN.toBuffer()],
+      program.programId,
+    );
+    await program.methods
+      .init()
+      .accounts({
+        trust: trustN,
+        moduleState: moduleStatePda,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // single role type 'director'
+    const tid = new Uint8Array(32);
+    tid[0] = 0xab;
+    const [rtPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role_type"), trustN.toBuffer(), Buffer.from(tid)],
+      program.programId,
+    );
+    await program.methods
+      .createRoleType(Array.from(tid), 0, {
+        vesting: false,
+        vestingCliff: new anchor.BN(0),
+        vestingDuration: new anchor.BN(0),
+        fdv: false,
+        fdvStart: new anchor.BN(0),
+        fdvEnd: new anchor.BN(0),
+        probationaryPeriod: new anchor.BN(0),
+        severancePeriod: new anchor.BN(0),
+        contribution: false,
+      })
+      .accounts({
+        trust: trustN,
+        roleType: rtPda,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // role A (no parent) — assigned to user
+    const aId = new Uint8Array(32);
+    aId[0] = 0xa1;
+    const [aPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role"), trustN.toBuffer(), Buffer.from(aId)],
+      program.programId,
+    );
+    await program.methods
+      .createRole(
+        Array.from(aId),
+        Array.from(tid),
+        null,
+        Array.from(new Uint8Array(64)),
+      )
+      .accounts({
+        trust: trustN,
+        roleType: rtPda,
+        role: aPda,
+        callerRole: null,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const [aCkpt] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("role_ckpt"),
+        trustN.toBuffer(),
+        Buffer.from(tid),
+        provider.wallet.publicKey.toBuffer(),
+      ],
+      program.programId,
+    );
+    await program.methods
+      .assignRole(provider.wallet.publicKey)
+      .accounts({
+        role: aPda,
+        roleType: rtPda,
+        trust: trustN,
+        checkpoint: aCkpt,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // role B (no parent) — UNRELATED to A; assigned to user
+    const bId = new Uint8Array(32);
+    bId[0] = 0xb1;
+    const [bPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role"), trustN.toBuffer(), Buffer.from(bId)],
+      program.programId,
+    );
+    await program.methods
+      .createRole(
+        Array.from(bId),
+        Array.from(tid),
+        null,
+        Array.from(new Uint8Array(64)),
+      )
+      .accounts({
+        trust: trustN,
+        roleType: rtPda,
+        role: bPda,
+        callerRole: null,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+    // (no need to assign B for the walk test — only need role state)
+
+    // Now try to create role X with parent = A, but pass callerRole = B.
+    // B is not in A's ancestor chain → walk MUST fail.
+    const xId = new Uint8Array(32);
+    xId[0] = 0xff;
+    const [xPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role"), trustN.toBuffer(), Buffer.from(xId)],
+      program.programId,
+    );
+
+    let threw = false;
+    try {
+      await program.methods
+        .createRole(
+          Array.from(xId),
+          Array.from(tid),
+          Array.from(aId), // parent = A
+          Array.from(new Uint8Array(64)),
+        )
+        .accounts({
+          trust: trustN,
+          roleType: rtPda,
+          role: xPda,
+          callerRole: bPda, // caller = B, an unrelated role
+          payer: provider.wallet.publicKey,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .remainingAccounts([
+          { pubkey: aPda, isWritable: false, isSigner: false }, // target chain: just A
+        ])
+        .rpc();
+    } catch (e: any) {
+      threw = true;
+      // Expect AuthorityNotFound (walk reached root without finding caller)
+      expect(e.toString()).to.match(/AuthorityNotFound|Unauthorized/);
+    }
+    expect(threw).to.eq(true);
+  });
+
   it("create_role_type stores hierarchies as expected (CEO=1, EA=4)", async () => {
     const ceoId = new Uint8Array(32);
     ceoId[0] = 0x43; // 'C'
