@@ -2,6 +2,14 @@ import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { AeqiGovernance } from "../target/types/aeqi_governance";
 import { PublicKey, Keypair } from "@solana/web3.js";
+import {
+  TOKEN_2022_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  createMint,
+  getAssociatedTokenAddressSync,
+  createAssociatedTokenAccountInstruction,
+  mintTo,
+} from "@solana/spl-token";
 import { expect } from "chai";
 
 describe("aeqi_governance", () => {
@@ -360,6 +368,146 @@ describe("aeqi_governance", () => {
       expect(e.toString()).to.match(/QuorumNotMet/);
     }
     expect(threw).to.eq(true);
+  });
+
+  it("cast_vote_token reads weight from real Token-2022 balance", async () => {
+    // Fresh trust + governance config + proposal, plus a real Token-2022
+    // mint with the voter holding 1500 tokens. cast_vote_token should
+    // record weight = 1500 from the on-chain balance, not a passed param.
+
+    const trustV = Keypair.generate().publicKey;
+
+    const [moduleStatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("gov_module"), trustV.toBuffer()],
+      program.programId,
+    );
+    await program.methods
+      .init()
+      .accounts({
+        trust: trustV,
+        moduleState: moduleStatePda,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const tokenCfgId = new Uint8Array(32); // [0;32] = token mode
+    const [cfgPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("gov_config"), trustV.toBuffer(), Buffer.from(tokenCfgId)],
+      program.programId,
+    );
+    await program.methods
+      .registerConfig(Array.from(tokenCfgId), {
+        proposalThreshold: new anchor.BN(0),
+        quorumBps: 4000,
+        supportBps: 5000,
+        votingPeriod: new anchor.BN(60),
+        executionDelay: new anchor.BN(0),
+        allowEarlyEnact: true,
+      })
+      .accounts({
+        trust: trustV,
+        moduleState: moduleStatePda,
+        governanceConfig: cfgPda,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const proposalId = new Uint8Array(32);
+    proposalId[0] = 0xb1;
+    const [proposalPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("proposal"), trustV.toBuffer(), Buffer.from(proposalId)],
+      program.programId,
+    );
+    await program.methods
+      .propose(
+        Array.from(proposalId),
+        Array.from(tokenCfgId),
+        Array.from(new Uint8Array(64)),
+      )
+      .accounts({
+        trust: trustV,
+        moduleState: moduleStatePda,
+        governanceConfig: cfgPda,
+        proposal: proposalPda,
+        proposer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Token-2022 mint setup
+    const mint = await createMint(
+      provider.connection,
+      (provider.wallet as anchor.Wallet).payer,
+      provider.wallet.publicKey,
+      null,
+      9,
+      Keypair.generate(),
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+    );
+
+    const voter = provider.wallet.publicKey;
+    const voterAta = getAssociatedTokenAddressSync(
+      mint,
+      voter,
+      false,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+    await provider.sendAndConfirm(
+      new anchor.web3.Transaction().add(
+        createAssociatedTokenAccountInstruction(
+          voter,
+          voterAta,
+          voter,
+          mint,
+          TOKEN_2022_PROGRAM_ID,
+          ASSOCIATED_TOKEN_PROGRAM_ID,
+        ),
+      ),
+    );
+    await mintTo(
+      provider.connection,
+      (provider.wallet as anchor.Wallet).payer,
+      mint,
+      voterAta,
+      voter,
+      1500,
+      [],
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+    );
+
+    const [votePda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("vote"),
+        trustV.toBuffer(),
+        Buffer.from(proposalId),
+        voter.toBuffer(),
+      ],
+      program.programId,
+    );
+
+    await program.methods
+      .castVoteToken(1) // For
+      .accounts({
+        proposal: proposalPda,
+        vote: votePda,
+        voterTokenAccount: voterAta,
+        mint,
+        voter,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const p = await program.account.proposal.fetch(proposalPda);
+    expect(p.forVotes.toString()).to.eq("1500");
+
+    const v = await program.account.voteRecord.fetch(votePda);
+    expect(v.weight.toString()).to.eq("1500");
+    expect(v.choice).to.eq(1);
   });
 
   it("rejects register_config with invalid bps", async () => {

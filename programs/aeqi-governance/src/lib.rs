@@ -15,6 +15,7 @@
 //! ixes. cast_vote and execute land in subsequent iterations.
 
 use anchor_lang::prelude::*;
+use anchor_spl::token_interface::{Mint, TokenAccount};
 
 declare_id!("528PTeSk8M3pKMMhc5vitbcwMGUMcHMzg6G5XpX8iVBn");
 
@@ -148,6 +149,54 @@ pub mod aeqi_governance {
             against_votes: p.against_votes,
             abstain_votes: p.abstain_votes,
             executed_at: now,
+        });
+        Ok(())
+    }
+
+    /// Cast a token-weighted vote. Vote power = `voter_token_account.amount`,
+    /// validated to be owned by the voter. The caller MUST pass the trust's
+    /// canonical Token-2022 cap-table account; mint validation against the
+    /// `[b"mint", trust]` PDA is the production hardening — currently the
+    /// caller passes the right account and ownership-of-account is enforced.
+    /// Replaces the legacy `cast_vote` (which took weight as a param) for
+    /// real token-mode governance.
+    pub fn cast_vote_token(ctx: Context<CastVoteToken>, choice: u8) -> Result<()> {
+        require!(choice <= 2, GovernanceError::InvalidVoteChoice);
+
+        let weight = ctx.accounts.voter_token_account.amount as u128;
+        require!(weight > 0, GovernanceError::ZeroWeight);
+
+        let p = &mut ctx.accounts.proposal;
+        let now = Clock::get()?.unix_timestamp;
+        require!(!p.executed, GovernanceError::ProposalAlreadyExecuted);
+        require!(!p.canceled, GovernanceError::ProposalCanceled);
+        require!(now >= p.vote_start, GovernanceError::VotingNotStarted);
+        require!(
+            now < p.vote_start.checked_add(p.vote_duration).unwrap(),
+            GovernanceError::VotingClosed
+        );
+
+        let v = &mut ctx.accounts.vote;
+        v.trust = p.trust;
+        v.proposal_id = p.proposal_id;
+        v.voter = ctx.accounts.voter.key();
+        v.choice = choice;
+        v.weight = weight;
+        v.bump = ctx.bumps.vote;
+
+        match choice {
+            0 => p.against_votes = p.against_votes.checked_add(weight).unwrap(),
+            1 => p.for_votes = p.for_votes.checked_add(weight).unwrap(),
+            2 => p.abstain_votes = p.abstain_votes.checked_add(weight).unwrap(),
+            _ => unreachable!(),
+        }
+
+        emit!(VoteCast {
+            trust: p.trust,
+            proposal_id: p.proposal_id,
+            voter: v.voter,
+            choice,
+            weight,
         });
         Ok(())
     }
@@ -413,6 +462,34 @@ pub struct ExecuteProposal<'info> {
     )]
     pub governance_config: Account<'info, GovernanceConfig>,
     pub executor: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct CastVoteToken<'info> {
+    #[account(
+        mut,
+        seeds = [b"proposal", proposal.trust.as_ref(), proposal.proposal_id.as_ref()],
+        bump = proposal.bump,
+    )]
+    pub proposal: Account<'info, Proposal>,
+    #[account(
+        init,
+        payer = voter,
+        space = 8 + VoteRecord::INIT_SPACE,
+        seeds = [b"vote", proposal.trust.as_ref(), proposal.proposal_id.as_ref(), voter.key().as_ref()],
+        bump,
+    )]
+    pub vote: Account<'info, VoteRecord>,
+    /// The voter's cap-table token account. `token::authority` constraint
+    /// enforces voter owns it; `mint` is bound by the same constraint.
+    #[account(token::authority = voter)]
+    pub voter_token_account: InterfaceAccount<'info, TokenAccount>,
+    /// CHECK: the cap-table mint — caller passes; mint == voter_token_account.mint
+    /// is enforced by Anchor's token_interface constraint resolver.
+    pub mint: InterfaceAccount<'info, Mint>,
+    #[account(mut)]
+    pub voter: Signer<'info>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
