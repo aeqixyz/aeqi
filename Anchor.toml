@@ -26,4 +26,5 @@ test = "npx ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
 bind_address = "127.0.0.1"
 rpc_port = 9899
 gossip_port = 9800
-faucet_port = 9900
+faucet_port = 9909
+# rpc_pubsub_port defaults to rpc_port + 1 = 9900 — keep faucet off that.

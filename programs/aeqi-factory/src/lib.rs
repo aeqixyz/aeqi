@@ -10,15 +10,19 @@
 //! 4. CPI each module's `finalize` so it loads its config.
 //! 5. CPI `aeqi_trust::finalize` to exit creation mode.
 //!
-//! This file ships step 1 as `create_company` so cross-program CPI is proven
-//! end-to-end. The full template-driven instantiate flow lands as
-//! `instantiate_template` in WS-S6 (next iteration).
+//! `create_company` ships step 1 as a standalone helper (proves CPI). The
+//! full template-driven instantiate is the staged pipeline above; templates
+//! land on-chain via `register_template` and get replayed by
+//! `instantiate_template` in the next iteration.
 
 use anchor_lang::prelude::*;
 use aeqi_trust::cpi::accounts::Initialize as TrustInitialize;
 use aeqi_trust::program::AeqiTrust;
 
 declare_id!("7rX3fnJUy7tDSpo1EGCnUhs1XnxxbsQzXXNDCTh64v6n");
+
+pub mod state;
+pub use state::*;
 
 #[program]
 pub mod aeqi_factory {
@@ -44,14 +48,39 @@ pub mod aeqi_factory {
         Ok(())
     }
 
-    /// Register a template — stores config + module set + ACL graph + initial
-    /// values keyed by `template_id`. Skeleton; full impl in WS-S6.
-    pub fn register_template(_ctx: Context<RegisterTemplate>) -> Result<()> {
+    /// Register a template — stores the module set, ACL graph, and admin so
+    /// `instantiate_template` can later replay this against a fresh TRUST.
+    /// Mirrors EVM `Factory.registerTemplate` + `FactoryLibrary.Template`.
+    pub fn register_template(
+        ctx: Context<RegisterTemplate>,
+        template_id: [u8; 32],
+        modules: Vec<ModuleSpec>,
+        acl_edges: Vec<AclEdgeSpec>,
+    ) -> Result<()> {
+        require!(!modules.is_empty(), FactoryError::EmptyModuleSet);
+        require!(modules.len() <= 16, FactoryError::TooManyModules);
+        require!(acl_edges.len() <= 64, FactoryError::TooManyAclEdges);
+
+        let template = &mut ctx.accounts.template;
+        template.template_id = template_id;
+        template.admin = ctx.accounts.admin.key();
+        template.modules = modules;
+        template.acl_edges = acl_edges;
+        template.bump = ctx.bumps.template;
+
+        emit!(TemplateRegistered {
+            template_id,
+            admin: template.admin,
+            module_count: template.modules.len() as u8,
+            acl_edge_count: template.acl_edges.len() as u8,
+        });
         Ok(())
     }
 
     /// Full instantiate — register_template-driven create flow that runs all
-    /// 5 steps above. Skeleton.
+    /// 5 steps (initialize → register modules → wire ACLs → module finalize →
+    /// trust finalize). Skeleton; lands incrementally as module init/finalize
+    /// CPI surfaces stabilize across role/token/governance.
     pub fn instantiate_template(_ctx: Context<InstantiateTemplate>) -> Result<()> {
         Ok(())
     }
@@ -60,8 +89,8 @@ pub mod aeqi_factory {
 #[derive(Accounts)]
 #[instruction(trust_id: [u8; 32])]
 pub struct CreateCompany<'info> {
-    /// CHECK: validated structurally by aeqi_trust::initialize, which
-    /// derives the PDA from `[b"trust", trust_id]` under its own program ID.
+    /// CHECK: validated structurally by aeqi_trust::initialize, which derives
+    /// the PDA from `[b"trust", trust_id]` under its own program ID.
     #[account(mut)]
     pub trust: UncheckedAccount<'info>,
     #[account(mut)]
@@ -71,7 +100,16 @@ pub struct CreateCompany<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(template_id: [u8; 32], modules: Vec<ModuleSpec>, acl_edges: Vec<AclEdgeSpec>)]
 pub struct RegisterTemplate<'info> {
+    #[account(
+        init,
+        payer = admin,
+        space = Template::space(modules.len(), acl_edges.len()),
+        seeds = [b"template", template_id.as_ref()],
+        bump,
+    )]
+    pub template: Account<'info, Template>,
     #[account(mut)]
     pub admin: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -89,4 +127,22 @@ pub struct CompanyCreated {
     pub trust: Pubkey,
     pub trust_id: [u8; 32],
     pub authority: Pubkey,
+}
+
+#[event]
+pub struct TemplateRegistered {
+    pub template_id: [u8; 32],
+    pub admin: Pubkey,
+    pub module_count: u8,
+    pub acl_edge_count: u8,
+}
+
+#[error_code]
+pub enum FactoryError {
+    #[msg("template must declare at least one module")]
+    EmptyModuleSet,
+    #[msg("template module set exceeds maximum (16)")]
+    TooManyModules,
+    #[msg("template ACL edges exceed maximum (64)")]
+    TooManyAclEdges,
 }
