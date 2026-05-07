@@ -370,6 +370,193 @@ describe("aeqi_governance", () => {
     expect(threw).to.eq(true);
   });
 
+  it("cast_vote_role reads weight from RoleVoteCheckpoint owned by aeqi_role", async () => {
+    // Need an actual RoleVoteCheckpoint PDA — set one up by spinning up
+    // aeqi_role on a fresh fake trust, creating + assigning a role.
+    const role = anchor.workspace.aeqiRole as anchor.Program<
+      import("../target/types/aeqi_role").AeqiRole
+    >;
+
+    const trustR = Keypair.generate().publicKey;
+    const directorTypeId = new Uint8Array(32);
+    directorTypeId[0] = 0xc7;
+
+    // 1. init aeqi_role module on fake trust
+    const [roleModuleStatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role_module"), trustR.toBuffer()],
+      role.programId,
+    );
+    await role.methods
+      .init()
+      .accounts({
+        trust: trustR,
+        moduleState: roleModuleStatePda,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // 2. create the director role type
+    const [rtPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role_type"), trustR.toBuffer(), Buffer.from(directorTypeId)],
+      role.programId,
+    );
+    await role.methods
+      .createRoleType(Array.from(directorTypeId), 0, {
+        vesting: false,
+        vestingCliff: new anchor.BN(0),
+        vestingDuration: new anchor.BN(0),
+        fdv: false,
+        fdvStart: new anchor.BN(0),
+        fdvEnd: new anchor.BN(0),
+        probationaryPeriod: new anchor.BN(0),
+        severancePeriod: new anchor.BN(0),
+        contribution: false,
+      })
+      .accounts({
+        trust: trustR,
+        roleType: rtPda,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // 3. create a role + assign to provider.wallet — auto-self-delegates → checkpoint count = 1
+    const roleId = new Uint8Array(32);
+    roleId[0] = 0xc7;
+    roleId[1] = 0x01;
+    const [rolePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role"), trustR.toBuffer(), Buffer.from(roleId)],
+      role.programId,
+    );
+    await role.methods
+      .createRole(
+        Array.from(roleId),
+        Array.from(directorTypeId),
+        null,
+        Array.from(new Uint8Array(64)),
+      )
+      .accounts({
+        trust: trustR,
+        roleType: rtPda,
+        role: rolePda,
+        callerRole: null,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const voter = provider.wallet.publicKey;
+    const [checkpointPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("role_ckpt"),
+        trustR.toBuffer(),
+        Buffer.from(directorTypeId),
+        voter.toBuffer(),
+      ],
+      role.programId,
+    );
+    await role.methods
+      .assignRole(voter)
+      .accounts({
+        role: rolePda,
+        roleType: rtPda,
+        trust: trustR,
+        checkpoint: checkpointPda,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // 4. governance setup — config_id = directorTypeId (per-role multisig mode)
+    const [govModulePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("gov_module"), trustR.toBuffer()],
+      program.programId,
+    );
+    await program.methods
+      .init()
+      .accounts({
+        trust: trustR,
+        moduleState: govModulePda,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const [cfgPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("gov_config"), trustR.toBuffer(), Buffer.from(directorTypeId)],
+      program.programId,
+    );
+    await program.methods
+      .registerConfig(Array.from(directorTypeId), {
+        proposalThreshold: new anchor.BN(0),
+        quorumBps: 4000,
+        supportBps: 5000,
+        votingPeriod: new anchor.BN(60),
+        executionDelay: new anchor.BN(0),
+        allowEarlyEnact: true,
+      })
+      .accounts({
+        trust: trustR,
+        moduleState: govModulePda,
+        governanceConfig: cfgPda,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const proposalId = new Uint8Array(32);
+    proposalId[0] = 0xc7;
+    proposalId[1] = 0xff;
+    const [proposalPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("proposal"), trustR.toBuffer(), Buffer.from(proposalId)],
+      program.programId,
+    );
+    await program.methods
+      .propose(
+        Array.from(proposalId),
+        Array.from(directorTypeId),
+        Array.from(new Uint8Array(64)),
+      )
+      .accounts({
+        trust: trustR,
+        moduleState: govModulePda,
+        governanceConfig: cfgPda,
+        proposal: proposalPda,
+        proposer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // 5. cast_vote_role — voter_checkpoint = the role-checkpoint PDA we just created
+    const [votePda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("vote"),
+        trustR.toBuffer(),
+        Buffer.from(proposalId),
+        voter.toBuffer(),
+      ],
+      program.programId,
+    );
+
+    await program.methods
+      .castVoteRole(1) // For
+      .accounts({
+        proposal: proposalPda,
+        vote: votePda,
+        voterCheckpoint: checkpointPda,
+        voter,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const p = await program.account.proposal.fetch(proposalPda);
+    expect(p.forVotes.toString()).to.eq("1"); // 1 director role held by voter
+
+    const v = await program.account.voteRecord.fetch(votePda);
+    expect(v.weight.toString()).to.eq("1");
+  });
+
   it("cast_vote_token reads weight from real Token-2022 balance", async () => {
     // Fresh trust + governance config + proposal, plus a real Token-2022
     // mint with the voter holding 1500 tokens. cast_vote_token should

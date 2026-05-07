@@ -19,6 +19,24 @@ use anchor_spl::token_interface::{Mint, TokenAccount};
 
 declare_id!("528PTeSk8M3pKMMhc5vitbcwMGUMcHMzg6G5XpX8iVBn");
 
+/// Hardcoded aeqi_role program ID — used to validate the PDA derivation +
+/// account ownership of `voter_checkpoint` in `cast_vote_role`. Avoids a
+/// cross-crate dep just to read RoleVoteCheckpoint.account / .count.
+pub const AEQI_ROLE_ID: Pubkey =
+    anchor_lang::pubkey!("HFqh9bPLS7EwirMsz9MpNT96SN5v2JBeKTdnUpSVyuVe");
+
+/// Same memory layout as `aeqi_role::RoleVoteCheckpoint`. Used for borsh
+/// deserialization of the cross-program account data; the `#[account]`
+/// discriminator on the original is handled by skipping the first 8 bytes.
+#[derive(AnchorDeserialize, AnchorSerialize)]
+pub struct RoleVoteCheckpointData {
+    pub account: Pubkey,
+    pub role_type_id: [u8; 32],
+    pub slot: u64,
+    pub count: u64,
+    pub bump: u8,
+}
+
 #[program]
 pub mod aeqi_governance {
     use super::*;
@@ -149,6 +167,76 @@ pub mod aeqi_governance {
             against_votes: p.against_votes,
             abstain_votes: p.abstain_votes,
             executed_at: now,
+        });
+        Ok(())
+    }
+
+    /// Cast a per-role-multisig vote. Vote power = the voter's
+    /// `RoleVoteCheckpoint.count` for the role type designated by the
+    /// proposal's governance_config_id. The checkpoint PDA is owned by
+    /// `aeqi_role`; we validate its `account` field == voter.
+    pub fn cast_vote_role(ctx: Context<CastVoteRole>, choice: u8) -> Result<()> {
+        require!(choice <= 2, GovernanceError::InvalidVoteChoice);
+
+        // Validate the cross-program account: must be owned by aeqi_role and
+        // its PDA derivation is enforced by Anchor's seeds::program constraint.
+        let acct_info = &ctx.accounts.voter_checkpoint;
+        require_keys_eq!(
+            *acct_info.owner,
+            AEQI_ROLE_ID,
+            GovernanceError::InvalidCheckpoint
+        );
+
+        let data = acct_info.try_borrow_data()?;
+        require!(data.len() >= 8, GovernanceError::InvalidCheckpoint);
+        // Skip Anchor's 8-byte discriminator (we already validated ownership).
+        let ckpt = RoleVoteCheckpointData::try_from_slice(&data[8..])
+            .map_err(|_| error!(GovernanceError::InvalidCheckpoint))?;
+
+        require_keys_eq!(
+            ckpt.account,
+            ctx.accounts.voter.key(),
+            GovernanceError::CheckpointVoterMismatch
+        );
+        require!(
+            ckpt.role_type_id == ctx.accounts.proposal.governance_config_id,
+            GovernanceError::ConfigMismatch
+        );
+
+        let weight = ckpt.count as u128;
+        require!(weight > 0, GovernanceError::ZeroWeight);
+
+        let p = &mut ctx.accounts.proposal;
+        let now = Clock::get()?.unix_timestamp;
+        require!(!p.executed, GovernanceError::ProposalAlreadyExecuted);
+        require!(!p.canceled, GovernanceError::ProposalCanceled);
+        require!(now >= p.vote_start, GovernanceError::VotingNotStarted);
+        require!(
+            now < p.vote_start.checked_add(p.vote_duration).unwrap(),
+            GovernanceError::VotingClosed
+        );
+
+        let v = &mut ctx.accounts.vote;
+        v.trust = p.trust;
+        v.proposal_id = p.proposal_id;
+        v.voter = ctx.accounts.voter.key();
+        v.choice = choice;
+        v.weight = weight;
+        v.bump = ctx.bumps.vote;
+
+        match choice {
+            0 => p.against_votes = p.against_votes.checked_add(weight).unwrap(),
+            1 => p.for_votes = p.for_votes.checked_add(weight).unwrap(),
+            2 => p.abstain_votes = p.abstain_votes.checked_add(weight).unwrap(),
+            _ => unreachable!(),
+        }
+
+        emit!(VoteCast {
+            trust: p.trust,
+            proposal_id: p.proposal_id,
+            voter: v.voter,
+            choice,
+            weight,
         });
         Ok(())
     }
@@ -465,6 +553,41 @@ pub struct ExecuteProposal<'info> {
 }
 
 #[derive(Accounts)]
+pub struct CastVoteRole<'info> {
+    #[account(
+        mut,
+        seeds = [b"proposal", proposal.trust.as_ref(), proposal.proposal_id.as_ref()],
+        bump = proposal.bump,
+    )]
+    pub proposal: Account<'info, Proposal>,
+    #[account(
+        init,
+        payer = voter,
+        space = 8 + VoteRecord::INIT_SPACE,
+        seeds = [b"vote", proposal.trust.as_ref(), proposal.proposal_id.as_ref(), voter.key().as_ref()],
+        bump,
+    )]
+    pub vote: Account<'info, VoteRecord>,
+    /// CHECK: voter's role-vote checkpoint PDA, owned by aeqi_role. PDA
+    /// derivation is enforced by `seeds::program = AEQI_ROLE_ID`; the
+    /// handler verifies ownership and borsh-decodes the data manually.
+    #[account(
+        seeds = [
+            b"role_ckpt",
+            proposal.trust.as_ref(),
+            proposal.governance_config_id.as_ref(),
+            voter.key().as_ref(),
+        ],
+        bump,
+        seeds::program = AEQI_ROLE_ID,
+    )]
+    pub voter_checkpoint: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub voter: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct CastVoteToken<'info> {
     #[account(
         mut,
@@ -584,4 +707,8 @@ pub enum GovernanceError {
     SupportNotMet,
     #[msg("execution delay has not yet elapsed")]
     ExecutionDelayNotMet,
+    #[msg("voter_checkpoint.account != voter signer")]
+    CheckpointVoterMismatch,
+    #[msg("voter_checkpoint is not owned by aeqi_role or has invalid layout")]
+    InvalidCheckpoint,
 }
