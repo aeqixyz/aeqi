@@ -6,6 +6,7 @@ members = [
     "programs/aeqi-role",
     "programs/aeqi-governance",
     "programs/aeqi-token",
+    "programs/aeqi-treasury",
 ]
 
 [workspace.package]

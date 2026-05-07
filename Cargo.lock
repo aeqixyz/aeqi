@@ -44,6 +44,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aeqi-treasury"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+]
+
+[[package]]
 name = "aeqi-trust"
 version = "0.1.0"
 dependencies = [
