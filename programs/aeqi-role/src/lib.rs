@@ -75,8 +75,8 @@ pub mod aeqi_role {
     /// role that is an ancestor of `parent_role_id` (or be the TRUST authority
     /// during creation mode). The off-chain client supplies the ancestor walk
     /// in `remaining_accounts`.
-    pub fn create_role(
-        ctx: Context<CreateRole>,
+    pub fn create_role<'info>(
+        ctx: Context<'_, '_, 'info, 'info, CreateRole<'info>>,
         role_id: [u8; 32],
         role_type_id: [u8; 32],
         parent_role_id: Option<[u8; 32]>,
@@ -215,10 +215,10 @@ pub mod aeqi_role {
 /// Walk parent_role_id chain from `caller_role` upward looking for `target`.
 /// `remaining_accounts` must contain the chain from caller's parent up to
 /// (and including) the target role, in order.
-fn check_authority_walk(
-    caller_role: &Account<Role>,
+fn check_authority_walk<'info>(
+    caller_role: &Account<'info, Role>,
     target_role_id: &[u8; 32],
-    remaining: &[AccountInfo],
+    remaining: &'info [AccountInfo<'info>],
 ) -> Result<()> {
     if &caller_role.role_id == target_role_id {
         return Ok(());
