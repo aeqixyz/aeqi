@@ -147,6 +147,99 @@ describe("aeqi_factory", () => {
     expect(gov.trustAcl.toString()).to.eq("128");
   });
 
+  it("instantiate_template replays a registered template into a fresh TRUST", async () => {
+    // Register a template first
+    const templateId = new Uint8Array(32);
+    templateId[0] = 0xa1;
+    templateId[1] = 0x02;
+
+    const [templatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("template"), Buffer.from(templateId)],
+      factory.programId,
+    );
+
+    const moduleIdR = new Uint8Array(32);
+    moduleIdR[0] = 0x52;
+    moduleIdR[1] = 0xa1;
+    const moduleIdT = new Uint8Array(32);
+    moduleIdT[0] = 0x54;
+    moduleIdT[1] = 0xa1;
+
+    const programR = anchor.web3.Keypair.generate().publicKey;
+    const programT = anchor.web3.Keypair.generate().publicKey;
+
+    await factory.methods
+      .registerTemplate(
+        Array.from(templateId),
+        [
+          {
+            moduleId: Array.from(moduleIdR),
+            programId: programR,
+            trustAcl: new anchor.BN(0xff),
+          },
+          {
+            moduleId: Array.from(moduleIdT),
+            programId: programT,
+            trustAcl: new anchor.BN(0x80),
+          },
+        ],
+        [],
+      )
+      .accounts({
+        template: templatePda,
+        admin: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Now instantiate it against a fresh trust_id
+    const trustId = new Uint8Array(32);
+    trustId[0] = 0x88;
+    trustId[1] = 0xa1;
+
+    const [trustPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("trust"), Buffer.from(trustId)],
+      trust.programId,
+    );
+
+    const [modR] = PublicKey.findProgramAddressSync(
+      [Buffer.from("module"), trustPda.toBuffer(), Buffer.from(moduleIdR)],
+      trust.programId,
+    );
+    const [modT] = PublicKey.findProgramAddressSync(
+      [Buffer.from("module"), trustPda.toBuffer(), Buffer.from(moduleIdT)],
+      trust.programId,
+    );
+
+    await factory.methods
+      .instantiateTemplate(Array.from(trustId))
+      .accounts({
+        template: templatePda,
+        trust: trustPda,
+        authority: provider.wallet.publicKey,
+        aeqiTrustProgram: trust.programId,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .remainingAccounts([
+        { pubkey: modR, isWritable: true, isSigner: false },
+        { pubkey: modT, isWritable: true, isSigner: false },
+      ])
+      .rpc();
+
+    // Verify trust is finalized + 2 modules registered with right program IDs
+    const t = await trust.account.trust.fetch(trustPda);
+    expect(t.creationMode).to.eq(false);
+    expect(t.moduleCount).to.eq(2);
+
+    const mR = await trust.account.module.fetch(modR);
+    expect(mR.programId.toBase58()).to.eq(programR.toBase58());
+    expect(mR.trustAcl.toString()).to.eq("255");
+
+    const mT = await trust.account.module.fetch(modT);
+    expect(mT.programId.toBase58()).to.eq(programT.toBase58());
+    expect(mT.trustAcl.toString()).to.eq("128");
+  });
+
   it("rejects register_template with empty module set", async () => {
     const templateId = new Uint8Array(32);
     templateId[0] = 0xee;

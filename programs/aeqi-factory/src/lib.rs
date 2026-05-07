@@ -157,11 +157,84 @@ pub mod aeqi_factory {
         Ok(())
     }
 
-    /// Full instantiate — register_template-driven create flow that runs all
-    /// 5 steps (initialize → register modules → wire ACLs → module finalize →
-    /// trust finalize). Skeleton; lands incrementally as module init/finalize
-    /// CPI surfaces stabilize across role/token/governance.
-    pub fn instantiate_template(_ctx: Context<InstantiateTemplate>) -> Result<()> {
+    /// Full template-driven create flow: reads a registered Template PDA and
+    /// replays its module set against a fresh TRUST. Mirrors EVM
+    /// `Factory._createTRUST` reading from `Factory.templates[templateId]`.
+    ///
+    /// `remaining_accounts` layout: one Module PDA per module in the
+    /// template, in declaration order. The aeqi_trust program will init them
+    /// pairwise during CPI.
+    ///
+    /// Steps run atomically:
+    ///   1. CPI aeqi_trust::initialize (creates trust, enters creation mode)
+    ///   2. For each ModuleSpec in template.modules: CPI register_module
+    ///   3. CPI aeqi_trust::finalize (exits creation mode)
+    ///
+    /// Module init/finalize CPIs (loading per-module config) land separately
+    /// once each module's surface stabilizes. ACL-edge CPIs likewise.
+    pub fn instantiate_template<'info>(
+        ctx: Context<'_, '_, 'info, 'info, InstantiateTemplate<'info>>,
+        trust_id: [u8; 32],
+    ) -> Result<()> {
+        let template = &ctx.accounts.template;
+        require!(
+            !template.modules.is_empty(),
+            FactoryError::EmptyModuleSet
+        );
+        require!(
+            ctx.remaining_accounts.len() == template.modules.len(),
+            FactoryError::ModuleAccountCountMismatch
+        );
+
+        // 1. initialize trust
+        let init_accounts = TrustInitialize {
+            trust: ctx.accounts.trust.to_account_info(),
+            authority: ctx.accounts.authority.to_account_info(),
+            system_program: ctx.accounts.system_program.to_account_info(),
+        };
+        let init_ctx = CpiContext::new(
+            ctx.accounts.aeqi_trust_program.to_account_info(),
+            init_accounts,
+        );
+        aeqi_trust::cpi::initialize(init_ctx, trust_id)?;
+
+        // 2. register each module from the template's spec
+        for (spec, module_acct) in template.modules.iter().zip(ctx.remaining_accounts.iter()) {
+            let reg_accounts = TrustRegisterModule {
+                trust: ctx.accounts.trust.to_account_info(),
+                module: module_acct.clone(),
+                authority: ctx.accounts.authority.to_account_info(),
+                system_program: ctx.accounts.system_program.to_account_info(),
+            };
+            let reg_ctx = CpiContext::new(
+                ctx.accounts.aeqi_trust_program.to_account_info(),
+                reg_accounts,
+            );
+            aeqi_trust::cpi::register_module(
+                reg_ctx,
+                spec.module_id,
+                spec.program_id,
+                spec.trust_acl,
+            )?;
+        }
+
+        // 3. finalize trust
+        let fin_accounts = TrustFinalize {
+            trust: ctx.accounts.trust.to_account_info(),
+            authority: ctx.accounts.authority.to_account_info(),
+        };
+        let fin_ctx = CpiContext::new(
+            ctx.accounts.aeqi_trust_program.to_account_info(),
+            fin_accounts,
+        );
+        aeqi_trust::cpi::finalize(fin_ctx)?;
+
+        emit!(TemplateInstantiated {
+            trust: ctx.accounts.trust.key(),
+            trust_id,
+            template_id: template.template_id,
+            module_count: template.modules.len() as u8,
+        });
         Ok(())
     }
 }
@@ -209,9 +282,17 @@ pub struct CreateWithModules<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(trust_id: [u8; 32])]
 pub struct InstantiateTemplate<'info> {
+    #[account(seeds = [b"template", template.template_id.as_ref()], bump = template.bump)]
+    pub template: Account<'info, Template>,
+    /// CHECK: aeqi_trust::initialize derives the PDA from
+    /// `[b"trust", trust_id]` under its own program ID.
     #[account(mut)]
-    pub creator: Signer<'info>,
+    pub trust: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub aeqi_trust_program: Program<'info, AeqiTrust>,
     pub system_program: Program<'info, System>,
 }
 
@@ -228,6 +309,14 @@ pub struct TemplateRegistered {
     pub admin: Pubkey,
     pub module_count: u8,
     pub acl_edge_count: u8,
+}
+
+#[event]
+pub struct TemplateInstantiated {
+    pub trust: Pubkey,
+    pub trust_id: [u8; 32],
+    pub template_id: [u8; 32],
+    pub module_count: u8,
 }
 
 #[event]
