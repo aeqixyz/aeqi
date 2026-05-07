@@ -76,6 +76,82 @@ pub mod aeqi_governance {
         Ok(())
     }
 
+    /// Execute a proposal that has succeeded. Mirrors EVM
+    /// `Governance.module._execute`. Validates:
+    ///   - voting period has ended (or early enact + thresholds met)
+    ///   - quorum: (for + abstain) ≥ totalVoteSupply * quorum_bps / 10000
+    ///   - support: for ≥ (for + against) * support_bps / 10000
+    ///
+    /// `total_vote_supply` is passed in; the next iteration replaces it with
+    /// a CPI to aeqi_token::total_supply (token mode) or
+    /// aeqi_role::role_count(role_type) (per-role multisig).
+    ///
+    /// On-chain ix dispatch (running the proposed action via remaining_accounts)
+    /// is reserved for a follow-up — this iteration just transitions
+    /// Proposal.executed → true after threshold gate.
+    pub fn execute_proposal(
+        ctx: Context<ExecuteProposal>,
+        total_vote_supply: u128,
+    ) -> Result<()> {
+        let cfg = &ctx.accounts.governance_config;
+        let p = &mut ctx.accounts.proposal;
+
+        require!(!p.executed, GovernanceError::ProposalAlreadyExecuted);
+        require!(!p.canceled, GovernanceError::ProposalCanceled);
+        require!(
+            p.governance_config_id == cfg.governance_config_id,
+            GovernanceError::ConfigMismatch
+        );
+
+        let now = Clock::get()?.unix_timestamp;
+        let vote_end = p.vote_start.checked_add(p.vote_duration).unwrap();
+
+        // Allow early enact if config permits AND thresholds already met.
+        let voting_ended = now >= vote_end;
+        let early_ok = cfg.allow_early_enact;
+        require!(voting_ended || early_ok, GovernanceError::VotingNotClosed);
+
+        // Quorum: (for + abstain) ≥ supply * quorum_bps / 10000
+        let participating = p.for_votes.checked_add(p.abstain_votes).unwrap();
+        let quorum_required = total_vote_supply
+            .checked_mul(cfg.quorum_bps as u128)
+            .unwrap()
+            .checked_div(10_000)
+            .unwrap();
+        require!(participating >= quorum_required, GovernanceError::QuorumNotMet);
+
+        // Support: for ≥ (for + against) * support_bps / 10000
+        let decisive = p.for_votes.checked_add(p.against_votes).unwrap();
+        require!(decisive > 0, GovernanceError::NoDecisiveVotes);
+        let support_required = decisive
+            .checked_mul(cfg.support_bps as u128)
+            .unwrap()
+            .checked_div(10_000)
+            .unwrap();
+        require!(p.for_votes >= support_required, GovernanceError::SupportNotMet);
+
+        // Optional execution delay: enforce now ≥ vote_end + execution_delay
+        if cfg.execution_delay > 0 {
+            require!(
+                now >= vote_end.checked_add(cfg.execution_delay).unwrap(),
+                GovernanceError::ExecutionDelayNotMet
+            );
+        }
+
+        p.succeeded_at = if p.succeeded_at == 0 { now } else { p.succeeded_at };
+        p.executed = true;
+
+        emit!(ProposalExecuted {
+            trust: p.trust,
+            proposal_id: p.proposal_id,
+            for_votes: p.for_votes,
+            against_votes: p.against_votes,
+            abstain_votes: p.abstain_votes,
+            executed_at: now,
+        });
+        Ok(())
+    }
+
     /// Cast a vote on a proposal. Records a `VoteRecord` PDA so the same voter
     /// can't double-vote, and bumps the proposal's tally. Vote power is
     /// passed in for now; the next iteration replaces this with a CPI to
@@ -324,6 +400,22 @@ pub struct Propose<'info> {
 }
 
 #[derive(Accounts)]
+pub struct ExecuteProposal<'info> {
+    #[account(
+        mut,
+        seeds = [b"proposal", proposal.trust.as_ref(), proposal.proposal_id.as_ref()],
+        bump = proposal.bump,
+    )]
+    pub proposal: Account<'info, Proposal>,
+    #[account(
+        seeds = [b"gov_config", proposal.trust.as_ref(), proposal.governance_config_id.as_ref()],
+        bump = governance_config.bump,
+    )]
+    pub governance_config: Account<'info, GovernanceConfig>,
+    pub executor: Signer<'info>,
+}
+
+#[derive(Accounts)]
 pub struct CastVote<'info> {
     #[account(
         mut,
@@ -367,6 +459,16 @@ pub struct ProposalCreated {
 }
 
 #[event]
+pub struct ProposalExecuted {
+    pub trust: Pubkey,
+    pub proposal_id: [u8; 32],
+    pub for_votes: u128,
+    pub against_votes: u128,
+    pub abstain_votes: u128,
+    pub executed_at: i64,
+}
+
+#[event]
 pub struct VoteCast {
     pub trust: Pubkey,
     pub proposal_id: [u8; 32],
@@ -395,4 +497,14 @@ pub enum GovernanceError {
     VotingNotStarted,
     #[msg("voting has closed for this proposal")]
     VotingClosed,
+    #[msg("voting has not yet closed and config does not allow early enact")]
+    VotingNotClosed,
+    #[msg("quorum threshold not met")]
+    QuorumNotMet,
+    #[msg("no decisive votes (for + against = 0)")]
+    NoDecisiveVotes,
+    #[msg("support threshold not met")]
+    SupportNotMet,
+    #[msg("execution delay has not yet elapsed")]
+    ExecutionDelayNotMet,
 }
