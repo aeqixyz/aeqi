@@ -20,6 +20,12 @@ use aeqi_trust::cpi::accounts::{
     Finalize as TrustFinalize, Initialize as TrustInitialize, RegisterModule as TrustRegisterModule,
 };
 use aeqi_trust::program::AeqiTrust;
+use aeqi_role::cpi::accounts::InitModule as RoleInit;
+use aeqi_role::program::AeqiRole;
+use aeqi_token::cpi::accounts::InitToken;
+use aeqi_token::program::AeqiToken;
+use aeqi_governance::cpi::accounts::InitGovernance;
+use aeqi_governance::program::AeqiGovernance;
 
 declare_id!("7rX3fnJUy7tDSpo1EGCnUhs1XnxxbsQzXXNDCTh64v6n");
 
@@ -124,6 +130,130 @@ pub mod aeqi_factory {
             trust_id,
             authority: ctx.accounts.authority.key(),
             module_count: modules.len() as u8,
+        });
+        Ok(())
+    }
+
+    /// Full atomic spawn — closes the gap where the EVM Factory orchestrates
+    /// everything in one tx. Runs all 5 steps of `Factory._createTRUST`
+    /// for the canonical 3-module configuration (role + token + governance):
+    ///
+    ///   1. CPI `aeqi_trust::initialize` (creates trust PDA, creation mode)
+    ///   2. CPI `aeqi_trust::register_module` ×3 (one per module slot)
+    ///   3. CPI each module's `init` (creates its module-state PDA bound
+    ///      to the trust)
+    ///   4. CPI `aeqi_trust::finalize` (exits creation mode)
+    ///
+    /// Module finalize CPIs (config-bytes decode) are NOT yet called here —
+    /// that requires the BytesConfig dispatch flow which follows.
+    /// Tx size: ~13 accounts; should fit comfortably in 1232 bytes.
+    pub fn create_company_full(
+        ctx: Context<CreateCompanyFull>,
+        trust_id: [u8; 32],
+        role_module_id: [u8; 32],
+        token_module_id: [u8; 32],
+        gov_module_id: [u8; 32],
+        role_acl: u64,
+        token_acl: u64,
+        gov_acl: u64,
+    ) -> Result<()> {
+        // 1. initialize trust
+        let init_accs = TrustInitialize {
+            trust: ctx.accounts.trust.to_account_info(),
+            authority: ctx.accounts.authority.to_account_info(),
+            system_program: ctx.accounts.system_program.to_account_info(),
+        };
+        aeqi_trust::cpi::initialize(
+            CpiContext::new(ctx.accounts.aeqi_trust_program.to_account_info(), init_accs),
+            trust_id,
+        )?;
+
+        // 2. register the 3 modules on trust (one CPI each)
+        aeqi_trust::cpi::register_module(
+            CpiContext::new(
+                ctx.accounts.aeqi_trust_program.to_account_info(),
+                TrustRegisterModule {
+                    trust: ctx.accounts.trust.to_account_info(),
+                    module: ctx.accounts.role_module.to_account_info(),
+                    authority: ctx.accounts.authority.to_account_info(),
+                    system_program: ctx.accounts.system_program.to_account_info(),
+                },
+            ),
+            role_module_id,
+            ctx.accounts.aeqi_role_program.key(),
+            role_acl,
+        )?;
+        aeqi_trust::cpi::register_module(
+            CpiContext::new(
+                ctx.accounts.aeqi_trust_program.to_account_info(),
+                TrustRegisterModule {
+                    trust: ctx.accounts.trust.to_account_info(),
+                    module: ctx.accounts.token_module.to_account_info(),
+                    authority: ctx.accounts.authority.to_account_info(),
+                    system_program: ctx.accounts.system_program.to_account_info(),
+                },
+            ),
+            token_module_id,
+            ctx.accounts.aeqi_token_program.key(),
+            token_acl,
+        )?;
+        aeqi_trust::cpi::register_module(
+            CpiContext::new(
+                ctx.accounts.aeqi_trust_program.to_account_info(),
+                TrustRegisterModule {
+                    trust: ctx.accounts.trust.to_account_info(),
+                    module: ctx.accounts.gov_module.to_account_info(),
+                    authority: ctx.accounts.authority.to_account_info(),
+                    system_program: ctx.accounts.system_program.to_account_info(),
+                },
+            ),
+            gov_module_id,
+            ctx.accounts.aeqi_governance_program.key(),
+            gov_acl,
+        )?;
+
+        // 3. CPI each module's init — creates the module-state PDA
+        aeqi_role::cpi::init(CpiContext::new(
+            ctx.accounts.aeqi_role_program.to_account_info(),
+            RoleInit {
+                trust: ctx.accounts.trust.to_account_info(),
+                module_state: ctx.accounts.role_module_state.to_account_info(),
+                payer: ctx.accounts.authority.to_account_info(),
+                system_program: ctx.accounts.system_program.to_account_info(),
+            },
+        ))?;
+        aeqi_token::cpi::init(CpiContext::new(
+            ctx.accounts.aeqi_token_program.to_account_info(),
+            InitToken {
+                trust: ctx.accounts.trust.to_account_info(),
+                module_state: ctx.accounts.token_module_state.to_account_info(),
+                payer: ctx.accounts.authority.to_account_info(),
+                system_program: ctx.accounts.system_program.to_account_info(),
+            },
+        ))?;
+        aeqi_governance::cpi::init(CpiContext::new(
+            ctx.accounts.aeqi_governance_program.to_account_info(),
+            InitGovernance {
+                trust: ctx.accounts.trust.to_account_info(),
+                module_state: ctx.accounts.gov_module_state.to_account_info(),
+                payer: ctx.accounts.authority.to_account_info(),
+                system_program: ctx.accounts.system_program.to_account_info(),
+            },
+        ))?;
+
+        // 4. finalize trust
+        aeqi_trust::cpi::finalize(CpiContext::new(
+            ctx.accounts.aeqi_trust_program.to_account_info(),
+            TrustFinalize {
+                trust: ctx.accounts.trust.to_account_info(),
+                authority: ctx.accounts.authority.to_account_info(),
+            },
+        ))?;
+
+        emit!(CompanyFullySpawned {
+            trust: ctx.accounts.trust.key(),
+            trust_id,
+            authority: ctx.accounts.authority.key(),
         });
         Ok(())
     }
@@ -282,6 +412,44 @@ pub struct CreateWithModules<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(
+    trust_id: [u8; 32],
+    role_module_id: [u8; 32],
+    token_module_id: [u8; 32],
+    gov_module_id: [u8; 32],
+)]
+pub struct CreateCompanyFull<'info> {
+    /// CHECK: aeqi_trust::initialize derives + creates the PDA.
+    #[account(mut)]
+    pub trust: UncheckedAccount<'info>,
+    /// CHECK: aeqi_trust::register_module creates this PDA.
+    #[account(mut)]
+    pub role_module: UncheckedAccount<'info>,
+    /// CHECK: aeqi_trust::register_module creates this PDA.
+    #[account(mut)]
+    pub token_module: UncheckedAccount<'info>,
+    /// CHECK: aeqi_trust::register_module creates this PDA.
+    #[account(mut)]
+    pub gov_module: UncheckedAccount<'info>,
+    /// CHECK: aeqi_role::init creates this PDA.
+    #[account(mut)]
+    pub role_module_state: UncheckedAccount<'info>,
+    /// CHECK: aeqi_token::init creates this PDA.
+    #[account(mut)]
+    pub token_module_state: UncheckedAccount<'info>,
+    /// CHECK: aeqi_governance::init creates this PDA.
+    #[account(mut)]
+    pub gov_module_state: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub aeqi_trust_program: Program<'info, AeqiTrust>,
+    pub aeqi_role_program: Program<'info, AeqiRole>,
+    pub aeqi_token_program: Program<'info, AeqiToken>,
+    pub aeqi_governance_program: Program<'info, AeqiGovernance>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 #[instruction(trust_id: [u8; 32])]
 pub struct InstantiateTemplate<'info> {
     #[account(seeds = [b"template", template.template_id.as_ref()], bump = template.bump)]
@@ -309,6 +477,13 @@ pub struct TemplateRegistered {
     pub admin: Pubkey,
     pub module_count: u8,
     pub acl_edge_count: u8,
+}
+
+#[event]
+pub struct CompanyFullySpawned {
+    pub trust: Pubkey,
+    pub trust_id: [u8; 32],
+    pub authority: Pubkey,
 }
 
 #[event]

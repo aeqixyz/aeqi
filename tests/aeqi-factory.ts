@@ -2,6 +2,9 @@ import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { AeqiFactory } from "../target/types/aeqi_factory";
 import { AeqiTrust } from "../target/types/aeqi_trust";
+import { AeqiRole } from "../target/types/aeqi_role";
+import { AeqiToken } from "../target/types/aeqi_token";
+import { AeqiGovernance } from "../target/types/aeqi_governance";
 import { PublicKey } from "@solana/web3.js";
 import { expect } from "chai";
 
@@ -11,6 +14,9 @@ describe("aeqi_factory", () => {
 
   const factory = anchor.workspace.aeqiFactory as Program<AeqiFactory>;
   const trust = anchor.workspace.aeqiTrust as Program<AeqiTrust>;
+  const role = anchor.workspace.aeqiRole as Program<AeqiRole>;
+  const token = anchor.workspace.aeqiToken as Program<AeqiToken>;
+  const governance = anchor.workspace.aeqiGovernance as Program<AeqiGovernance>;
 
   it("create_company spawns a trust via CPI to aeqi_trust::initialize", async () => {
     const trustId = new Uint8Array(32);
@@ -238,6 +244,109 @@ describe("aeqi_factory", () => {
     const mT = await trust.account.module.fetch(modT);
     expect(mT.programId.toBase58()).to.eq(programT.toBase58());
     expect(mT.trustAcl.toString()).to.eq("128");
+  });
+
+  it("create_company_full atomically spawns trust + registers + inits 3 modules in ONE tx", async () => {
+    // This is the EVM Factory._createTRUST shape — atomic orchestration.
+    // Currently 4 of the 5 EVM steps run in one tx:
+    //   1. trust.initialize
+    //   2. trust.register_module ×3 (role / token / governance)
+    //   3. each module's init (creates module-state PDA)
+    //   4. trust.finalize
+    // Step 5 (each module's finalize with config bytes) lands when the
+    // BytesConfig dispatch flow ships.
+
+    const trustId = new Uint8Array(32);
+    trustId[0] = 0x99;
+    trustId[1] = 0xaa;
+
+    const roleModuleId = new Uint8Array(32);
+    roleModuleId[0] = 0x52;
+    const tokenModuleId = new Uint8Array(32);
+    tokenModuleId[0] = 0x54;
+    const govModuleId = new Uint8Array(32);
+    govModuleId[0] = 0x47;
+
+    const [trustPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("trust"), Buffer.from(trustId)],
+      trust.programId,
+    );
+    const [roleModulePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("module"), trustPda.toBuffer(), Buffer.from(roleModuleId)],
+      trust.programId,
+    );
+    const [tokenModulePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("module"), trustPda.toBuffer(), Buffer.from(tokenModuleId)],
+      trust.programId,
+    );
+    const [govModulePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("module"), trustPda.toBuffer(), Buffer.from(govModuleId)],
+      trust.programId,
+    );
+
+    const [roleModuleStatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role_module"), trustPda.toBuffer()],
+      role.programId,
+    );
+    const [tokenModuleStatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("token_module"), trustPda.toBuffer()],
+      token.programId,
+    );
+    const [govModuleStatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("gov_module"), trustPda.toBuffer()],
+      governance.programId,
+    );
+
+    await factory.methods
+      .createCompanyFull(
+        Array.from(trustId),
+        Array.from(roleModuleId),
+        Array.from(tokenModuleId),
+        Array.from(govModuleId),
+        new anchor.BN(0xff),
+        new anchor.BN(0xff),
+        new anchor.BN(0xff),
+      )
+      .accounts({
+        trust: trustPda,
+        roleModule: roleModulePda,
+        tokenModule: tokenModulePda,
+        govModule: govModulePda,
+        roleModuleState: roleModuleStatePda,
+        tokenModuleState: tokenModuleStatePda,
+        govModuleState: govModuleStatePda,
+        authority: provider.wallet.publicKey,
+        aeqiTrustProgram: trust.programId,
+        aeqiRoleProgram: role.programId,
+        aeqiTokenProgram: token.programId,
+        aeqiGovernanceProgram: governance.programId,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Verify trust is finalized + 3 modules registered
+    const t = await trust.account.trust.fetch(trustPda);
+    expect(t.creationMode).to.eq(false);
+    expect(t.moduleCount).to.eq(3);
+
+    // Each module record has the right program ID
+    const r = await trust.account.module.fetch(roleModulePda);
+    expect(r.programId.toBase58()).to.eq(role.programId.toBase58());
+    const tk = await trust.account.module.fetch(tokenModulePda);
+    expect(tk.programId.toBase58()).to.eq(token.programId.toBase58());
+    const g = await trust.account.module.fetch(govModulePda);
+    expect(g.programId.toBase58()).to.eq(governance.programId.toBase58());
+
+    // Each module's state PDA was created — module init ran
+    const rs = await role.account.roleModuleState.fetch(roleModuleStatePda);
+    expect(rs.trust.toBase58()).to.eq(trustPda.toBase58());
+    expect(rs.initialized).to.eq(true);
+
+    const ts = await token.account.tokenModuleState.fetch(tokenModuleStatePda);
+    expect(ts.trust.toBase58()).to.eq(trustPda.toBase58());
+
+    const gs = await governance.account.governanceModuleState.fetch(govModuleStatePda);
+    expect(gs.trust.toBase58()).to.eq(trustPda.toBase58());
   });
 
   it("rejects register_template with empty module set", async () => {

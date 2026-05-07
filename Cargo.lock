@@ -16,6 +16,9 @@ dependencies = [
 name = "aeqi-factory"
 version = "0.1.0"
 dependencies = [
+ "aeqi-governance",
+ "aeqi-role",
+ "aeqi-token",
  "aeqi-trust",
  "anchor-lang",
 ]
