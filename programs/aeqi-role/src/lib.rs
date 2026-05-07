@@ -147,6 +147,48 @@ pub mod aeqi_role {
         Ok(())
     }
 
+    /// Transfer an Occupied role from the current holder to a new account.
+    /// Decrements the prior holder's checkpoint, increments the new holder's
+    /// checkpoint. Mirrors EVM `Role.module.transferRole`.
+    pub fn transfer_role(ctx: Context<TransferRole>, new_account: Pubkey) -> Result<()> {
+        let role = &mut ctx.accounts.role;
+        require!(
+            role.status == RoleStatus::Occupied as u8,
+            AeqiRoleError::RoleNotOccupied
+        );
+        require_keys_eq!(
+            ctx.accounts.payer.key(),
+            role.account,
+            AeqiRoleError::Unauthorized
+        );
+
+        let prev_account = role.account;
+        role.account = new_account;
+        role.status_since = Clock::get()?.unix_timestamp;
+
+        // Move 1 vote on this role's type from prev to new.
+        bump_checkpoint(
+            &mut ctx.accounts.prev_checkpoint,
+            prev_account,
+            ctx.accounts.role_type.role_type_id,
+            -1,
+        )?;
+        bump_checkpoint(
+            &mut ctx.accounts.new_checkpoint,
+            new_account,
+            ctx.accounts.role_type.role_type_id,
+            1,
+        )?;
+
+        emit!(RoleTransferred {
+            trust: role.trust,
+            role_id: role.role_id,
+            from: prev_account,
+            to: new_account,
+        });
+        Ok(())
+    }
+
     /// Delegate this role's voting power to another account. Decrements the
     /// previous delegatee's checkpoint and increments the new delegatee's.
     pub fn delegate_role(ctx: Context<DelegateRole>, delegatee: Pubkey) -> Result<()> {
@@ -371,6 +413,34 @@ pub struct AssignRole<'info> {
 }
 
 #[derive(Accounts)]
+pub struct TransferRole<'info> {
+    #[account(mut, has_one = trust)]
+    pub role: Account<'info, Role>,
+    pub role_type: Account<'info, RoleType>,
+    /// CHECK: trust pda — used as seed for checkpoints.
+    pub trust: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        seeds = [b"role_ckpt", trust.key().as_ref(), role_type.role_type_id.as_ref(), role.account.as_ref()],
+        bump,
+    )]
+    pub prev_checkpoint: Account<'info, RoleVoteCheckpoint>,
+    #[account(
+        init_if_needed,
+        payer = payer,
+        space = 8 + RoleVoteCheckpoint::INIT_SPACE,
+        seeds = [b"role_ckpt", trust.key().as_ref(), role_type.role_type_id.as_ref(), new_account.key().as_ref()],
+        bump,
+    )]
+    pub new_checkpoint: Account<'info, RoleVoteCheckpoint>,
+    /// CHECK: the new role holder — used as seed for the new checkpoint PDA.
+    pub new_account: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct DelegateRole<'info> {
     pub role: Account<'info, Role>,
     pub role_type: Account<'info, RoleType>,
@@ -431,6 +501,14 @@ pub struct RoleAssigned {
     pub trust: Pubkey,
     pub role_id: [u8; 32],
     pub account: Pubkey,
+}
+
+#[event]
+pub struct RoleTransferred {
+    pub trust: Pubkey,
+    pub role_id: [u8; 32],
+    pub from: Pubkey,
+    pub to: Pubkey,
 }
 
 #[event]

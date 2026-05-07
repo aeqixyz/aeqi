@@ -12,7 +12,7 @@
 
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{
-    mint_to, Mint, MintTo, TokenAccount, TokenInterface,
+    burn, mint_to, Burn, Mint, MintTo, TokenAccount, TokenInterface,
 };
 
 declare_id!("V9WiXaeayA8KTyVAEEG1rAuPQ28G6NEwzSCmzZNZv6z");
@@ -48,6 +48,37 @@ pub mod aeqi_token {
             TokenError::NotInitialized
         );
         module.initialized = ModuleInitState::Finalized as u8;
+        Ok(())
+    }
+
+    /// Burn cap-table tokens. The token account owner signs; no program
+    /// authority needed (Token-2022 burn requires the owner's signature).
+    /// Used for redemption, exit, buyback, vesting clawback (when the vault
+    /// is owned by a vesting PDA).
+    pub fn burn_tokens(ctx: Context<BurnTokens>, amount: u64) -> Result<()> {
+        let module = &ctx.accounts.module_state;
+        require!(
+            module.mint == ctx.accounts.mint.key(),
+            TokenError::MintMismatch
+        );
+
+        let cpi_accounts = Burn {
+            mint: ctx.accounts.mint.to_account_info(),
+            from: ctx.accounts.owner_ta.to_account_info(),
+            authority: ctx.accounts.owner.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            cpi_accounts,
+        );
+        burn(cpi_ctx, amount)?;
+
+        emit!(TokensBurned {
+            trust: module.trust,
+            mint: module.mint,
+            owner_ta: ctx.accounts.owner_ta.key(),
+            amount,
+        });
         Ok(())
     }
 
@@ -190,6 +221,23 @@ pub struct CreateMint<'info> {
 }
 
 #[derive(Accounts)]
+pub struct BurnTokens<'info> {
+    /// CHECK: trust pda — used as the seed namespace.
+    pub trust: UncheckedAccount<'info>,
+    #[account(
+        seeds = [b"token_module", trust.key().as_ref()],
+        bump = module_state.bump,
+    )]
+    pub module_state: Account<'info, TokenModuleState>,
+    #[account(mut, seeds = [b"mint", trust.key().as_ref()], bump)]
+    pub mint: InterfaceAccount<'info, Mint>,
+    #[account(mut)]
+    pub owner_ta: InterfaceAccount<'info, TokenAccount>,
+    pub owner: Signer<'info>,
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
+#[derive(Accounts)]
 pub struct MintTokens<'info> {
     /// CHECK: trust pda — used as the seed namespace.
     pub trust: UncheckedAccount<'info>,
@@ -226,6 +274,14 @@ pub struct TokensMinted {
     pub trust: Pubkey,
     pub mint: Pubkey,
     pub recipient_ta: Pubkey,
+    pub amount: u64,
+}
+
+#[event]
+pub struct TokensBurned {
+    pub trust: Pubkey,
+    pub mint: Pubkey,
+    pub owner_ta: Pubkey,
     pub amount: u64,
 }
 
