@@ -37,6 +37,60 @@ describe("aeqi_token", () => {
     expect(state.mint.toBase58()).to.eq(PublicKey.default.toBase58());
   });
 
+  it("create_mint creates a Token-2022 mint as a PDA", async () => {
+    const fakeTrust = Keypair.generate().publicKey;
+    const TOKEN_2022_PROGRAM_ID = new PublicKey(
+      "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    );
+
+    const [moduleStatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("token_module"), fakeTrust.toBuffer()],
+      program.programId,
+    );
+
+    // Init the module state first
+    await program.methods
+      .init()
+      .accounts({
+        trust: fakeTrust,
+        moduleState: moduleStatePda,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const [mintAuthorityPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("token_authority"), fakeTrust.toBuffer()],
+      program.programId,
+    );
+    const [mintPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("mint"), fakeTrust.toBuffer()],
+      program.programId,
+    );
+
+    await program.methods
+      .createMint(9)
+      .accounts({
+        trust: fakeTrust,
+        moduleState: moduleStatePda,
+        mintAuthority: mintAuthorityPda,
+        mint: mintPda,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // module_state.mint should now be the mint PDA
+    const state = await program.account.tokenModuleState.fetch(moduleStatePda);
+    expect(state.mint.toBase58()).to.eq(mintPda.toBase58());
+
+    // The mint account exists on-chain — verify by fetching its lamports
+    const mintInfo = await provider.connection.getAccountInfo(mintPda);
+    expect(mintInfo).to.not.be.null;
+    expect(mintInfo!.owner.toBase58()).to.eq(TOKEN_2022_PROGRAM_ID.toBase58());
+  });
+
   it("finalize transitions Initialized → Finalized", async () => {
     const fakeTrust = Keypair.generate().publicKey;
 
