@@ -114,6 +114,83 @@ describe("aeqi_governance", () => {
     expect(m.proposalCount.toString()).to.eq("1");
   });
 
+  it("cast_vote tallies a For vote and creates VoteRecord", async () => {
+    const tokenConfigId = new Uint8Array(32);
+    const proposalId = new Uint8Array(32);
+    proposalId[0] = 0xab; // same proposal as previous test
+
+    const [proposalPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("proposal"), fakeTrust.toBuffer(), Buffer.from(proposalId)],
+      program.programId,
+    );
+    const [votePda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("vote"),
+        fakeTrust.toBuffer(),
+        Buffer.from(proposalId),
+        provider.wallet.publicKey.toBuffer(),
+      ],
+      program.programId,
+    );
+
+    await program.methods
+      .castVote(1, new anchor.BN(1000)) // 1 = For, weight 1000
+      .accounts({
+        proposal: proposalPda,
+        vote: votePda,
+        voter: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const p = await program.account.proposal.fetch(proposalPda);
+    expect(p.forVotes.toString()).to.eq("1000");
+    expect(p.againstVotes.toString()).to.eq("0");
+    expect(p.abstainVotes.toString()).to.eq("0");
+
+    const v = await program.account.voteRecord.fetch(votePda);
+    expect(v.choice).to.eq(1);
+    expect(v.weight.toString()).to.eq("1000");
+    expect(v.voter.toBase58()).to.eq(provider.wallet.publicKey.toBase58());
+  });
+
+  it("rejects double-voting via PDA uniqueness", async () => {
+    const proposalId = new Uint8Array(32);
+    proposalId[0] = 0xab;
+
+    const [proposalPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("proposal"), fakeTrust.toBuffer(), Buffer.from(proposalId)],
+      program.programId,
+    );
+    const [votePda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("vote"),
+        fakeTrust.toBuffer(),
+        Buffer.from(proposalId),
+        provider.wallet.publicKey.toBuffer(),
+      ],
+      program.programId,
+    );
+
+    let threw = false;
+    try {
+      await program.methods
+        .castVote(0, new anchor.BN(500))
+        .accounts({
+          proposal: proposalPda,
+          vote: votePda,
+          voter: provider.wallet.publicKey,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
+    } catch (e: any) {
+      threw = true;
+      // VoteRecord PDA already exists — init will fail
+      expect(e.toString()).to.match(/already in use|custom program error/);
+    }
+    expect(threw).to.eq(true);
+  });
+
   it("rejects register_config with invalid bps", async () => {
     const cfgId = new Uint8Array(32);
     cfgId[0] = 0xee;

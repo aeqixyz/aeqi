@@ -76,6 +76,55 @@ pub mod aeqi_governance {
         Ok(())
     }
 
+    /// Cast a vote on a proposal. Records a `VoteRecord` PDA so the same voter
+    /// can't double-vote, and bumps the proposal's tally. Vote power is
+    /// passed in for now; the next iteration replaces this with a CPI to
+    /// `aeqi_token::get_past_votes` (token mode) or
+    /// `aeqi_role::get_past_role_votes` (per-role multisig).
+    pub fn cast_vote(
+        ctx: Context<CastVote>,
+        choice: u8,
+        weight: u128,
+    ) -> Result<()> {
+        require!(choice <= 2, GovernanceError::InvalidVoteChoice);
+        require!(weight > 0, GovernanceError::ZeroWeight);
+
+        let p = &mut ctx.accounts.proposal;
+        let now = Clock::get()?.unix_timestamp;
+        require!(!p.executed, GovernanceError::ProposalAlreadyExecuted);
+        require!(!p.canceled, GovernanceError::ProposalCanceled);
+        require!(now >= p.vote_start, GovernanceError::VotingNotStarted);
+        require!(
+            now < p.vote_start.checked_add(p.vote_duration).unwrap(),
+            GovernanceError::VotingClosed
+        );
+
+        // Record vote — VoteRecord PDA init enforces uniqueness per voter.
+        let v = &mut ctx.accounts.vote;
+        v.trust = p.trust;
+        v.proposal_id = p.proposal_id;
+        v.voter = ctx.accounts.voter.key();
+        v.choice = choice;
+        v.weight = weight;
+        v.bump = ctx.bumps.vote;
+
+        match choice {
+            0 => p.against_votes = p.against_votes.checked_add(weight).unwrap(),
+            1 => p.for_votes = p.for_votes.checked_add(weight).unwrap(),
+            2 => p.abstain_votes = p.abstain_votes.checked_add(weight).unwrap(),
+            _ => unreachable!(),
+        }
+
+        emit!(VoteCast {
+            trust: p.trust,
+            proposal_id: p.proposal_id,
+            voter: v.voter,
+            choice,
+            weight,
+        });
+        Ok(())
+    }
+
     /// Create a proposal under a registered governance config. Per-proposal
     /// mode selection via `governance_config_id`. Mirrors EVM
     /// `Governance.module.propose`.
@@ -160,6 +209,18 @@ pub struct GovernanceConfigInput {
     pub voting_period: i64,
     pub execution_delay: i64,
     pub allow_early_enact: bool,
+}
+
+/// One per (proposal, voter) pair — init enforces single-vote-per-voter.
+#[account]
+#[derive(InitSpace)]
+pub struct VoteRecord {
+    pub trust: Pubkey,
+    pub proposal_id: [u8; 32],
+    pub voter: Pubkey,
+    pub choice: u8, // 0 = against, 1 = for, 2 = abstain
+    pub weight: u128,
+    pub bump: u8,
 }
 
 #[account]
@@ -262,6 +323,27 @@ pub struct Propose<'info> {
     pub system_program: Program<'info, System>,
 }
 
+#[derive(Accounts)]
+pub struct CastVote<'info> {
+    #[account(
+        mut,
+        seeds = [b"proposal", proposal.trust.as_ref(), proposal.proposal_id.as_ref()],
+        bump = proposal.bump,
+    )]
+    pub proposal: Account<'info, Proposal>,
+    #[account(
+        init,
+        payer = voter,
+        space = 8 + VoteRecord::INIT_SPACE,
+        seeds = [b"vote", proposal.trust.as_ref(), proposal.proposal_id.as_ref(), voter.key().as_ref()],
+        bump,
+    )]
+    pub vote: Account<'info, VoteRecord>,
+    #[account(mut)]
+    pub voter: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
 // -----------------------------------------------------------------------------
 // Events
 // -----------------------------------------------------------------------------
@@ -284,6 +366,15 @@ pub struct ProposalCreated {
     pub vote_duration: i64,
 }
 
+#[event]
+pub struct VoteCast {
+    pub trust: Pubkey,
+    pub proposal_id: [u8; 32],
+    pub voter: Pubkey,
+    pub choice: u8,
+    pub weight: u128,
+}
+
 #[error_code]
 pub enum GovernanceError {
     #[msg("bps value must be ≤ 10000 (100.00%)")]
@@ -292,4 +383,16 @@ pub enum GovernanceError {
     ZeroVotingPeriod,
     #[msg("governance_config_id mismatch — config PDA doesn't match the id passed")]
     ConfigMismatch,
+    #[msg("vote choice must be 0 (against), 1 (for), or 2 (abstain)")]
+    InvalidVoteChoice,
+    #[msg("vote weight must be > 0")]
+    ZeroWeight,
+    #[msg("proposal has already been executed")]
+    ProposalAlreadyExecuted,
+    #[msg("proposal was canceled")]
+    ProposalCanceled,
+    #[msg("voting has not yet started for this proposal")]
+    VotingNotStarted,
+    #[msg("voting has closed for this proposal")]
+    VotingClosed,
 }
