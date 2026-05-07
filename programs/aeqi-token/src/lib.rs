@@ -11,7 +11,9 @@
 //! Token-2022 CPI lands as `create_mint` in the next iteration.
 
 use anchor_lang::prelude::*;
-use anchor_spl::token_interface::{Mint, TokenInterface};
+use anchor_spl::token_interface::{
+    mint_to, Mint, MintTo, TokenAccount, TokenInterface,
+};
 
 declare_id!("V9WiXaeayA8KTyVAEEG1rAuPQ28G6NEwzSCmzZNZv6z");
 
@@ -46,6 +48,41 @@ pub mod aeqi_token {
             TokenError::NotInitialized
         );
         module.initialized = ModuleInitState::Finalized as u8;
+        Ok(())
+    }
+
+    /// Issue cap-table tokens. Mints `amount` tokens to `recipient_ta` via
+    /// CPI into Token-2022, signing with the program-controlled mint
+    /// authority PDA seeds. No off-chain key holds mint authority.
+    pub fn mint_tokens(ctx: Context<MintTokens>, amount: u64) -> Result<()> {
+        let module = &ctx.accounts.module_state;
+        require!(
+            module.mint == ctx.accounts.mint.key(),
+            TokenError::MintMismatch
+        );
+
+        let trust_key = ctx.accounts.trust.key();
+        let bump = ctx.bumps.mint_authority;
+        let seeds: &[&[&[u8]]] = &[&[b"token_authority", trust_key.as_ref(), &[bump]]];
+
+        let cpi_accounts = MintTo {
+            mint: ctx.accounts.mint.to_account_info(),
+            to: ctx.accounts.recipient_ta.to_account_info(),
+            authority: ctx.accounts.mint_authority.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            cpi_accounts,
+            seeds,
+        );
+        mint_to(cpi_ctx, amount)?;
+
+        emit!(TokensMinted {
+            trust: module.trust,
+            mint: module.mint,
+            recipient_ta: ctx.accounts.recipient_ta.key(),
+            amount,
+        });
         Ok(())
     }
 
@@ -152,6 +189,25 @@ pub struct CreateMint<'info> {
     pub system_program: Program<'info, System>,
 }
 
+#[derive(Accounts)]
+pub struct MintTokens<'info> {
+    /// CHECK: trust pda — used as the seed namespace.
+    pub trust: UncheckedAccount<'info>,
+    #[account(
+        seeds = [b"token_module", trust.key().as_ref()],
+        bump = module_state.bump,
+    )]
+    pub module_state: Account<'info, TokenModuleState>,
+    /// CHECK: program-controlled PDA mint authority. Signed via signer seeds.
+    #[account(seeds = [b"token_authority", trust.key().as_ref()], bump)]
+    pub mint_authority: UncheckedAccount<'info>,
+    #[account(mut, seeds = [b"mint", trust.key().as_ref()], bump)]
+    pub mint: InterfaceAccount<'info, Mint>,
+    #[account(mut)]
+    pub recipient_ta: InterfaceAccount<'info, TokenAccount>,
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
 #[event]
 pub struct TokenModuleInitialized {
     pub trust: Pubkey,
@@ -165,10 +221,20 @@ pub struct MintCreated {
     pub decimals: u8,
 }
 
+#[event]
+pub struct TokensMinted {
+    pub trust: Pubkey,
+    pub mint: Pubkey,
+    pub recipient_ta: Pubkey,
+    pub amount: u64,
+}
+
 #[error_code]
 pub enum TokenError {
     #[msg("token module not yet initialized")]
     NotInitialized,
     #[msg("mint already created for this trust")]
     MintAlreadyCreated,
+    #[msg("mint account does not match the module's recorded mint")]
+    MintMismatch,
 }
