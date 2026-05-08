@@ -322,6 +322,224 @@ describe("aeqi_unifutures", () => {
     expect(c.reserveBalance.toString()).to.eq("105");
   });
 
+  it("sell_to_curve mirrors buy with 90% reserve_ratio applied", async () => {
+    // Linear 1e18→2e18, max 1000, 90% reserve. Buy 100 (cost=105), then
+    // sell 50:
+    //   p(100)=1.1e18, p(50)=1.05e18, avg=1.075e18
+    //   gross = 50*1.075e18/1e18 = 53 (truncated)
+    //   return = 53 * 900_000 / 1_000_000 = 47
+    const curveId = new Uint8Array(32);
+    curveId[0] = 0x55; // distinct from buy test
+    curveId[1] = 0x55;
+
+    const [curvePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("curve"), fakeTrust.toBuffer(), Buffer.from(curveId)],
+      program.programId,
+    );
+    const [curveAuthorityPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("curve_authority"), fakeTrust.toBuffer(), Buffer.from(curveId)],
+      program.programId,
+    );
+
+    await program.methods
+      .createCurve(
+        Array.from(curveId),
+        0,
+        PRECISION,
+        PRECISION.mul(new anchor.BN(2)),
+        new anchor.BN(1000),
+        900_000,
+      )
+      .accounts({
+        trust: fakeTrust,
+        moduleState: modulePda,
+        curve: curvePda,
+        creator: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Two mints
+    const assetMint = await createMint(
+      provider.connection,
+      (provider.wallet as anchor.Wallet).payer,
+      provider.wallet.publicKey,
+      null,
+      0,
+      Keypair.generate(),
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+    );
+    const quoteMint = await createMint(
+      provider.connection,
+      (provider.wallet as anchor.Wallet).payer,
+      provider.wallet.publicKey,
+      null,
+      0,
+      Keypair.generate(),
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+    );
+
+    // Curve vaults
+    const curveAssetVault = getAssociatedTokenAddressSync(
+      assetMint,
+      curveAuthorityPda,
+      true,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+    const curveQuoteVault = getAssociatedTokenAddressSync(
+      quoteMint,
+      curveAuthorityPda,
+      true,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+    await provider.sendAndConfirm(
+      new anchor.web3.Transaction()
+        .add(
+          createAssociatedTokenAccountInstruction(
+            provider.wallet.publicKey,
+            curveAssetVault,
+            curveAuthorityPda,
+            assetMint,
+            TOKEN_2022_PROGRAM_ID,
+            ASSOCIATED_TOKEN_PROGRAM_ID,
+          ),
+        )
+        .add(
+          createAssociatedTokenAccountInstruction(
+            provider.wallet.publicKey,
+            curveQuoteVault,
+            curveAuthorityPda,
+            quoteMint,
+            TOKEN_2022_PROGRAM_ID,
+            ASSOCIATED_TOKEN_PROGRAM_ID,
+          ),
+        ),
+    );
+    await mintTo(
+      provider.connection,
+      (provider.wallet as anchor.Wallet).payer,
+      assetMint,
+      curveAssetVault,
+      provider.wallet.publicKey,
+      1000,
+      [],
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+    );
+
+    // Trader ATAs + 200 quote balance
+    const trader = provider.wallet.publicKey;
+    const traderAssetTa = getAssociatedTokenAddressSync(
+      assetMint,
+      trader,
+      false,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+    const traderQuoteTa = getAssociatedTokenAddressSync(
+      quoteMint,
+      trader,
+      false,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+    await provider.sendAndConfirm(
+      new anchor.web3.Transaction()
+        .add(
+          createAssociatedTokenAccountInstruction(
+            trader,
+            traderAssetTa,
+            trader,
+            assetMint,
+            TOKEN_2022_PROGRAM_ID,
+            ASSOCIATED_TOKEN_PROGRAM_ID,
+          ),
+        )
+        .add(
+          createAssociatedTokenAccountInstruction(
+            trader,
+            traderQuoteTa,
+            trader,
+            quoteMint,
+            TOKEN_2022_PROGRAM_ID,
+            ASSOCIATED_TOKEN_PROGRAM_ID,
+          ),
+        ),
+    );
+    await mintTo(
+      provider.connection,
+      (provider.wallet as anchor.Wallet).payer,
+      quoteMint,
+      traderQuoteTa,
+      trader,
+      200,
+      [],
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+    );
+
+    // Buy 100 (cost = 105) — sets supply=100, reserve=105
+    await program.methods
+      .buyFromCurve(new anchor.BN(100), new anchor.BN(120))
+      .accounts({
+        curve: curvePda,
+        curveAuthority: curveAuthorityPda,
+        assetMint,
+        quoteMint,
+        curveAssetVault,
+        curveQuoteVault,
+        buyerAssetTa: traderAssetTa,
+        buyerQuoteTa: traderQuoteTa,
+        buyer: trader,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+      })
+      .rpc();
+
+    // Now sell 50 back. Expected return = 47.
+    await program.methods
+      .sellToCurve(new anchor.BN(50), new anchor.BN(40)) // min_return = 40
+      .accounts({
+        curve: curvePda,
+        curveAuthority: curveAuthorityPda,
+        assetMint,
+        quoteMint,
+        curveAssetVault,
+        curveQuoteVault,
+        sellerAssetTa: traderAssetTa,
+        sellerQuoteTa: traderQuoteTa,
+        seller: trader,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+      })
+      .rpc();
+
+    // Verify:
+    //   trader asset = 100 - 50 = 50
+    //   trader quote = (200 - 105) + 47 = 142
+    //   curve asset vault = 900 + 50 = 950
+    //   curve quote vault = 105 - 47 = 58
+    //   curve.current_supply = 50
+    //   curve.reserve_balance = 105 - 47 = 58
+    const traderAsset = await getAccount(provider.connection, traderAssetTa, undefined, TOKEN_2022_PROGRAM_ID);
+    expect(traderAsset.amount.toString()).to.eq("50");
+
+    const traderQuote = await getAccount(provider.connection, traderQuoteTa, undefined, TOKEN_2022_PROGRAM_ID);
+    expect(traderQuote.amount.toString()).to.eq("142");
+
+    const vaultAsset = await getAccount(provider.connection, curveAssetVault, undefined, TOKEN_2022_PROGRAM_ID);
+    expect(vaultAsset.amount.toString()).to.eq("950");
+
+    const vaultQuote = await getAccount(provider.connection, curveQuoteVault, undefined, TOKEN_2022_PROGRAM_ID);
+    expect(vaultQuote.amount.toString()).to.eq("58");
+
+    const c = await program.account.bondingCurve.fetch(curvePda);
+    expect(c.currentSupply.toString()).to.eq("50");
+    expect(c.reserveBalance.toString()).to.eq("58");
+  });
+
   it("rejects create_curve with reserve_ratio > 100%", async () => {
     const curveId = new Uint8Array(32);
     curveId[0] = 0xed;
