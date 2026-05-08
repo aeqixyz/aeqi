@@ -57,6 +57,7 @@ pub mod aeqi_fund {
         f.total_shares = 0;
         f.high_water_mark = 0;
         f.carry_bps = carry_bps;
+        f.accrued_carry = 0;
         f.bump = ctx.bumps.fund;
 
         let m = &mut ctx.accounts.module_state;
@@ -124,6 +125,102 @@ pub mod aeqi_fund {
             lp: s.lp,
             quote_in: amount,
             shares_issued: shares_u64,
+        });
+        Ok(())
+    }
+
+    /// Manager-only mark-to-market. Recompute LP-attributable NAV; if it
+    /// crosses the prior HWM, accrue carry on the increase and reset HWM
+    /// to the post-carry NAV. Down-marks just reduce gross_nav (no carry
+    /// clawback — high-water-mark semantics).
+    ///
+    /// `new_gross_nav` is the manager's reported portfolio mark including
+    /// any unclaimed carry already sitting in the vault — i.e. the full
+    /// vault valuation, not LP-attributable. Carry is split off here.
+    pub fn update_nav(ctx: Context<UpdateNav>, new_gross_nav: u64) -> Result<()> {
+        let f = &mut ctx.accounts.fund;
+        require_keys_eq!(
+            ctx.accounts.manager.key(),
+            f.manager,
+            FundError::NotManager
+        );
+
+        // Subtract already-accrued carry so we're working in LP terms.
+        let lp_nav = new_gross_nav
+            .checked_sub(f.accrued_carry)
+            .ok_or(error!(FundError::MathOverflow))?;
+
+        if lp_nav > f.high_water_mark {
+            let increase = lp_nav - f.high_water_mark;
+            let carry = (increase as u128)
+                .checked_mul(f.carry_bps as u128)
+                .ok_or(error!(FundError::MathOverflow))?
+                / 10_000u128;
+            let carry_u64: u64 = carry
+                .try_into()
+                .map_err(|_| error!(FundError::MathOverflow))?;
+            f.accrued_carry = f.accrued_carry.checked_add(carry_u64).unwrap();
+            f.gross_nav = lp_nav.checked_sub(carry_u64).unwrap();
+            f.high_water_mark = f.gross_nav;
+        } else {
+            f.gross_nav = lp_nav;
+            // HWM unchanged on down-marks.
+        }
+
+        emit!(NavUpdated {
+            trust: f.trust,
+            fund_id: f.fund_id,
+            gross_nav: f.gross_nav,
+            high_water_mark: f.high_water_mark,
+            accrued_carry: f.accrued_carry,
+        });
+        Ok(())
+    }
+
+    /// Manager claims accrued carry from the fund vault. Resets
+    /// `accrued_carry` to zero. Vault → manager TA, PDA-signed.
+    pub fn claim_carry(ctx: Context<ClaimCarry>) -> Result<()> {
+        let f = &mut ctx.accounts.fund;
+        require_keys_eq!(
+            ctx.accounts.manager.key(),
+            f.manager,
+            FundError::NotManager
+        );
+        let carry = f.accrued_carry;
+        require!(carry > 0, FundError::NoCarry);
+
+        let trust_key = f.trust;
+        let fund_id_bytes = f.fund_id;
+        let bump = ctx.bumps.fund_authority;
+        let seeds: &[&[&[u8]]] = &[&[
+            b"fund_authority",
+            trust_key.as_ref(),
+            fund_id_bytes.as_ref(),
+            &[bump],
+        ]];
+        let cpi = TransferChecked {
+            from: ctx.accounts.fund_quote_vault.to_account_info(),
+            mint: ctx.accounts.quote_mint.to_account_info(),
+            to: ctx.accounts.manager_quote_ta.to_account_info(),
+            authority: ctx.accounts.fund_authority.to_account_info(),
+        };
+        transfer_checked(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                cpi,
+                seeds,
+            ),
+            carry,
+            ctx.accounts.quote_mint.decimals,
+        )?;
+
+        f.accrued_carry = 0;
+
+        emit!(CarryClaimed {
+            trust: f.trust,
+            fund_id: f.fund_id,
+            manager: f.manager,
+            amount: carry,
         });
         Ok(())
     }
@@ -213,10 +310,17 @@ pub struct Fund {
     pub fund_id: [u8; 32],
     pub manager: Pubkey,
     pub quote_mint: Pubkey,
+    /// LP-attributable NAV. Excludes `accrued_carry` so deposit/redeem
+    /// share-price math remains LP-fair.
     pub gross_nav: u64,
     pub total_shares: u64,
     pub high_water_mark: u64,
     pub carry_bps: u16,
+    /// Carry the manager has earned via NAV-up updates beyond HWM. Sits
+    /// in the fund vault until `claim_carry` transfers it out to the
+    /// manager. Counted separately from `gross_nav` so the share price
+    /// LPs see is exactly what they're owed.
+    pub accrued_carry: u64,
     pub bump: u8,
 }
 
@@ -332,6 +436,37 @@ pub struct FundRedeem<'info> {
     pub token_program: Interface<'info, TokenInterface>,
 }
 
+#[derive(Accounts)]
+pub struct UpdateNav<'info> {
+    #[account(
+        mut,
+        seeds = [b"fund", fund.trust.as_ref(), fund.fund_id.as_ref()],
+        bump = fund.bump,
+    )]
+    pub fund: Box<Account<'info, Fund>>,
+    pub manager: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct ClaimCarry<'info> {
+    #[account(
+        mut,
+        seeds = [b"fund", fund.trust.as_ref(), fund.fund_id.as_ref()],
+        bump = fund.bump,
+    )]
+    pub fund: Box<Account<'info, Fund>>,
+    /// CHECK: PDA — signs the carry out-transfer
+    #[account(seeds = [b"fund_authority", fund.trust.as_ref(), fund.fund_id.as_ref()], bump)]
+    pub fund_authority: UncheckedAccount<'info>,
+    pub quote_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(mut, token::mint = quote_mint, token::authority = fund_authority)]
+    pub fund_quote_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, token::mint = quote_mint)]
+    pub manager_quote_ta: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub manager: Signer<'info>,
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
 // -----------------------------------------------------------------------------
 // Events
 // -----------------------------------------------------------------------------
@@ -363,6 +498,23 @@ pub struct FundRedeemed {
     pub quote_out: u64,
 }
 
+#[event]
+pub struct NavUpdated {
+    pub trust: Pubkey,
+    pub fund_id: [u8; 32],
+    pub gross_nav: u64,
+    pub high_water_mark: u64,
+    pub accrued_carry: u64,
+}
+
+#[event]
+pub struct CarryClaimed {
+    pub trust: Pubkey,
+    pub fund_id: [u8; 32],
+    pub manager: Pubkey,
+    pub amount: u64,
+}
+
 #[error_code]
 pub enum FundError {
     #[msg("amount must be > 0")]
@@ -379,4 +531,8 @@ pub enum FundError {
     Unauthorized,
     #[msg("LP doesn't have enough shares")]
     InsufficientShares,
+    #[msg("only the fund manager can call this ix")]
+    NotManager,
+    #[msg("no accrued carry to claim")]
+    NoCarry,
 }
