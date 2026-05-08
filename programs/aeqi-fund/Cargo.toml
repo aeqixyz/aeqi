@@ -1,0 +1,23 @@
+[package]
+name = "aeqi-fund"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "AEQI Fund module — NAV-based fund accounting, LP shares, deposits, redeems"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "aeqi_fund"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+
+[dependencies]
+anchor-lang = { workspace = true, features = ["init-if-needed"] }
+anchor-spl = { workspace = true, features = ["token_2022"] }
