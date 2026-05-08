@@ -144,12 +144,27 @@ pub mod aeqi_token {
     /// Issue cap-table tokens. Mints `amount` tokens to `recipient_ta` via
     /// CPI into Token-2022, signing with the program-controlled mint
     /// authority PDA seeds. No off-chain key holds mint authority.
+    ///
+    /// Supply cap: when `module_state.max_supply_cap > 0` the post-mint
+    /// total supply is checked against the cap (cap=0 means "uncapped",
+    /// the pre-finalize default).
     pub fn mint_tokens(ctx: Context<MintTokens>, amount: u64) -> Result<()> {
         let module = &ctx.accounts.module_state;
         require!(
             module.mint == ctx.accounts.mint.key(),
             TokenError::MintMismatch
         );
+
+        if module.max_supply_cap > 0 {
+            let current_supply = ctx.accounts.mint.supply;
+            let new_supply = current_supply
+                .checked_add(amount)
+                .ok_or(error!(TokenError::SupplyCapExceeded))?;
+            require!(
+                new_supply <= module.max_supply_cap,
+                TokenError::SupplyCapExceeded
+            );
+        }
 
         let trust_key = ctx.accounts.trust.key();
         let bump = ctx.bumps.mint_authority;
@@ -183,8 +198,11 @@ pub mod aeqi_token {
     /// program can mint or freeze.
     pub fn create_mint(ctx: Context<CreateMint>, decimals: u8) -> Result<()> {
         let module = &mut ctx.accounts.module_state;
+        // Mint creation is valid post-init *and* post-finalize. The factory
+        // pipeline finalizes the module before user-driven create_mint runs,
+        // so requiring strict Initialized would lock out the canonical flow.
         require!(
-            module.initialized == ModuleInitState::Initialized as u8,
+            module.initialized != ModuleInitState::Pending as u8,
             TokenError::NotInitialized
         );
         require!(
@@ -368,4 +386,6 @@ pub enum TokenError {
     MintMismatch,
     #[msg("BytesConfig PDA missing, malformed, or wrong owner")]
     InvalidConfig,
+    #[msg("mint would exceed max_supply_cap from TokenInitConfig")]
+    SupplyCapExceeded,
 }

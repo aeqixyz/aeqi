@@ -365,6 +365,184 @@ describe("aeqi_factory", () => {
     expect(gs.trust.toBase58()).to.eq(trustPda.toBase58());
   });
 
+  it("max_supply_cap from TokenInitConfig is enforced by mint_tokens", async () => {
+    // createCompanyFull → create_mint → mint up to cap → exceed (fails) →
+    // residual headroom mint succeeds. Cap = 2000, decimals = 0 to keep
+    // the math literal.
+    const trustId = new Uint8Array(32);
+    trustId[0] = 0xca;
+    trustId[1] = 0xaa;
+
+    const [trustPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("trust"), Buffer.from(trustId)],
+      trust.programId,
+    );
+    const roleModuleId = new Uint8Array(32); roleModuleId[0] = 0x52;
+    const tokenModuleId = new Uint8Array(32); tokenModuleId[0] = 0x54;
+    const govModuleId = new Uint8Array(32); govModuleId[0] = 0x47;
+
+    const pdaModule = (id: Uint8Array) =>
+      PublicKey.findProgramAddressSync(
+        [Buffer.from("module"), trustPda.toBuffer(), Buffer.from(id)],
+        trust.programId,
+      )[0];
+    const roleModulePda = pdaModule(roleModuleId);
+    const tokenModulePda = pdaModule(tokenModuleId);
+    const govModulePda = pdaModule(govModuleId);
+
+    const [roleModuleStatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role_module"), trustPda.toBuffer()],
+      role.programId,
+    );
+    const [tokenModuleStatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("token_module"), trustPda.toBuffer()],
+      token.programId,
+    );
+    const [govModuleStatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("gov_module"), trustPda.toBuffer()],
+      governance.programId,
+    );
+
+    const tokenConfigKey = new Uint8Array(32);
+    tokenConfigKey[0] = 1;
+    const [tokenBytesConfigPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("cfg_bytes"), trustPda.toBuffer(), Buffer.from(tokenConfigKey)],
+      trust.programId,
+    );
+
+    await factory.methods
+      .createCompanyFull(
+        Array.from(trustId),
+        Array.from(roleModuleId),
+        Array.from(tokenModuleId),
+        Array.from(govModuleId),
+        new anchor.BN(0xff),
+        new anchor.BN(0xff),
+        new anchor.BN(0xff),
+        0, // decimals
+        new anchor.BN(2000), // max_supply_cap
+      )
+      .accounts({
+        trust: trustPda,
+        roleModule: roleModulePda,
+        tokenModule: tokenModulePda,
+        govModule: govModulePda,
+        roleModuleState: roleModuleStatePda,
+        tokenModuleState: tokenModuleStatePda,
+        govModuleState: govModuleStatePda,
+        tokenBytesConfig: tokenBytesConfigPda,
+        authority: provider.wallet.publicKey,
+        aeqiTrustProgram: trust.programId,
+        aeqiRoleProgram: role.programId,
+        aeqiTokenProgram: token.programId,
+        aeqiGovernanceProgram: governance.programId,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Now create the Token-2022 mint + an ATA, then try mints.
+    const {
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+      getAssociatedTokenAddressSync,
+      createAssociatedTokenAccountInstruction,
+      getAccount,
+    } = await import("@solana/spl-token");
+
+    const [mintAuthorityPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("token_authority"), trustPda.toBuffer()],
+      token.programId,
+    );
+    const [mintPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("mint"), trustPda.toBuffer()],
+      token.programId,
+    );
+
+    await token.methods
+      .createMint(0)
+      .accounts({
+        trust: trustPda,
+        moduleState: tokenModuleStatePda,
+        mintAuthority: mintAuthorityPda,
+        mint: mintPda,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const recipient = provider.wallet.publicKey;
+    const ata = getAssociatedTokenAddressSync(
+      mintPda,
+      recipient,
+      false,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+    await provider.sendAndConfirm(
+      new anchor.web3.Transaction().add(
+        createAssociatedTokenAccountInstruction(
+          provider.wallet.publicKey,
+          ata,
+          recipient,
+          mintPda,
+          TOKEN_2022_PROGRAM_ID,
+          ASSOCIATED_TOKEN_PROGRAM_ID,
+        ),
+      ),
+    );
+
+    // Mint 1500 (under cap) — succeeds.
+    await token.methods
+      .mintTokens(new anchor.BN(1500))
+      .accounts({
+        trust: trustPda,
+        moduleState: tokenModuleStatePda,
+        mintAuthority: mintAuthorityPda,
+        mint: mintPda,
+        recipientTa: ata,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+      })
+      .rpc();
+    let acct = await getAccount(provider.connection, ata, undefined, TOKEN_2022_PROGRAM_ID);
+    expect(acct.amount.toString()).to.eq("1500");
+
+    // Mint 600 more (1500+600=2100 > 2000) — must fail.
+    let threw = false;
+    try {
+      await token.methods
+        .mintTokens(new anchor.BN(600))
+        .accounts({
+          trust: trustPda,
+          moduleState: tokenModuleStatePda,
+          mintAuthority: mintAuthorityPda,
+          mint: mintPda,
+          recipientTa: ata,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+        })
+        .rpc();
+    } catch (e: any) {
+      threw = true;
+      expect(e.toString()).to.match(/SupplyCapExceeded/);
+    }
+    expect(threw).to.eq(true);
+
+    // Residual headroom: mint 500 (1500+500=2000 ≤ 2000) — succeeds.
+    await token.methods
+      .mintTokens(new anchor.BN(500))
+      .accounts({
+        trust: trustPda,
+        moduleState: tokenModuleStatePda,
+        mintAuthority: mintAuthorityPda,
+        mint: mintPda,
+        recipientTa: ata,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+      })
+      .rpc();
+    acct = await getAccount(provider.connection, ata, undefined, TOKEN_2022_PROGRAM_ID);
+    expect(acct.amount.toString()).to.eq("2000");
+  });
+
   it("rejects register_template with empty module set", async () => {
     const templateId = new Uint8Array(32);
     templateId[0] = 0xee;
