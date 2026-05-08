@@ -658,6 +658,168 @@ describe("aeqi_unifutures", () => {
     expect(e.creator.toBase58()).to.eq(provider.wallet.publicKey.toBase58());
   });
 
+  it("commit_to_sale transfers quote in + records commitment per buyer", async () => {
+    // Sale: target=5000, overflow=7500, asset=1000, 7d duration.
+    // Buyer commits 1500 then 500 → total commitment = 2000.
+    const saleId = new Uint8Array(32);
+    saleId[0] = 0xc1;
+    saleId[1] = 0x07; // 'commit' marker
+
+    const [salePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("sale"), fakeTrust.toBuffer(), Buffer.from(saleId)],
+      program.programId,
+    );
+    const [saleAuthorityPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("sale_authority"), fakeTrust.toBuffer(), Buffer.from(saleId)],
+      program.programId,
+    );
+
+    await program.methods
+      .createCommitmentSale(
+        Array.from(saleId),
+        new anchor.BN(1000),
+        new anchor.BN(5000),
+        new anchor.BN(7500),
+        new anchor.BN(60 * 60 * 24 * 7),
+      )
+      .accounts({
+        trust: fakeTrust,
+        moduleState: modulePda,
+        sale: salePda,
+        creator: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Quote mint + sale vault + buyer ATA
+    const quoteMint = await createMint(
+      provider.connection,
+      (provider.wallet as anchor.Wallet).payer,
+      provider.wallet.publicKey,
+      null,
+      0,
+      Keypair.generate(),
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+    );
+
+    const saleQuoteVault = getAssociatedTokenAddressSync(
+      quoteMint,
+      saleAuthorityPda,
+      true,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+    const buyer = provider.wallet.publicKey;
+    const buyerQuoteTa = getAssociatedTokenAddressSync(
+      quoteMint,
+      buyer,
+      false,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+    await provider.sendAndConfirm(
+      new anchor.web3.Transaction()
+        .add(
+          createAssociatedTokenAccountInstruction(
+            buyer,
+            saleQuoteVault,
+            saleAuthorityPda,
+            quoteMint,
+            TOKEN_2022_PROGRAM_ID,
+            ASSOCIATED_TOKEN_PROGRAM_ID,
+          ),
+        )
+        .add(
+          createAssociatedTokenAccountInstruction(
+            buyer,
+            buyerQuoteTa,
+            buyer,
+            quoteMint,
+            TOKEN_2022_PROGRAM_ID,
+            ASSOCIATED_TOKEN_PROGRAM_ID,
+          ),
+        ),
+    );
+    await mintTo(
+      provider.connection,
+      (provider.wallet as anchor.Wallet).payer,
+      quoteMint,
+      buyerQuoteTa,
+      buyer,
+      3000,
+      [],
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+    );
+
+    const [commitmentPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("sale_commitment"),
+        fakeTrust.toBuffer(),
+        Buffer.from(saleId),
+        buyer.toBuffer(),
+      ],
+      program.programId,
+    );
+
+    // First commit: 1500
+    await program.methods
+      .commitToSale(new anchor.BN(1500))
+      .accounts({
+        sale: salePda,
+        saleAuthority: saleAuthorityPda,
+        quoteMint,
+        saleQuoteVault,
+        buyerQuoteTa,
+        commitment: commitmentPda,
+        buyer,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    let s = await program.account.commitmentSale.fetch(salePda);
+    expect(s.proceedsCollected.toString()).to.eq("1500");
+    expect(s.commitmentsCollected.toString()).to.eq("1500");
+
+    let c = await program.account.saleCommitment.fetch(commitmentPda);
+    expect(c.amount.toString()).to.eq("1500");
+    expect(c.buyer.toBase58()).to.eq(buyer.toBase58());
+
+    let vault = await getAccount(provider.connection, saleQuoteVault, undefined, TOKEN_2022_PROGRAM_ID);
+    expect(vault.amount.toString()).to.eq("1500");
+
+    // Second commit: 500 (accumulates)
+    await program.methods
+      .commitToSale(new anchor.BN(500))
+      .accounts({
+        sale: salePda,
+        saleAuthority: saleAuthorityPda,
+        quoteMint,
+        saleQuoteVault,
+        buyerQuoteTa,
+        commitment: commitmentPda,
+        buyer,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    s = await program.account.commitmentSale.fetch(salePda);
+    expect(s.proceedsCollected.toString()).to.eq("2000");
+
+    c = await program.account.saleCommitment.fetch(commitmentPda);
+    expect(c.amount.toString()).to.eq("2000");
+
+    vault = await getAccount(provider.connection, saleQuoteVault, undefined, TOKEN_2022_PROGRAM_ID);
+    expect(vault.amount.toString()).to.eq("2000");
+
+    // Buyer left with 1000 (3000 - 2000)
+    const buyerAcct = await getAccount(provider.connection, buyerQuoteTa, undefined, TOKEN_2022_PROGRAM_ID);
+    expect(buyerAcct.amount.toString()).to.eq("1000");
+  });
+
   it("rejects create_curve with reserve_ratio > 100%", async () => {
     const curveId = new Uint8Array(32);
     curveId[0] = 0xed;

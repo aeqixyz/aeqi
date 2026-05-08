@@ -179,6 +179,56 @@ pub mod aeqi_unifutures {
         Ok(())
     }
 
+    /// Commit quote to a CommitmentSale during its active phase. Transfers
+    /// `amount` of quote to the sale's vault and records the buyer's
+    /// commitment so they can claim asset allocations at finalize.
+    /// Mirrors EVM `Unifutures.module.commit*`.
+    pub fn commit_to_sale(ctx: Context<CommitToSale>, amount: u64) -> Result<()> {
+        require!(amount > 0, UnifuturesError::ZeroAmount);
+
+        let s = &mut ctx.accounts.sale;
+        let now = Clock::get()?.unix_timestamp;
+        require!(s.status == SaleStatus::Active as u8, UnifuturesError::SaleNotActive);
+        require!(now < s.end_time, UnifuturesError::SaleClosed);
+        require!(
+            s.proceeds_collected.checked_add(amount).unwrap() <= s.overflow_quote,
+            UnifuturesError::OverflowExceeded
+        );
+
+        // Transfer quote: buyer → sale_quote_vault (buyer signs)
+        let cpi = TransferChecked {
+            from: ctx.accounts.buyer_quote_ta.to_account_info(),
+            mint: ctx.accounts.quote_mint.to_account_info(),
+            to: ctx.accounts.sale_quote_vault.to_account_info(),
+            authority: ctx.accounts.buyer.to_account_info(),
+        };
+        transfer_checked(
+            CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi),
+            amount,
+            ctx.accounts.quote_mint.decimals,
+        )?;
+
+        let c = &mut ctx.accounts.commitment;
+        // Init-if-needed: zero on first call, accumulate on subsequent.
+        c.trust = s.trust;
+        c.sale_id = s.sale_id;
+        c.buyer = ctx.accounts.buyer.key();
+        c.amount = c.amount.checked_add(amount).unwrap();
+        c.bump = ctx.bumps.commitment;
+
+        s.proceeds_collected = s.proceeds_collected.checked_add(amount).unwrap();
+        s.commitments_collected = s.commitments_collected.checked_add(amount).unwrap();
+
+        emit!(SaleCommitted {
+            trust: s.trust,
+            sale_id: s.sale_id,
+            buyer: c.buyer,
+            amount,
+            total_commitment: c.amount,
+        });
+        Ok(())
+    }
+
     /// Buy `token_amount` of asset from the curve. Buyer pays `cost` of
     /// quote tokens (computed from the curve), receives `token_amount` of
     /// asset tokens from the program-controlled curve_asset_vault.
@@ -415,6 +465,16 @@ pub struct CommitmentSale {
 
 #[account]
 #[derive(InitSpace)]
+pub struct SaleCommitment {
+    pub trust: Pubkey,
+    pub sale_id: [u8; 32],
+    pub buyer: Pubkey,
+    pub amount: u64,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
 pub struct Exit {
     pub trust: Pubkey,
     pub exit_id: [u8; 32],
@@ -494,6 +554,36 @@ pub struct CreateCurve<'info> {
 #[derive(Accounts)]
 pub struct QuoteBuy<'info> {
     pub curve: Account<'info, BondingCurve>,
+}
+
+#[derive(Accounts)]
+pub struct CommitToSale<'info> {
+    #[account(
+        mut,
+        seeds = [b"sale", sale.trust.as_ref(), sale.sale_id.as_ref()],
+        bump = sale.bump,
+    )]
+    pub sale: Box<Account<'info, CommitmentSale>>,
+    /// CHECK: program-controlled vault authority
+    #[account(seeds = [b"sale_authority", sale.trust.as_ref(), sale.sale_id.as_ref()], bump)]
+    pub sale_authority: UncheckedAccount<'info>,
+    pub quote_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(mut, token::mint = quote_mint, token::authority = sale_authority)]
+    pub sale_quote_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, token::mint = quote_mint, token::authority = buyer)]
+    pub buyer_quote_ta: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(
+        init_if_needed,
+        payer = buyer,
+        space = 8 + SaleCommitment::INIT_SPACE,
+        seeds = [b"sale_commitment", sale.trust.as_ref(), sale.sale_id.as_ref(), buyer.key().as_ref()],
+        bump,
+    )]
+    pub commitment: Box<Account<'info, SaleCommitment>>,
+    #[account(mut)]
+    pub buyer: Signer<'info>,
+    pub token_program: Interface<'info, TokenInterface>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -644,6 +734,15 @@ pub struct ExitCreated {
     pub end_time: i64,
 }
 
+#[event]
+pub struct SaleCommitted {
+    pub trust: Pubkey,
+    pub sale_id: [u8; 32],
+    pub buyer: Pubkey,
+    pub amount: u64,
+    pub total_commitment: u64,
+}
+
 #[error_code]
 pub enum UnifuturesError {
     #[msg("max_supply must be > 0")]
@@ -668,4 +767,10 @@ pub enum UnifuturesError {
     InvalidOverflowTarget,
     #[msg("duration_secs must be > 0")]
     InvalidDuration,
+    #[msg("sale is not Active (already finalized or cancelled)")]
+    SaleNotActive,
+    #[msg("sale has closed (now >= end_time)")]
+    SaleClosed,
+    #[msg("commitment would exceed sale.overflow_quote")]
+    OverflowExceeded,
 }
