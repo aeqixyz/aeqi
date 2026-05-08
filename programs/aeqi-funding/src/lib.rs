@@ -21,7 +21,7 @@
 //! follows once the inter-module CPI surfaces stabilize.
 
 use anchor_lang::prelude::*;
-use aeqi_unifutures::cpi::accounts::CreateCommitmentSale;
+use aeqi_unifutures::cpi::accounts::{CreateCommitmentSale, CreateCurve, CreateExit};
 use aeqi_unifutures::program::AeqiUnifutures;
 
 declare_id!("8EAVY6uosAatbwhemj1gsPB47WwwmDLzi2t7yo2b8CWV");
@@ -49,8 +49,14 @@ pub mod aeqi_funding {
         target_quote: u64,
     ) -> Result<()> {
         require!(kind <= 2, FundingError::InvalidKind);
-        require!(asset_amount > 0, FundingError::ZeroAmount);
-        require!(target_quote > 0, FundingError::ZeroAmount);
+        // CommitmentSale needs concrete amounts at request time; BondingCurve
+        // and Exit carry their parameters in the activation call (price curve
+        // / exit_quote are kind-specific and meaningless here), so the zero
+        // gate is kind=0 only.
+        if kind == 0 {
+            require!(asset_amount > 0, FundingError::ZeroAmount);
+            require!(target_quote > 0, FundingError::ZeroAmount);
+        }
 
         let now = Clock::get()?.unix_timestamp;
         let r = &mut ctx.accounts.request;
@@ -123,6 +129,96 @@ pub mod aeqi_funding {
             request_id: r.request_id,
             kind: r.kind,
             primitive_id: sale_id,
+        });
+        Ok(())
+    }
+
+    /// Activate a BondingCurve-kind funding request — CPIs into
+    /// `aeqi_unifutures::create_curve`.
+    pub fn activate_bonding_curve<'info>(
+        ctx: Context<'_, '_, 'info, 'info, ActivateBondingCurve<'info>>,
+        curve_id: [u8; 32],
+        curve_type: u8,
+        start_price: u128,
+        end_price: u128,
+        max_supply: u64,
+        reserve_ratio_ppm: u32,
+    ) -> Result<()> {
+        let r = &mut ctx.accounts.request;
+        require!(
+            r.status == RequestStatus::Pending as u8,
+            FundingError::CannotActivate
+        );
+        require!(r.kind == 1, FundingError::WrongKind);
+
+        let cpi = CreateCurve {
+            trust: ctx.accounts.trust.to_account_info(),
+            module_state: ctx.accounts.unifutures_module_state.to_account_info(),
+            curve: ctx.accounts.curve.to_account_info(),
+            creator: ctx.accounts.creator.to_account_info(),
+            system_program: ctx.accounts.system_program.to_account_info(),
+        };
+        aeqi_unifutures::cpi::create_curve(
+            CpiContext::new(ctx.accounts.aeqi_unifutures_program.to_account_info(), cpi),
+            curve_id,
+            curve_type,
+            start_price,
+            end_price,
+            max_supply,
+            reserve_ratio_ppm,
+        )?;
+
+        r.status = RequestStatus::Activated as u8;
+        r.primitive_id = curve_id;
+
+        emit!(FundingRequestActivated {
+            trust: r.trust,
+            request_id: r.request_id,
+            kind: r.kind,
+            primitive_id: curve_id,
+        });
+        Ok(())
+    }
+
+    /// Activate an Exit-kind funding request — CPIs into
+    /// `aeqi_unifutures::create_exit`.
+    pub fn activate_exit<'info>(
+        ctx: Context<'_, '_, 'info, 'info, ActivateExit<'info>>,
+        exit_id: [u8; 32],
+        exit_quote: u64,
+        total_supply_snapshot: u64,
+        duration_secs: i64,
+    ) -> Result<()> {
+        let r = &mut ctx.accounts.request;
+        require!(
+            r.status == RequestStatus::Pending as u8,
+            FundingError::CannotActivate
+        );
+        require!(r.kind == 2, FundingError::WrongKind);
+
+        let cpi = CreateExit {
+            trust: ctx.accounts.trust.to_account_info(),
+            module_state: ctx.accounts.unifutures_module_state.to_account_info(),
+            exit: ctx.accounts.exit.to_account_info(),
+            creator: ctx.accounts.creator.to_account_info(),
+            system_program: ctx.accounts.system_program.to_account_info(),
+        };
+        aeqi_unifutures::cpi::create_exit(
+            CpiContext::new(ctx.accounts.aeqi_unifutures_program.to_account_info(), cpi),
+            exit_id,
+            exit_quote,
+            total_supply_snapshot,
+            duration_secs,
+        )?;
+
+        r.status = RequestStatus::Activated as u8;
+        r.primitive_id = exit_id;
+
+        emit!(FundingRequestActivated {
+            trust: r.trust,
+            request_id: r.request_id,
+            kind: r.kind,
+            primitive_id: exit_id,
         });
         Ok(())
     }
@@ -239,6 +335,50 @@ pub struct ActivateCommitmentSale<'info> {
     /// CHECK: aeqi_unifutures will init the CommitmentSale PDA
     #[account(mut)]
     pub sale: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub creator: Signer<'info>,
+    pub aeqi_unifutures_program: Program<'info, AeqiUnifutures>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct ActivateBondingCurve<'info> {
+    #[account(
+        mut,
+        seeds = [b"funding_request", request.trust.as_ref(), request.request_id.as_ref()],
+        bump = request.bump,
+    )]
+    pub request: Account<'info, FundingRequest>,
+    /// CHECK: trust pda
+    pub trust: UncheckedAccount<'info>,
+    /// CHECK: unifutures module_state
+    #[account(mut)]
+    pub unifutures_module_state: UncheckedAccount<'info>,
+    /// CHECK: aeqi_unifutures inits the BondingCurve PDA
+    #[account(mut)]
+    pub curve: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub creator: Signer<'info>,
+    pub aeqi_unifutures_program: Program<'info, AeqiUnifutures>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct ActivateExit<'info> {
+    #[account(
+        mut,
+        seeds = [b"funding_request", request.trust.as_ref(), request.request_id.as_ref()],
+        bump = request.bump,
+    )]
+    pub request: Account<'info, FundingRequest>,
+    /// CHECK: trust pda
+    pub trust: UncheckedAccount<'info>,
+    /// CHECK: unifutures module_state
+    #[account(mut)]
+    pub unifutures_module_state: UncheckedAccount<'info>,
+    /// CHECK: aeqi_unifutures inits the Exit PDA
+    #[account(mut)]
+    pub exit: UncheckedAccount<'info>,
     #[account(mut)]
     pub creator: Signer<'info>,
     pub aeqi_unifutures_program: Program<'info, AeqiUnifutures>,

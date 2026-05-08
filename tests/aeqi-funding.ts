@@ -202,6 +202,226 @@ describe("aeqi_funding", () => {
     expect(sale.status).to.eq(0); // Active
   });
 
+  it("activate_bonding_curve CPIs into aeqi_unifutures.create_curve", async () => {
+    const unifutures = anchor.workspace.aeqiUnifutures as Program<AeqiUnifutures>;
+
+    // Reuse same fakeTrust + module init from prior test (it's idempotent —
+    // skip the init since it's already done above; the module_state PDA is
+    // already initialized so a second init would fail).
+    const [unifModulePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("unifutures_module"), fakeTrust.toBuffer()],
+      unifutures.programId,
+    );
+
+    const requestId = new Uint8Array(32);
+    requestId[0] = 0xb0;
+    const budgetId = new Uint8Array(32);
+    budgetId[0] = 0xb1;
+
+    const [requestPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("funding_request"), fakeTrust.toBuffer(), Buffer.from(requestId)],
+      program.programId,
+    );
+
+    await program.methods
+      .createFundingRequest(
+        Array.from(requestId),
+        1, // BondingCurve
+        Array.from(budgetId),
+        new anchor.BN(0),
+        new anchor.BN(0),
+      )
+      .accounts({
+        trust: fakeTrust,
+        moduleState: modulePda,
+        request: requestPda,
+        creator: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const curveId = new Uint8Array(32);
+    curveId[0] = 0xc0;
+    curveId[1] = 0xff;
+    const [curvePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("curve"), fakeTrust.toBuffer(), Buffer.from(curveId)],
+      unifutures.programId,
+    );
+
+    await program.methods
+      .activateBondingCurve(
+        Array.from(curveId),
+        0, // Linear
+        new anchor.BN("1000000000000000000"), // start_price 1e18
+        new anchor.BN("2000000000000000000"), // end_price 2e18
+        new anchor.BN(1_000_000), // max_supply
+        500_000, // 50% reserve_ratio_ppm
+      )
+      .accounts({
+        request: requestPda,
+        trust: fakeTrust,
+        unifuturesModuleState: unifModulePda,
+        curve: curvePda,
+        creator: provider.wallet.publicKey,
+        aeqiUnifuturesProgram: unifutures.programId,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const r = await program.account.fundingRequest.fetch(requestPda);
+    expect(r.status).to.eq(1);
+    expect(Buffer.from(r.primitiveId).toString("hex")).to.eq(
+      Buffer.from(curveId).toString("hex"),
+    );
+
+    const c = await unifutures.account.bondingCurve.fetch(curvePda);
+    expect(c.maxSupply.toString()).to.eq("1000000");
+    expect(c.curveType).to.eq(0);
+    expect(c.reserveRatioPpm).to.eq(500_000);
+  });
+
+  it("activate_exit CPIs into aeqi_unifutures.create_exit", async () => {
+    const unifutures = anchor.workspace.aeqiUnifutures as Program<AeqiUnifutures>;
+
+    const [unifModulePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("unifutures_module"), fakeTrust.toBuffer()],
+      unifutures.programId,
+    );
+
+    const requestId = new Uint8Array(32);
+    requestId[0] = 0xe0;
+    const budgetId = new Uint8Array(32);
+    budgetId[0] = 0xe1;
+
+    const [requestPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("funding_request"), fakeTrust.toBuffer(), Buffer.from(requestId)],
+      program.programId,
+    );
+
+    await program.methods
+      .createFundingRequest(
+        Array.from(requestId),
+        2, // Exit
+        Array.from(budgetId),
+        new anchor.BN(0),
+        new anchor.BN(0),
+      )
+      .accounts({
+        trust: fakeTrust,
+        moduleState: modulePda,
+        request: requestPda,
+        creator: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const exitId = new Uint8Array(32);
+    exitId[0] = 0xe0;
+    exitId[1] = 0x17;
+    const [exitPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("exit"), fakeTrust.toBuffer(), Buffer.from(exitId)],
+      unifutures.programId,
+    );
+
+    await program.methods
+      .activateExit(
+        Array.from(exitId),
+        new anchor.BN(100_000), // exit_quote
+        new anchor.BN(500_000), // total_supply_snapshot
+        new anchor.BN(60 * 60 * 24 * 30), // 30 days
+      )
+      .accounts({
+        request: requestPda,
+        trust: fakeTrust,
+        unifuturesModuleState: unifModulePda,
+        exit: exitPda,
+        creator: provider.wallet.publicKey,
+        aeqiUnifuturesProgram: unifutures.programId,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const r = await program.account.fundingRequest.fetch(requestPda);
+    expect(r.status).to.eq(1);
+    expect(Buffer.from(r.primitiveId).toString("hex")).to.eq(
+      Buffer.from(exitId).toString("hex"),
+    );
+
+    const e = await unifutures.account.exit.fetch(exitPda);
+    expect(e.exitQuote.toString()).to.eq("100000");
+    expect(e.totalSupplySnapshot.toString()).to.eq("500000");
+    expect(e.status).to.eq(0); // Active
+  });
+
+  it("activate_bonding_curve rejects wrong-kind request", async () => {
+    // Reuse the CommitmentSale request from earlier in the suite — it has
+    // status=Activated already, but more importantly kind=0. Even if we
+    // create a fresh Pending CommitmentSale here, kind=0 ≠ 1 → WrongKind.
+    const requestId = new Uint8Array(32);
+    requestId[0] = 0x77;
+
+    const [requestPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("funding_request"), fakeTrust.toBuffer(), Buffer.from(requestId)],
+      program.programId,
+    );
+
+    await program.methods
+      .createFundingRequest(
+        Array.from(requestId),
+        0, // CommitmentSale (NOT BondingCurve)
+        Array.from(new Uint8Array(32)),
+        new anchor.BN(1),
+        new anchor.BN(1),
+      )
+      .accounts({
+        trust: fakeTrust,
+        moduleState: modulePda,
+        request: requestPda,
+        creator: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const unifutures = anchor.workspace.aeqiUnifutures as Program<AeqiUnifutures>;
+    const [unifModulePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("unifutures_module"), fakeTrust.toBuffer()],
+      unifutures.programId,
+    );
+    const curveId = new Uint8Array(32);
+    curveId[0] = 0x77;
+    const [curvePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("curve"), fakeTrust.toBuffer(), Buffer.from(curveId)],
+      unifutures.programId,
+    );
+
+    let threw = false;
+    try {
+      await program.methods
+        .activateBondingCurve(
+          Array.from(curveId),
+          0,
+          new anchor.BN("1000000000000000000"),
+          new anchor.BN("2000000000000000000"),
+          new anchor.BN(1000),
+          500_000,
+        )
+        .accounts({
+          request: requestPda,
+          trust: fakeTrust,
+          unifuturesModuleState: unifModulePda,
+          curve: curvePda,
+          creator: provider.wallet.publicKey,
+          aeqiUnifuturesProgram: unifutures.programId,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
+    } catch (e: any) {
+      threw = true;
+      expect(e.toString()).to.match(/WrongKind/);
+    }
+    expect(threw).to.eq(true);
+  });
+
   it("rejects invalid kind (>=3)", async () => {
     const requestId = new Uint8Array(32);
     requestId[0] = 0xee;
