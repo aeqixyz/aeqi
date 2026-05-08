@@ -540,6 +540,85 @@ describe("aeqi_unifutures", () => {
     expect(c.reserveBalance.toString()).to.eq("58");
   });
 
+  it("create_commitment_sale stores a fixed-price pre-sale PDA", async () => {
+    const saleId = new Uint8Array(32);
+    saleId[0] = 0xc5;
+    saleId[1] = 0xa1;
+
+    const [salePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("sale"), fakeTrust.toBuffer(), Buffer.from(saleId)],
+      program.programId,
+    );
+
+    const ASSET_AMOUNT = 1000;
+    const TARGET = 5000;
+    const OVERFLOW = 7500;
+    const DURATION = 60 * 60 * 24 * 7; // 7 days
+
+    await program.methods
+      .createCommitmentSale(
+        Array.from(saleId),
+        new anchor.BN(ASSET_AMOUNT),
+        new anchor.BN(TARGET),
+        new anchor.BN(OVERFLOW),
+        new anchor.BN(DURATION),
+      )
+      .accounts({
+        trust: fakeTrust,
+        moduleState: modulePda,
+        sale: salePda,
+        creator: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const s = await program.account.commitmentSale.fetch(salePda);
+    expect(s.assetAmount.toString()).to.eq(String(ASSET_AMOUNT));
+    expect(s.targetQuote.toString()).to.eq(String(TARGET));
+    expect(s.overflowQuote.toString()).to.eq(String(OVERFLOW));
+    expect(s.status).to.eq(0); // Active
+    expect(s.proceedsCollected.toString()).to.eq("0");
+    expect(s.creator.toBase58()).to.eq(provider.wallet.publicKey.toBase58());
+    // end_time = start + DURATION; allow ±5s slack
+    const expectedEnd = s.startTime.add(new anchor.BN(DURATION));
+    expect(s.endTime.toString()).to.eq(expectedEnd.toString());
+  });
+
+  it("rejects create_commitment_sale when overflow < target", async () => {
+    const saleId = new Uint8Array(32);
+    saleId[0] = 0xee;
+    saleId[1] = 0xee;
+
+    const [salePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("sale"), fakeTrust.toBuffer(), Buffer.from(saleId)],
+      program.programId,
+    );
+
+    let threw = false;
+    try {
+      await program.methods
+        .createCommitmentSale(
+          Array.from(saleId),
+          new anchor.BN(1000),
+          new anchor.BN(5000), // target
+          new anchor.BN(3000), // overflow < target — INVALID
+          new anchor.BN(60 * 60 * 24),
+        )
+        .accounts({
+          trust: fakeTrust,
+          moduleState: modulePda,
+          sale: salePda,
+          creator: provider.wallet.publicKey,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
+    } catch (e: any) {
+      threw = true;
+      expect(e.toString()).to.match(/InvalidOverflowTarget/);
+    }
+    expect(threw).to.eq(true);
+  });
+
   it("rejects create_curve with reserve_ratio > 100%", async () => {
     const curveId = new Uint8Array(32);
     curveId[0] = 0xed;

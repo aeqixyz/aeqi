@@ -85,6 +85,56 @@ pub mod aeqi_unifutures {
         Ok(())
     }
 
+    /// Create a CommitmentSale — fixed-price pre-sale. Buyers commit quote
+    /// during the active phase; on finalization, allocations are computed
+    /// against the target. Mirrors EVM `Unifutures.module.createCommitmentSale`.
+    /// Buy/finalize/claim ixes follow.
+    pub fn create_commitment_sale(
+        ctx: Context<CreateCommitmentSale>,
+        sale_id: [u8; 32],
+        asset_amount: u64,
+        target_quote: u64,
+        overflow_quote: u64,
+        duration_secs: i64,
+    ) -> Result<()> {
+        require!(asset_amount > 0, UnifuturesError::ZeroAmount);
+        require!(target_quote > 0, UnifuturesError::ZeroAmount);
+        require!(
+            overflow_quote >= target_quote,
+            UnifuturesError::InvalidOverflowTarget
+        );
+        require!(duration_secs > 0, UnifuturesError::InvalidDuration);
+
+        let now = Clock::get()?.unix_timestamp;
+        let s = &mut ctx.accounts.sale;
+        s.trust = ctx.accounts.trust.key();
+        s.sale_id = sale_id;
+        s.creator = ctx.accounts.creator.key();
+        s.asset_amount = asset_amount;
+        s.target_quote = target_quote;
+        s.overflow_quote = overflow_quote;
+        s.proceeds_collected = 0;
+        s.commitments_collected = 0;
+        s.status = SaleStatus::Active as u8;
+        s.start_time = now;
+        s.end_time = now.checked_add(duration_secs).unwrap();
+        s.bump = ctx.bumps.sale;
+
+        let m = &mut ctx.accounts.module_state;
+        m.sale_count = m.sale_count.checked_add(1).unwrap();
+
+        emit!(SaleCreated {
+            trust: s.trust,
+            sale_id,
+            creator: s.creator,
+            asset_amount,
+            target_quote,
+            overflow_quote,
+            end_time: s.end_time,
+        });
+        Ok(())
+    }
+
     /// Buy `token_amount` of asset from the curve. Buyer pays `cost` of
     /// quote tokens (computed from the curve), receives `token_amount` of
     /// asset tokens from the program-controlled curve_asset_vault.
@@ -290,6 +340,31 @@ pub mod aeqi_unifutures {
 pub struct UnifuturesModuleState {
     pub trust: Pubkey,
     pub curve_count: u64,
+    pub sale_count: u64,
+    pub bump: u8,
+}
+
+#[repr(u8)]
+pub enum SaleStatus {
+    Active = 0,
+    Completed = 1,
+    Cancelled = 2,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct CommitmentSale {
+    pub trust: Pubkey,
+    pub sale_id: [u8; 32],
+    pub creator: Pubkey,
+    pub asset_amount: u64,
+    pub target_quote: u64,
+    pub overflow_quote: u64,
+    pub proceeds_collected: u64,
+    pub commitments_collected: u64,
+    pub status: u8,
+    pub start_time: i64,
+    pub end_time: i64,
     pub bump: u8,
 }
 
@@ -358,6 +433,30 @@ pub struct CreateCurve<'info> {
 #[derive(Accounts)]
 pub struct QuoteBuy<'info> {
     pub curve: Account<'info, BondingCurve>,
+}
+
+#[derive(Accounts)]
+#[instruction(sale_id: [u8; 32])]
+pub struct CreateCommitmentSale<'info> {
+    /// CHECK: trust pda
+    pub trust: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        seeds = [b"unifutures_module", trust.key().as_ref()],
+        bump = module_state.bump,
+    )]
+    pub module_state: Account<'info, UnifuturesModuleState>,
+    #[account(
+        init,
+        payer = creator,
+        space = 8 + CommitmentSale::INIT_SPACE,
+        seeds = [b"sale", trust.key().as_ref(), sale_id.as_ref()],
+        bump,
+    )]
+    pub sale: Account<'info, CommitmentSale>,
+    #[account(mut)]
+    pub creator: Signer<'info>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -439,6 +538,17 @@ pub struct CurveSell {
     pub return_amount: u64,
 }
 
+#[event]
+pub struct SaleCreated {
+    pub trust: Pubkey,
+    pub sale_id: [u8; 32],
+    pub creator: Pubkey,
+    pub asset_amount: u64,
+    pub target_quote: u64,
+    pub overflow_quote: u64,
+    pub end_time: i64,
+}
+
 #[error_code]
 pub enum UnifuturesError {
     #[msg("max_supply must be > 0")]
@@ -459,4 +569,8 @@ pub enum UnifuturesError {
     ExceedsSupply,
     #[msg("return_amount exceeds curve.reserve_balance")]
     InsufficientReserve,
+    #[msg("overflow_quote must be ≥ target_quote")]
+    InvalidOverflowTarget,
+    #[msg("duration_secs must be > 0")]
+    InvalidDuration,
 }
