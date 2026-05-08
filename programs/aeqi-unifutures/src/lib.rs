@@ -14,7 +14,7 @@
 
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{
-    transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
+    burn, transfer_checked, Burn, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
 
 pub mod curve;
@@ -81,6 +81,119 @@ pub mod aeqi_unifutures {
             start_price,
             end_price,
             max_supply,
+        });
+        Ok(())
+    }
+
+    /// Settle an Exit — creator (acquirer) deposits the full `exit_quote`
+    /// into the exit's vault upfront, locking the proceeds pool. Token
+    /// holders can then claim_pro_rata by burning their cap-table tokens.
+    pub fn settle_exit(ctx: Context<SettleExit>) -> Result<()> {
+        let e = &ctx.accounts.exit;
+        require!(e.status == SaleStatus::Active as u8, UnifuturesError::SaleNotActive);
+        require_keys_eq!(
+            ctx.accounts.creator.key(),
+            e.creator,
+            UnifuturesError::Unauthorized
+        );
+        require!(
+            e.proceeds_collected == 0,
+            UnifuturesError::AlreadySettled
+        );
+
+        let cpi = TransferChecked {
+            from: ctx.accounts.creator_quote_ta.to_account_info(),
+            mint: ctx.accounts.quote_mint.to_account_info(),
+            to: ctx.accounts.exit_quote_vault.to_account_info(),
+            authority: ctx.accounts.creator.to_account_info(),
+        };
+        transfer_checked(
+            CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi),
+            e.exit_quote,
+            ctx.accounts.quote_mint.decimals,
+        )?;
+
+        let e = &mut ctx.accounts.exit;
+        e.proceeds_collected = e.exit_quote;
+
+        emit!(ExitSettled {
+            trust: e.trust,
+            exit_id: e.exit_id,
+            creator: e.creator,
+            exit_quote: e.exit_quote,
+        });
+        Ok(())
+    }
+
+    /// Claim a pro-rata share of an Exit's proceeds by burning cap-table
+    /// tokens. Burns `burn_amount` of asset; receives
+    /// `burn_amount * exit_quote / total_supply_snapshot` of quote.
+    pub fn claim_pro_rata(ctx: Context<ClaimProRata>, burn_amount: u64) -> Result<()> {
+        require!(burn_amount > 0, UnifuturesError::ZeroAmount);
+        let e = &ctx.accounts.exit;
+        require!(e.proceeds_collected > 0, UnifuturesError::NotSettled);
+        require!(e.status == SaleStatus::Active as u8, UnifuturesError::SaleNotActive);
+
+        let share_u128 = (burn_amount as u128)
+            .checked_mul(e.exit_quote as u128)
+            .ok_or_else(|| error!(UnifuturesError::MathOverflow))?
+            .checked_div(e.total_supply_snapshot as u128)
+            .ok_or_else(|| error!(UnifuturesError::MathOverflow))?;
+        let share: u64 = share_u128
+            .try_into()
+            .map_err(|_| error!(UnifuturesError::MathOverflow))?;
+        require!(share > 0, UnifuturesError::ShareTooSmall);
+        require!(
+            share <= e.remaining_proceeds,
+            UnifuturesError::InsufficientReserve
+        );
+
+        // 1. Holder burns `burn_amount` of asset (holder signs)
+        let burn_cpi = Burn {
+            mint: ctx.accounts.asset_mint.to_account_info(),
+            from: ctx.accounts.holder_asset_ta.to_account_info(),
+            authority: ctx.accounts.holder.to_account_info(),
+        };
+        burn(
+            CpiContext::new(ctx.accounts.token_program.to_account_info(), burn_cpi),
+            burn_amount,
+        )?;
+
+        // 2. Exit vault → holder (exit_authority PDA signs)
+        let trust_key = e.trust;
+        let exit_id_bytes = e.exit_id;
+        let bump = ctx.bumps.exit_authority;
+        let seeds: &[&[&[u8]]] = &[&[
+            b"exit_authority",
+            trust_key.as_ref(),
+            exit_id_bytes.as_ref(),
+            &[bump],
+        ]];
+        let cpi = TransferChecked {
+            from: ctx.accounts.exit_quote_vault.to_account_info(),
+            mint: ctx.accounts.quote_mint.to_account_info(),
+            to: ctx.accounts.holder_quote_ta.to_account_info(),
+            authority: ctx.accounts.exit_authority.to_account_info(),
+        };
+        transfer_checked(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                cpi,
+                seeds,
+            ),
+            share,
+            ctx.accounts.quote_mint.decimals,
+        )?;
+
+        let e = &mut ctx.accounts.exit;
+        e.remaining_proceeds = e.remaining_proceeds.checked_sub(share).unwrap();
+
+        emit!(ProRataClaimed {
+            trust: e.trust,
+            exit_id: e.exit_id,
+            holder: ctx.accounts.holder.key(),
+            burned: burn_amount,
+            share,
         });
         Ok(())
     }
@@ -587,6 +700,50 @@ pub struct CommitToSale<'info> {
 }
 
 #[derive(Accounts)]
+pub struct SettleExit<'info> {
+    #[account(
+        mut,
+        seeds = [b"exit", exit.trust.as_ref(), exit.exit_id.as_ref()],
+        bump = exit.bump,
+    )]
+    pub exit: Box<Account<'info, Exit>>,
+    /// CHECK: vault authority PDA
+    #[account(seeds = [b"exit_authority", exit.trust.as_ref(), exit.exit_id.as_ref()], bump)]
+    pub exit_authority: UncheckedAccount<'info>,
+    pub quote_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(mut, token::mint = quote_mint, token::authority = exit_authority)]
+    pub exit_quote_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, token::mint = quote_mint, token::authority = creator)]
+    pub creator_quote_ta: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub creator: Signer<'info>,
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
+#[derive(Accounts)]
+pub struct ClaimProRata<'info> {
+    #[account(
+        mut,
+        seeds = [b"exit", exit.trust.as_ref(), exit.exit_id.as_ref()],
+        bump = exit.bump,
+    )]
+    pub exit: Box<Account<'info, Exit>>,
+    /// CHECK: PDA signer for vault out-transfer
+    #[account(seeds = [b"exit_authority", exit.trust.as_ref(), exit.exit_id.as_ref()], bump)]
+    pub exit_authority: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub asset_mint: Box<InterfaceAccount<'info, Mint>>,
+    pub quote_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(mut, token::mint = quote_mint, token::authority = exit_authority)]
+    pub exit_quote_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, token::mint = asset_mint, token::authority = holder)]
+    pub holder_asset_ta: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, token::mint = quote_mint)]
+    pub holder_quote_ta: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub holder: Signer<'info>,
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
+#[derive(Accounts)]
 #[instruction(exit_id: [u8; 32])]
 pub struct CreateExit<'info> {
     /// CHECK: trust pda
@@ -743,6 +900,23 @@ pub struct SaleCommitted {
     pub total_commitment: u64,
 }
 
+#[event]
+pub struct ExitSettled {
+    pub trust: Pubkey,
+    pub exit_id: [u8; 32],
+    pub creator: Pubkey,
+    pub exit_quote: u64,
+}
+
+#[event]
+pub struct ProRataClaimed {
+    pub trust: Pubkey,
+    pub exit_id: [u8; 32],
+    pub holder: Pubkey,
+    pub burned: u64,
+    pub share: u64,
+}
+
 #[error_code]
 pub enum UnifuturesError {
     #[msg("max_supply must be > 0")]
@@ -773,4 +947,12 @@ pub enum UnifuturesError {
     SaleClosed,
     #[msg("commitment would exceed sale.overflow_quote")]
     OverflowExceeded,
+    #[msg("caller is not the exit creator")]
+    Unauthorized,
+    #[msg("exit was already settled")]
+    AlreadySettled,
+    #[msg("exit has not been settled yet")]
+    NotSettled,
+    #[msg("computed share rounded to zero — burn more or wait for settle")]
+    ShareTooSmall,
 }

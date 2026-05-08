@@ -820,6 +820,196 @@ describe("aeqi_unifutures", () => {
     expect(buyerAcct.amount.toString()).to.eq("1000");
   });
 
+  it("settle_exit + claim_pro_rata — creator settles, holder burns for share", async () => {
+    // Exit: 10_000 quote pool, 1000 supply snapshot, 30d duration.
+    // Holder burns 100 asset → share = 100 * 10000 / 1000 = 1000 quote.
+    const exitId = new Uint8Array(32);
+    exitId[0] = 0xe5;
+    exitId[1] = 0x07;
+
+    const [exitPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("exit"), fakeTrust.toBuffer(), Buffer.from(exitId)],
+      program.programId,
+    );
+    const [exitAuthorityPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("exit_authority"), fakeTrust.toBuffer(), Buffer.from(exitId)],
+      program.programId,
+    );
+
+    const EXIT_QUOTE = 10_000;
+    const SUPPLY_SNAPSHOT = 1_000;
+
+    await program.methods
+      .createExit(
+        Array.from(exitId),
+        new anchor.BN(EXIT_QUOTE),
+        new anchor.BN(SUPPLY_SNAPSHOT),
+        new anchor.BN(60 * 60 * 24 * 30),
+      )
+      .accounts({
+        trust: fakeTrust,
+        moduleState: modulePda,
+        exit: exitPda,
+        creator: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Mints
+    const assetMint = await createMint(
+      provider.connection,
+      (provider.wallet as anchor.Wallet).payer,
+      provider.wallet.publicKey,
+      null,
+      0,
+      Keypair.generate(),
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+    );
+    const quoteMint = await createMint(
+      provider.connection,
+      (provider.wallet as anchor.Wallet).payer,
+      provider.wallet.publicKey,
+      null,
+      0,
+      Keypair.generate(),
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+    );
+
+    // Vault for the exit_quote_vault — owned by exit_authority PDA
+    const exitQuoteVault = getAssociatedTokenAddressSync(
+      quoteMint,
+      exitAuthorityPda,
+      true,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+
+    const creator = provider.wallet.publicKey;
+    const creatorQuoteTa = getAssociatedTokenAddressSync(
+      quoteMint,
+      creator,
+      false,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+    const holder = creator; // single test wallet acts as both
+    const holderAssetTa = getAssociatedTokenAddressSync(
+      assetMint,
+      holder,
+      false,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+
+    await provider.sendAndConfirm(
+      new anchor.web3.Transaction()
+        .add(
+          createAssociatedTokenAccountInstruction(
+            creator,
+            exitQuoteVault,
+            exitAuthorityPda,
+            quoteMint,
+            TOKEN_2022_PROGRAM_ID,
+            ASSOCIATED_TOKEN_PROGRAM_ID,
+          ),
+        )
+        .add(
+          createAssociatedTokenAccountInstruction(
+            creator,
+            creatorQuoteTa,
+            creator,
+            quoteMint,
+            TOKEN_2022_PROGRAM_ID,
+            ASSOCIATED_TOKEN_PROGRAM_ID,
+          ),
+        )
+        .add(
+          createAssociatedTokenAccountInstruction(
+            creator,
+            holderAssetTa,
+            holder,
+            assetMint,
+            TOKEN_2022_PROGRAM_ID,
+            ASSOCIATED_TOKEN_PROGRAM_ID,
+          ),
+        ),
+    );
+
+    // Mint 10_000 quote to creator + 1000 asset to holder
+    await mintTo(
+      provider.connection,
+      (provider.wallet as anchor.Wallet).payer,
+      quoteMint,
+      creatorQuoteTa,
+      creator,
+      EXIT_QUOTE,
+      [],
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+    );
+    await mintTo(
+      provider.connection,
+      (provider.wallet as anchor.Wallet).payer,
+      assetMint,
+      holderAssetTa,
+      holder,
+      1000,
+      [],
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+    );
+
+    // Settle: creator deposits 10_000 into vault
+    await program.methods
+      .settleExit()
+      .accounts({
+        exit: exitPda,
+        exitAuthority: exitAuthorityPda,
+        quoteMint,
+        exitQuoteVault,
+        creatorQuoteTa,
+        creator,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+      })
+      .rpc();
+
+    let e = await program.account.exit.fetch(exitPda);
+    expect(e.proceedsCollected.toString()).to.eq(String(EXIT_QUOTE));
+
+    let vault = await getAccount(provider.connection, exitQuoteVault, undefined, TOKEN_2022_PROGRAM_ID);
+    expect(vault.amount.toString()).to.eq(String(EXIT_QUOTE));
+
+    // Now claim_pro_rata: burn 100, expect share = 1000
+    await program.methods
+      .claimProRata(new anchor.BN(100))
+      .accounts({
+        exit: exitPda,
+        exitAuthority: exitAuthorityPda,
+        assetMint,
+        quoteMint,
+        exitQuoteVault,
+        holderAssetTa,
+        holderQuoteTa: creatorQuoteTa, // reuse creator's quote ta as holder's
+        holder,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+      })
+      .rpc();
+
+    e = await program.account.exit.fetch(exitPda);
+    expect(e.remainingProceeds.toString()).to.eq("9000");
+
+    const holderAsset = await getAccount(provider.connection, holderAssetTa, undefined, TOKEN_2022_PROGRAM_ID);
+    expect(holderAsset.amount.toString()).to.eq("900"); // 1000 - 100 burned
+
+    const holderQuote = await getAccount(provider.connection, creatorQuoteTa, undefined, TOKEN_2022_PROGRAM_ID);
+    expect(holderQuote.amount.toString()).to.eq("1000"); // started 0 (creator gave it all to vault), got 1000 back
+
+    vault = await getAccount(provider.connection, exitQuoteVault, undefined, TOKEN_2022_PROGRAM_ID);
+    expect(vault.amount.toString()).to.eq("9000");
+  });
+
   it("rejects create_curve with reserve_ratio > 100%", async () => {
     const curveId = new Uint8Array(32);
     curveId[0] = 0xed;
