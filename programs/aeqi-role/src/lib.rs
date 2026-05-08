@@ -429,17 +429,23 @@ pub struct CreateRole<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(account: Pubkey)]
 pub struct AssignRole<'info> {
     #[account(mut, has_one = trust)]
     pub role: Account<'info, Role>,
     pub role_type: Account<'info, RoleType>,
     /// CHECK: structural.
     pub trust: AccountInfo<'info>,
+    /// Checkpoint is keyed on the *assignee* pubkey, not the payer — that's
+    /// the semantics `cast_vote_role` reads back (seeds with `voter.key()`).
+    /// Using `payer.key()` here would put the checkpoint at the wrong PDA
+    /// whenever someone-with-authority assigns a different account to a
+    /// role, which is the common case.
     #[account(
         init_if_needed,
         payer = payer,
         space = 8 + RoleVoteCheckpoint::INIT_SPACE,
-        seeds = [b"role_ckpt", trust.key().as_ref(), role_type.role_type_id.as_ref(), payer.key().as_ref()],
+        seeds = [b"role_ckpt", trust.key().as_ref(), role_type.role_type_id.as_ref(), account.as_ref()],
         bump,
     )]
     pub checkpoint: Account<'info, RoleVoteCheckpoint>,

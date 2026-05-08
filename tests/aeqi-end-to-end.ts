@@ -13,7 +13,7 @@ import { AeqiFactory } from "../target/types/aeqi_factory";
 import { AeqiRole } from "../target/types/aeqi_role";
 import { AeqiToken } from "../target/types/aeqi_token";
 import { AeqiGovernance } from "../target/types/aeqi_governance";
-import { PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey } from "@solana/web3.js";
 import { expect } from "chai";
 
 describe("AEQI end-to-end spawn", () => {
@@ -294,5 +294,193 @@ describe("AEQI end-to-end spawn", () => {
     const p = await governance.account.proposal.fetch(proposalPda);
     expect(p.executed).to.eq(true);
     expect(p.forVotes.toString()).to.eq("1000");
+  });
+
+  // The skeptic-grade walk: this stitches together pieces that exist in
+  // separate tests today.
+  //
+  //   real director seat → cross-program role-checkpoint → role-vote → execute
+  //
+  // Steps 1–4 above proved trust spawn + module init + role types + a
+  // governance lifecycle that took weight as a u64 argument. This one
+  // instead:
+  //   - creates a Director Role under the AEQI trust
+  //   - assigns it to a *different* wallet (Alice) — exercises the
+  //     `assign_role` checkpoint-PDA fix where the checkpoint is keyed on
+  //     the assignee, not the payer
+  //   - registers a per-role-type governance config (id == director_type_id)
+  //   - has Alice (signing herself) propose, cast_vote_role, and execute,
+  //     where weight is *read* from the cross-program RoleVoteCheckpoint
+  //     PDA owned by aeqi_role and validated by aeqi_governance via
+  //     `seeds::program = AEQI_ROLE_ID` + manual borsh decode.
+  it("step 5: assign director Role to Alice → role-vote proposal → execute", async () => {
+    const role = anchor.workspace.aeqiRole as Program<AeqiRole>;
+
+    // Alice is a real wallet, separate from provider.wallet.
+    const alice = Keypair.generate();
+    const sig = await provider.connection.requestAirdrop(
+      alice.publicKey,
+      1_000_000_000, // 1 SOL
+    );
+    await provider.connection.confirmTransaction(sig);
+
+    const directorTypeId = new Uint8Array(32);
+    directorTypeId[0] = 0x44;
+    directorTypeId[1] = 0x49;
+    directorTypeId[2] = 0x52;
+
+    const [rtPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role_type"), trustPda.toBuffer(), Buffer.from(directorTypeId)],
+      role.programId,
+    );
+
+    // Create the Director Role (no parent — this is a root seat).
+    const directorRoleId = new Uint8Array(32);
+    directorRoleId[0] = 0x44; // 'D'
+    directorRoleId[1] = 0x52; // 'R' — Director Role
+    const [rolePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("role"), trustPda.toBuffer(), Buffer.from(directorRoleId)],
+      role.programId,
+    );
+    await role.methods
+      .createRole(
+        Array.from(directorRoleId),
+        Array.from(directorTypeId),
+        null,
+        Array.from(new Uint8Array(64)),
+      )
+      .accounts({
+        trust: trustPda,
+        roleType: rtPda,
+        role: rolePda,
+        callerRole: null,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Assign that Role to Alice. Critical: provider.wallet pays, but
+    // Alice is the assignee — checkpoint PDA must be keyed on Alice.
+    const [aliceCkptPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("role_ckpt"),
+        trustPda.toBuffer(),
+        Buffer.from(directorTypeId),
+        alice.publicKey.toBuffer(),
+      ],
+      role.programId,
+    );
+    await role.methods
+      .assignRole(alice.publicKey)
+      .accounts({
+        role: rolePda,
+        roleType: rtPda,
+        trust: trustPda,
+        checkpoint: aliceCkptPda,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Register a per-role-type governance config keyed at directorTypeId.
+    // cast_vote_role requires `proposal.governance_config_id == ckpt.role_type_id`.
+    const [govModuleStatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("gov_module"), trustPda.toBuffer()],
+      governance.programId,
+    );
+    const [roleCfgPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("gov_config"), trustPda.toBuffer(), Buffer.from(directorTypeId)],
+      governance.programId,
+    );
+    await governance.methods
+      .registerConfig(Array.from(directorTypeId), {
+        proposalThreshold: new anchor.BN(0),
+        quorumBps: 5000,
+        supportBps: 5000,
+        votingPeriod: new anchor.BN(60),
+        executionDelay: new anchor.BN(0),
+        allowEarlyEnact: true,
+      })
+      .accounts({
+        trust: trustPda,
+        moduleState: govModuleStatePda,
+        governanceConfig: roleCfgPda,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Alice proposes — she signs the tx herself.
+    const proposalId = new Uint8Array(32);
+    proposalId[0] = 0x52; // 'R' — role-vote proposal
+    proposalId[1] = 0x76; // 'v'
+    const [proposalPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("proposal"), trustPda.toBuffer(), Buffer.from(proposalId)],
+      governance.programId,
+    );
+    await governance.methods
+      .propose(
+        Array.from(proposalId),
+        Array.from(directorTypeId),
+        Array.from(new Uint8Array(64)),
+      )
+      .accounts({
+        trust: trustPda,
+        moduleState: govModuleStatePda,
+        governanceConfig: roleCfgPda,
+        proposal: proposalPda,
+        proposer: alice.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([alice])
+      .rpc();
+
+    // Alice casts cast_vote_role — weight comes from her checkpoint, not
+    // from a u64 argument. aeqi_governance reads aeqi_role's PDA via
+    // `seeds::program = AEQI_ROLE_ID` and borsh-decodes the checkpoint.
+    const [votePda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("vote"),
+        trustPda.toBuffer(),
+        Buffer.from(proposalId),
+        alice.publicKey.toBuffer(),
+      ],
+      governance.programId,
+    );
+    await governance.methods
+      .castVoteRole(1) // For
+      .accounts({
+        proposal: proposalPda,
+        vote: votePda,
+        voterCheckpoint: aliceCkptPda,
+        voter: alice.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([alice])
+      .rpc();
+
+    // Execute — total_role_supply = 1 (one director seat). 1 For-vote ÷
+    // 1 supply = 100% participation, 100% support → passes 50/50 thresholds.
+    await governance.methods
+      .executeProposal(new anchor.BN(1))
+      .accounts({
+        proposal: proposalPda,
+        governanceConfig: roleCfgPda,
+        executor: alice.publicKey,
+      })
+      .signers([alice])
+      .rpc();
+
+    const p = await governance.account.proposal.fetch(proposalPda);
+    expect(p.executed).to.eq(true);
+    expect(p.forVotes.toString()).to.eq("1");
+
+    // Sanity: Alice's checkpoint reflects 1 director seat held.
+    const ckpt = await role.account.roleVoteCheckpoint.fetch(aliceCkptPda);
+    expect(ckpt.account.toBase58()).to.eq(alice.publicKey.toBase58());
+    expect(ckpt.count.toString()).to.eq("1");
+    expect(Buffer.from(ckpt.roleTypeId).toString("hex")).to.eq(
+      Buffer.from(directorTypeId).toString("hex"),
+    );
   });
 });
