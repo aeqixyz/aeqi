@@ -223,6 +223,32 @@ pub mod aeqi_funding {
         Ok(())
     }
 
+    /// Finalize an Activated funding request — closes the lifecycle once
+    /// the underlying Unifutures primitive has settled. Caller is the
+    /// creator (they own request lifecycle), and finalize is permanent;
+    /// downstream excess-budget refund / vesting role hooks will read
+    /// `status == Finalized` as their gate.
+    pub fn finalize_funding_request(ctx: Context<FinalizeFundingRequest>) -> Result<()> {
+        let r = &mut ctx.accounts.request;
+        require_keys_eq!(
+            ctx.accounts.creator.key(),
+            r.creator,
+            FundingError::Unauthorized
+        );
+        require!(
+            r.status == RequestStatus::Activated as u8,
+            FundingError::CannotFinalize
+        );
+        r.status = RequestStatus::Finalized as u8;
+        emit!(FundingRequestFinalized {
+            trust: r.trust,
+            request_id: r.request_id,
+            kind: r.kind,
+            primitive_id: r.primitive_id,
+        });
+        Ok(())
+    }
+
     /// Cancel a pending funding request. Only the creator can cancel.
     pub fn cancel_funding_request(ctx: Context<CancelFundingRequest>) -> Result<()> {
         let r = &mut ctx.accounts.request;
@@ -396,6 +422,17 @@ pub struct CancelFundingRequest<'info> {
     pub creator: Signer<'info>,
 }
 
+#[derive(Accounts)]
+pub struct FinalizeFundingRequest<'info> {
+    #[account(
+        mut,
+        seeds = [b"funding_request", request.trust.as_ref(), request.request_id.as_ref()],
+        bump = request.bump,
+    )]
+    pub request: Account<'info, FundingRequest>,
+    pub creator: Signer<'info>,
+}
+
 #[event]
 pub struct FundingRequestCreated {
     pub trust: Pubkey,
@@ -421,6 +458,14 @@ pub struct FundingRequestActivated {
     pub primitive_id: [u8; 32],
 }
 
+#[event]
+pub struct FundingRequestFinalized {
+    pub trust: Pubkey,
+    pub request_id: [u8; 32],
+    pub kind: u8,
+    pub primitive_id: [u8; 32],
+}
+
 #[error_code]
 pub enum FundingError {
     #[msg("kind must be 0 (CommitmentSale), 1 (BondingCurve), or 2 (Exit)")]
@@ -433,6 +478,8 @@ pub enum FundingError {
     CannotCancel,
     #[msg("request is not in Pending status — can't activate")]
     CannotActivate,
+    #[msg("request is not in Activated status — can't finalize")]
+    CannotFinalize,
     #[msg("request kind doesn't match this activation ix (kind=0 for CommitmentSale)")]
     WrongKind,
 }

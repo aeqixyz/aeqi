@@ -422,6 +422,123 @@ describe("aeqi_funding", () => {
     expect(threw).to.eq(true);
   });
 
+  it("finalize_funding_request closes the lifecycle (Activated → Finalized)", async () => {
+    const unifutures = anchor.workspace.aeqiUnifutures as Program<AeqiUnifutures>;
+    const [unifModulePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("unifutures_module"), fakeTrust.toBuffer()],
+      unifutures.programId,
+    );
+
+    // Pending → activate → finalize for an Exit-kind request.
+    const requestId = new Uint8Array(32);
+    requestId[0] = 0xf0;
+    const budgetId = new Uint8Array(32);
+    budgetId[0] = 0xf1;
+
+    const [requestPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("funding_request"), fakeTrust.toBuffer(), Buffer.from(requestId)],
+      program.programId,
+    );
+
+    await program.methods
+      .createFundingRequest(
+        Array.from(requestId),
+        2, // Exit
+        Array.from(budgetId),
+        new anchor.BN(0),
+        new anchor.BN(0),
+      )
+      .accounts({
+        trust: fakeTrust,
+        moduleState: modulePda,
+        request: requestPda,
+        creator: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const exitId = new Uint8Array(32);
+    exitId[0] = 0xf2;
+    const [exitPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("exit"), fakeTrust.toBuffer(), Buffer.from(exitId)],
+      unifutures.programId,
+    );
+
+    await program.methods
+      .activateExit(
+        Array.from(exitId),
+        new anchor.BN(50_000),
+        new anchor.BN(200_000),
+        new anchor.BN(60 * 60 * 24),
+      )
+      .accounts({
+        request: requestPda,
+        trust: fakeTrust,
+        unifuturesModuleState: unifModulePda,
+        exit: exitPda,
+        creator: provider.wallet.publicKey,
+        aeqiUnifuturesProgram: unifutures.programId,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    let r = await program.account.fundingRequest.fetch(requestPda);
+    expect(r.status).to.eq(1); // Activated
+
+    await program.methods
+      .finalizeFundingRequest()
+      .accounts({
+        request: requestPda,
+        creator: provider.wallet.publicKey,
+      })
+      .rpc();
+
+    r = await program.account.fundingRequest.fetch(requestPda);
+    expect(r.status).to.eq(2); // Finalized
+  });
+
+  it("finalize_funding_request rejects Pending requests", async () => {
+    const requestId = new Uint8Array(32);
+    requestId[0] = 0xf3;
+
+    const [requestPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("funding_request"), fakeTrust.toBuffer(), Buffer.from(requestId)],
+      program.programId,
+    );
+
+    await program.methods
+      .createFundingRequest(
+        Array.from(requestId),
+        2, // Exit (Pending)
+        Array.from(new Uint8Array(32)),
+        new anchor.BN(0),
+        new anchor.BN(0),
+      )
+      .accounts({
+        trust: fakeTrust,
+        moduleState: modulePda,
+        request: requestPda,
+        creator: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    let threw = false;
+    try {
+      await program.methods
+        .finalizeFundingRequest()
+        .accounts({
+          request: requestPda,
+          creator: provider.wallet.publicKey,
+        })
+        .rpc();
+    } catch (e: any) {
+      threw = true;
+      expect(e.toString()).to.match(/CannotFinalize/);
+    }
+    expect(threw).to.eq(true);
+  });
+
   it("rejects invalid kind (>=3)", async () => {
     const requestId = new Uint8Array(32);
     requestId[0] = 0xee;
