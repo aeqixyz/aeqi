@@ -85,6 +85,94 @@ pub mod aeqi_unifutures {
         Ok(())
     }
 
+    /// Finalize a CommitmentSale — closes the active phase, marks Completed
+    /// so claim_allocation can run. Anyone can call after `end_time`; the
+    /// creator can call any time if `proceeds_collected >= target_quote`.
+    pub fn finalize_sale(ctx: Context<FinalizeSale>) -> Result<()> {
+        let s = &mut ctx.accounts.sale;
+        require!(s.status == SaleStatus::Active as u8, UnifuturesError::SaleNotActive);
+
+        let now = Clock::get()?.unix_timestamp;
+        let voluntary = ctx.accounts.signer.key() == s.creator
+            && s.proceeds_collected >= s.target_quote;
+        let elapsed = now >= s.end_time;
+        require!(voluntary || elapsed, UnifuturesError::CannotFinalizeYet);
+
+        s.status = SaleStatus::Completed as u8;
+        emit!(SaleFinalized {
+            trust: s.trust,
+            sale_id: s.sale_id,
+            proceeds_collected: s.proceeds_collected,
+            commitments_collected: s.commitments_collected,
+            finalized_at: now,
+        });
+        Ok(())
+    }
+
+    /// Claim a buyer's pro-rata asset allocation from a Completed sale.
+    /// allocation = commitment.amount * asset_amount / commitments_collected
+    /// Mints asset by transferring from the pre-loaded sale_asset_vault
+    /// (premined supply model — vault must be funded before finalize).
+    pub fn claim_allocation(ctx: Context<ClaimAllocation>) -> Result<()> {
+        let s = &ctx.accounts.sale;
+        require!(s.status == SaleStatus::Completed as u8, UnifuturesError::SaleNotCompleted);
+
+        let c = &mut ctx.accounts.commitment;
+        require_keys_eq!(
+            c.buyer,
+            ctx.accounts.buyer.key(),
+            UnifuturesError::Unauthorized
+        );
+        require!(c.amount > 0, UnifuturesError::AlreadyClaimed);
+
+        let allocation_u128 = (c.amount as u128)
+            .checked_mul(s.asset_amount as u128)
+            .ok_or_else(|| error!(UnifuturesError::MathOverflow))?
+            .checked_div(s.commitments_collected as u128)
+            .ok_or_else(|| error!(UnifuturesError::MathOverflow))?;
+        let allocation: u64 = allocation_u128
+            .try_into()
+            .map_err(|_| error!(UnifuturesError::MathOverflow))?;
+        require!(allocation > 0, UnifuturesError::ShareTooSmall);
+
+        // PDA-signed transfer from sale_asset_vault → buyer_asset_ta
+        let trust_key = s.trust;
+        let sale_id_bytes = s.sale_id;
+        let bump = ctx.bumps.sale_authority;
+        let seeds: &[&[&[u8]]] = &[&[
+            b"sale_authority",
+            trust_key.as_ref(),
+            sale_id_bytes.as_ref(),
+            &[bump],
+        ]];
+        let cpi = TransferChecked {
+            from: ctx.accounts.sale_asset_vault.to_account_info(),
+            mint: ctx.accounts.asset_mint.to_account_info(),
+            to: ctx.accounts.buyer_asset_ta.to_account_info(),
+            authority: ctx.accounts.sale_authority.to_account_info(),
+        };
+        transfer_checked(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                cpi,
+                seeds,
+            ),
+            allocation,
+            ctx.accounts.asset_mint.decimals,
+        )?;
+
+        // Zero the commitment so it can't be claimed twice.
+        c.amount = 0;
+
+        emit!(AllocationClaimed {
+            trust: s.trust,
+            sale_id: s.sale_id,
+            buyer: c.buyer,
+            allocation,
+        });
+        Ok(())
+    }
+
     /// Settle an Exit — creator (acquirer) deposits the full `exit_quote`
     /// into the exit's vault upfront, locking the proceeds pool. Token
     /// holders can then claim_pro_rata by burning their cap-table tokens.
@@ -700,6 +788,42 @@ pub struct CommitToSale<'info> {
 }
 
 #[derive(Accounts)]
+pub struct FinalizeSale<'info> {
+    #[account(
+        mut,
+        seeds = [b"sale", sale.trust.as_ref(), sale.sale_id.as_ref()],
+        bump = sale.bump,
+    )]
+    pub sale: Box<Account<'info, CommitmentSale>>,
+    pub signer: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct ClaimAllocation<'info> {
+    #[account(
+        seeds = [b"sale", sale.trust.as_ref(), sale.sale_id.as_ref()],
+        bump = sale.bump,
+    )]
+    pub sale: Box<Account<'info, CommitmentSale>>,
+    /// CHECK: sale_authority PDA — signs asset out-transfer
+    #[account(seeds = [b"sale_authority", sale.trust.as_ref(), sale.sale_id.as_ref()], bump)]
+    pub sale_authority: UncheckedAccount<'info>,
+    pub asset_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(mut, token::mint = asset_mint, token::authority = sale_authority)]
+    pub sale_asset_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(
+        mut,
+        seeds = [b"sale_commitment", sale.trust.as_ref(), sale.sale_id.as_ref(), buyer.key().as_ref()],
+        bump = commitment.bump,
+    )]
+    pub commitment: Box<Account<'info, SaleCommitment>>,
+    #[account(mut, token::mint = asset_mint)]
+    pub buyer_asset_ta: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub buyer: Signer<'info>,
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
+#[derive(Accounts)]
 pub struct SettleExit<'info> {
     #[account(
         mut,
@@ -901,6 +1025,23 @@ pub struct SaleCommitted {
 }
 
 #[event]
+pub struct SaleFinalized {
+    pub trust: Pubkey,
+    pub sale_id: [u8; 32],
+    pub proceeds_collected: u64,
+    pub commitments_collected: u64,
+    pub finalized_at: i64,
+}
+
+#[event]
+pub struct AllocationClaimed {
+    pub trust: Pubkey,
+    pub sale_id: [u8; 32],
+    pub buyer: Pubkey,
+    pub allocation: u64,
+}
+
+#[event]
 pub struct ExitSettled {
     pub trust: Pubkey,
     pub exit_id: [u8; 32],
@@ -955,4 +1096,10 @@ pub enum UnifuturesError {
     NotSettled,
     #[msg("computed share rounded to zero — burn more or wait for settle")]
     ShareTooSmall,
+    #[msg("cannot finalize sale yet (active period not over and proceeds < target)")]
+    CannotFinalizeYet,
+    #[msg("sale is not Completed yet — finalize first")]
+    SaleNotCompleted,
+    #[msg("commitment already claimed")]
+    AlreadyClaimed,
 }

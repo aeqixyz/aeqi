@@ -1010,6 +1010,312 @@ describe("aeqi_unifutures", () => {
     expect(vault.amount.toString()).to.eq("9000");
   });
 
+  it("finalize_sale + claim_allocation — creator early-finalizes when target met, buyer claims pro-rata", async () => {
+    // Sale: target=2000, overflow=5000, asset=1000, 7d duration.
+    // Two buyers commit (3000 + 2000 = 5000 total), creator early-finalizes
+    // since proceeds >= target. Each buyer claims their pro-rata share:
+    //   Buyer A: 3000 * 1000 / 5000 = 600
+    //   Buyer B: 2000 * 1000 / 5000 = 400
+    const saleId = new Uint8Array(32);
+    saleId[0] = 0xf1;
+    saleId[1] = 0x10; // 'finalize'
+
+    const [salePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("sale"), fakeTrust.toBuffer(), Buffer.from(saleId)],
+      program.programId,
+    );
+    const [saleAuthorityPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("sale_authority"), fakeTrust.toBuffer(), Buffer.from(saleId)],
+      program.programId,
+    );
+
+    await program.methods
+      .createCommitmentSale(
+        Array.from(saleId),
+        new anchor.BN(1000), // asset_amount
+        new anchor.BN(2000), // target
+        new anchor.BN(5000), // overflow
+        new anchor.BN(60 * 60 * 24 * 7),
+      )
+      .accounts({
+        trust: fakeTrust,
+        moduleState: modulePda,
+        sale: salePda,
+        creator: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Mints + vaults + funding for two buyers
+    const assetMint = await createMint(
+      provider.connection,
+      (provider.wallet as anchor.Wallet).payer,
+      provider.wallet.publicKey,
+      null,
+      0,
+      Keypair.generate(),
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+    );
+    const quoteMint = await createMint(
+      provider.connection,
+      (provider.wallet as anchor.Wallet).payer,
+      provider.wallet.publicKey,
+      null,
+      0,
+      Keypair.generate(),
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+    );
+
+    const saleQuoteVault = getAssociatedTokenAddressSync(
+      quoteMint,
+      saleAuthorityPda,
+      true,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+    const saleAssetVault = getAssociatedTokenAddressSync(
+      assetMint,
+      saleAuthorityPda,
+      true,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+
+    const buyerA = provider.wallet.publicKey;
+    const buyerB = Keypair.generate();
+    const sigB = await provider.connection.requestAirdrop(buyerB.publicKey, 1e9);
+    await provider.connection.confirmTransaction(sigB);
+
+    const aQuoteTa = getAssociatedTokenAddressSync(
+      quoteMint,
+      buyerA,
+      false,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+    const aAssetTa = getAssociatedTokenAddressSync(
+      assetMint,
+      buyerA,
+      false,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+    const bQuoteTa = getAssociatedTokenAddressSync(
+      quoteMint,
+      buyerB.publicKey,
+      false,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+    const bAssetTa = getAssociatedTokenAddressSync(
+      assetMint,
+      buyerB.publicKey,
+      false,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+
+    await provider.sendAndConfirm(
+      new anchor.web3.Transaction()
+        .add(
+          createAssociatedTokenAccountInstruction(
+            buyerA,
+            saleQuoteVault,
+            saleAuthorityPda,
+            quoteMint,
+            TOKEN_2022_PROGRAM_ID,
+            ASSOCIATED_TOKEN_PROGRAM_ID,
+          ),
+        )
+        .add(
+          createAssociatedTokenAccountInstruction(
+            buyerA,
+            saleAssetVault,
+            saleAuthorityPda,
+            assetMint,
+            TOKEN_2022_PROGRAM_ID,
+            ASSOCIATED_TOKEN_PROGRAM_ID,
+          ),
+        )
+        .add(
+          createAssociatedTokenAccountInstruction(
+            buyerA,
+            aQuoteTa,
+            buyerA,
+            quoteMint,
+            TOKEN_2022_PROGRAM_ID,
+            ASSOCIATED_TOKEN_PROGRAM_ID,
+          ),
+        )
+        .add(
+          createAssociatedTokenAccountInstruction(
+            buyerA,
+            aAssetTa,
+            buyerA,
+            assetMint,
+            TOKEN_2022_PROGRAM_ID,
+            ASSOCIATED_TOKEN_PROGRAM_ID,
+          ),
+        )
+        .add(
+          createAssociatedTokenAccountInstruction(
+            buyerA,
+            bQuoteTa,
+            buyerB.publicKey,
+            quoteMint,
+            TOKEN_2022_PROGRAM_ID,
+            ASSOCIATED_TOKEN_PROGRAM_ID,
+          ),
+        )
+        .add(
+          createAssociatedTokenAccountInstruction(
+            buyerA,
+            bAssetTa,
+            buyerB.publicKey,
+            assetMint,
+            TOKEN_2022_PROGRAM_ID,
+            ASSOCIATED_TOKEN_PROGRAM_ID,
+          ),
+        ),
+    );
+
+    // Premine 1000 asset to sale vault; fund A with 3000 quote, B with 2000.
+    await mintTo(
+      provider.connection,
+      (provider.wallet as anchor.Wallet).payer,
+      assetMint,
+      saleAssetVault,
+      buyerA,
+      1000,
+      [],
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+    );
+    await mintTo(
+      provider.connection,
+      (provider.wallet as anchor.Wallet).payer,
+      quoteMint,
+      aQuoteTa,
+      buyerA,
+      3000,
+      [],
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+    );
+    await mintTo(
+      provider.connection,
+      (provider.wallet as anchor.Wallet).payer,
+      quoteMint,
+      bQuoteTa,
+      buyerA,
+      2000,
+      [],
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+    );
+
+    // Both buyers commit
+    const [aCommitmentPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("sale_commitment"), fakeTrust.toBuffer(), Buffer.from(saleId), buyerA.toBuffer()],
+      program.programId,
+    );
+    const [bCommitmentPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("sale_commitment"), fakeTrust.toBuffer(), Buffer.from(saleId), buyerB.publicKey.toBuffer()],
+      program.programId,
+    );
+
+    await program.methods
+      .commitToSale(new anchor.BN(3000))
+      .accounts({
+        sale: salePda,
+        saleAuthority: saleAuthorityPda,
+        quoteMint,
+        saleQuoteVault,
+        buyerQuoteTa: aQuoteTa,
+        commitment: aCommitmentPda,
+        buyer: buyerA,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    await program.methods
+      .commitToSale(new anchor.BN(2000))
+      .accounts({
+        sale: salePda,
+        saleAuthority: saleAuthorityPda,
+        quoteMint,
+        saleQuoteVault,
+        buyerQuoteTa: bQuoteTa,
+        commitment: bCommitmentPda,
+        buyer: buyerB.publicKey,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([buyerB])
+      .rpc();
+
+    // Creator early-finalizes (proceeds >= target)
+    await program.methods
+      .finalizeSale()
+      .accounts({
+        sale: salePda,
+        signer: provider.wallet.publicKey, // creator
+      })
+      .rpc();
+
+    let s = await program.account.commitmentSale.fetch(salePda);
+    expect(s.status).to.eq(1); // Completed
+
+    // Each buyer claims their pro-rata
+    await program.methods
+      .claimAllocation()
+      .accounts({
+        sale: salePda,
+        saleAuthority: saleAuthorityPda,
+        assetMint,
+        saleAssetVault,
+        commitment: aCommitmentPda,
+        buyerAssetTa: aAssetTa,
+        buyer: buyerA,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+      })
+      .rpc();
+
+    await program.methods
+      .claimAllocation()
+      .accounts({
+        sale: salePda,
+        saleAuthority: saleAuthorityPda,
+        assetMint,
+        saleAssetVault,
+        commitment: bCommitmentPda,
+        buyerAssetTa: bAssetTa,
+        buyer: buyerB.publicKey,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+      })
+      .signers([buyerB])
+      .rpc();
+
+    // Buyer A: 600, Buyer B: 400, sum = 1000 = asset_amount
+    const aAsset = await getAccount(provider.connection, aAssetTa, undefined, TOKEN_2022_PROGRAM_ID);
+    expect(aAsset.amount.toString()).to.eq("600");
+    const bAsset = await getAccount(provider.connection, bAssetTa, undefined, TOKEN_2022_PROGRAM_ID);
+    expect(bAsset.amount.toString()).to.eq("400");
+
+    // Vault drained
+    const vault = await getAccount(provider.connection, saleAssetVault, undefined, TOKEN_2022_PROGRAM_ID);
+    expect(vault.amount.toString()).to.eq("0");
+
+    // Commitments zeroed
+    const aCommit = await program.account.saleCommitment.fetch(aCommitmentPda);
+    expect(aCommit.amount.toString()).to.eq("0");
+    const bCommit = await program.account.saleCommitment.fetch(bCommitmentPda);
+    expect(bCommit.amount.toString()).to.eq("0");
+  });
+
   it("rejects create_curve with reserve_ratio > 100%", async () => {
     const curveId = new Uint8Array(32);
     curveId[0] = 0xed;
