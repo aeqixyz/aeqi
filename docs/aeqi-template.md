@@ -1,12 +1,12 @@
-# AEIQ template config
+# AEQI template config
 
-Defines the data needed to spawn the AEIQ company via `aeqi_factory.instantiate_template`. Once the factory program is fully implemented (WS-S6), this is the JSON the Solana provisioner feeds in.
+Defines the data needed to spawn the AEQI company via `aeqi_factory.instantiate_template`. Once the factory program is fully implemented (WS-S6), this is the JSON the Solana provisioner feeds in.
 
 ## Identity
 
 | Field | Value |
 |---|---|
-| Template ID | `keccak256("aeiq.v1")` (32 bytes) |
+| Template ID | `keccak256("aeqi.v1")` (32 bytes) |
 | TRUST ID | freshly random 32 bytes per spawn |
 | Authority | platform-managed signer (transitions to TRUST itself after finalize) |
 | IPFS CID | operating agreement pinned via `aeqi-ipfs` |
@@ -70,8 +70,8 @@ Two configs registered in parallel — proposers pick which at proposal time:
 
 | Field | Value |
 |---|---|
-| name | `AEIQ` |
-| symbol | `AEIQ` |
+| name | `AEQI` |
+| symbol | `AEQI` |
 | decimals | 9 |
 | max_supply | 100_000_000 * 10^9 |
 | transfer hooks | none initially (compliance hook reserved for vesting integration) |
@@ -100,12 +100,12 @@ Initial allocations (sum to 100_000_000):
 ## Treasury seed
 
 Once `aeqi_treasury` ships:
-- 1000 USDC SPL airdropped to AEIQ treasury PDA on devnet
+- 1000 USDC SPL airdropped to AEQI treasury PDA on devnet
 - 0.1 SOL for rent + tx fees
 
 ## Reference
 
-- EVM AEIQ memory: `project_aeiq_dogfood_company.md` (entity_id=59bc9fd3, original Base address `0x4a922...4edc`, being purged)
+- EVM AEQI memory: `project_aeqi_dogfood_company.md` (entity_id=59bc9fd3, original Base address `0x4a922...4edc`, being purged)
 - EA pattern: `architecture_executive_assistant_pattern.md`
 - Role primitive: `architecture_role_primitive.md`
 - Board vs org chart: `architecture_board_vs_org_chart.md` (directors are NOT in operational chain)

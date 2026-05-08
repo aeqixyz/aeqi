@@ -1,7 +1,7 @@
 /**
- * AEIQ end-to-end spawn — the full architecture proof.
+ * AEQI end-to-end spawn — the full architecture proof.
  *
- * Spawns an AEIQ TRUST via aeqi_factory.create_with_modules, then initializes
+ * Spawns an AEQI TRUST via aeqi_factory.create_with_modules, then initializes
  * the role / token / governance modules under it, registers role types and a
  * governance config, runs a proposal lifecycle (propose → vote → execute) end
  * to end. Exercises every program in one tx graph.
@@ -16,7 +16,7 @@ import { AeqiGovernance } from "../target/types/aeqi_governance";
 import { PublicKey } from "@solana/web3.js";
 import { expect } from "chai";
 
-describe("AEIQ end-to-end spawn", () => {
+describe("AEQI end-to-end spawn", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
@@ -27,7 +27,7 @@ describe("AEIQ end-to-end spawn", () => {
   const governance = anchor.workspace.aeqiGovernance as Program<AeqiGovernance>;
 
   const trustId = new Uint8Array(32);
-  trustId[0] = 0x41; // 'A' for AEIQ
+  trustId[0] = 0x41; // 'A' for AEQI
   trustId[1] = 0x45; // 'E'
   trustId[2] = 0x49; // 'I'
   trustId[3] = 0x51; // 'Q'
@@ -50,7 +50,7 @@ describe("AEIQ end-to-end spawn", () => {
     govModuleIdBytes[0] = 0x47; // 'G'
   });
 
-  it("step 1: factory.create_with_modules spawns AEIQ trust + registers 3 modules + finalizes", async () => {
+  it("step 1: factory.create_with_modules spawns AEQI trust + registers 3 modules + finalizes", async () => {
     const [roleModulePda] = PublicKey.findProgramAddressSync(
       [Buffer.from("module"), trustPda.toBuffer(), Buffer.from(roleModuleIdBytes)],
       trust.programId,
@@ -109,7 +109,7 @@ describe("AEIQ end-to-end spawn", () => {
     expect(g.programId.toBase58()).to.eq(governance.programId.toBase58());
   });
 
-  it("step 2: init each module under the AEIQ trust (role, token, governance)", async () => {
+  it("step 2: init each module under the AEQI trust (role, token, governance)", async () => {
     // role.init
     const [roleModuleStatePda] = PublicKey.findProgramAddressSync(
       [Buffer.from("role_module"), trustPda.toBuffer()],
@@ -155,7 +155,7 @@ describe("AEIQ end-to-end spawn", () => {
       })
       .rpc();
 
-    // All three module-state PDAs exist + bound to the AEIQ trust
+    // All three module-state PDAs exist + bound to the AEQI trust
     const rs = await role.account.roleModuleState.fetch(roleModuleStatePda);
     expect(rs.trust.toBase58()).to.eq(trustPda.toBase58());
     expect(rs.initialized).to.eq(true);
