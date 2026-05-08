@@ -8,6 +8,7 @@ members = [
     "programs/aeqi-token",
     "programs/aeqi-treasury",
     "programs/aeqi-vesting",
+    "programs/aeqi-unifutures",
 ]
 
 [workspace.package]

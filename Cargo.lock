@@ -63,6 +63,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "aeqi-unifutures"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+]
+
+[[package]]
 name = "aeqi-vesting"
 version = "0.1.0"
 dependencies = [

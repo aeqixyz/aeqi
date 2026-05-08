@@ -13,6 +13,7 @@ aeqi_governance = "528PTeSk8M3pKMMhc5vitbcwMGUMcHMzg6G5XpX8iVBn"
 aeqi_token = "V9WiXaeayA8KTyVAEEG1rAuPQ28G6NEwzSCmzZNZv6z"
 aeqi_treasury = "CQ7TGZFmkoZh61xgKnbjcj9Uomht38LqeihMNsY4p9KC"
 aeqi_vesting = "24mJEeCHs492NGCJADvfb9zWDcqoDWNCpCYC2xAE2VBs"
+aeqi_unifutures = "2AqvqotDRhQj67YGn3MaZPUoYFBUEbnEbvbLD8Q2mF4s"
 
 [registry]
 url = "https://api.apr.dev"
