@@ -13,6 +13,9 @@
 //! sale return.
 
 use anchor_lang::prelude::*;
+use anchor_spl::token_interface::{
+    transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
+};
 
 pub mod curve;
 pub use curve::CurveType;
@@ -78,6 +81,91 @@ pub mod aeqi_unifutures {
             start_price,
             end_price,
             max_supply,
+        });
+        Ok(())
+    }
+
+    /// Buy `token_amount` of asset from the curve. Buyer pays `cost` of
+    /// quote tokens (computed from the curve), receives `token_amount` of
+    /// asset tokens from the program-controlled curve_asset_vault.
+    /// `max_cost` is slippage protection — reverts if cost exceeds it.
+    pub fn buy_from_curve(
+        ctx: Context<BuyFromCurve>,
+        token_amount: u64,
+        max_cost: u64,
+    ) -> Result<()> {
+        require!(token_amount > 0, UnifuturesError::ZeroAmount);
+
+        let c = &mut ctx.accounts.curve;
+        let ct = CurveType::from_u8(c.curve_type)
+            .ok_or_else(|| error!(UnifuturesError::InvalidCurveType))?;
+
+        require!(
+            c.current_supply.checked_add(token_amount).unwrap() <= c.max_supply,
+            UnifuturesError::ExceedsMaxSupply
+        );
+
+        let cost_u128 = curve::purchase_cost(
+            ct,
+            c.start_price,
+            c.end_price,
+            c.max_supply as u128,
+            c.current_supply as u128,
+            token_amount as u128,
+        )
+        .ok_or_else(|| error!(UnifuturesError::MathOverflow))?;
+        let cost: u64 = cost_u128.try_into().map_err(|_| error!(UnifuturesError::MathOverflow))?;
+        require!(cost <= max_cost, UnifuturesError::SlippageExceeded);
+
+        // 1. buyer pays quote → curve_quote_vault (buyer signs)
+        let cpi_in = TransferChecked {
+            from: ctx.accounts.buyer_quote_ta.to_account_info(),
+            mint: ctx.accounts.quote_mint.to_account_info(),
+            to: ctx.accounts.curve_quote_vault.to_account_info(),
+            authority: ctx.accounts.buyer.to_account_info(),
+        };
+        transfer_checked(
+            CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_in),
+            cost,
+            ctx.accounts.quote_mint.decimals,
+        )?;
+
+        // 2. curve_asset_vault → buyer_asset_ta (curve_authority PDA signs)
+        let trust_key = c.trust;
+        let curve_id_bytes = c.curve_id;
+        let bump = ctx.bumps.curve_authority;
+        let seeds: &[&[&[u8]]] = &[&[
+            b"curve_authority",
+            trust_key.as_ref(),
+            curve_id_bytes.as_ref(),
+            &[bump],
+        ]];
+        let cpi_out = TransferChecked {
+            from: ctx.accounts.curve_asset_vault.to_account_info(),
+            mint: ctx.accounts.asset_mint.to_account_info(),
+            to: ctx.accounts.buyer_asset_ta.to_account_info(),
+            authority: ctx.accounts.curve_authority.to_account_info(),
+        };
+        transfer_checked(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                cpi_out,
+                seeds,
+            ),
+            token_amount,
+            ctx.accounts.asset_mint.decimals,
+        )?;
+
+        c.current_supply = c.current_supply.checked_add(token_amount).unwrap();
+        c.reserve_balance = c.reserve_balance.checked_add(cost as u128).unwrap();
+        c.proceeds_collected = c.proceeds_collected.checked_add(cost as u128).unwrap();
+
+        emit!(CurveBuy {
+            trust: c.trust,
+            curve_id: c.curve_id,
+            buyer: ctx.accounts.buyer.key(),
+            token_amount,
+            cost,
         });
         Ok(())
     }
@@ -181,6 +269,31 @@ pub struct QuoteBuy<'info> {
     pub curve: Account<'info, BondingCurve>,
 }
 
+#[derive(Accounts)]
+pub struct BuyFromCurve<'info> {
+    #[account(
+        mut,
+        seeds = [b"curve", curve.trust.as_ref(), curve.curve_id.as_ref()],
+        bump = curve.bump,
+    )]
+    pub curve: Box<Account<'info, BondingCurve>>,
+    /// CHECK: program-controlled vault authority — signs the asset out-transfer.
+    #[account(seeds = [b"curve_authority", curve.trust.as_ref(), curve.curve_id.as_ref()], bump)]
+    pub curve_authority: UncheckedAccount<'info>,
+    pub asset_mint: Box<InterfaceAccount<'info, Mint>>,
+    pub quote_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(mut, token::mint = asset_mint, token::authority = curve_authority)]
+    pub curve_asset_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, token::mint = quote_mint, token::authority = curve_authority)]
+    pub curve_quote_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, token::mint = asset_mint)]
+    pub buyer_asset_ta: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, token::mint = quote_mint, token::authority = buyer)]
+    pub buyer_quote_ta: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub buyer: Signer<'info>,
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
 #[event]
 pub struct CurveCreated {
     pub trust: Pubkey,
@@ -190,6 +303,15 @@ pub struct CurveCreated {
     pub start_price: u128,
     pub end_price: u128,
     pub max_supply: u64,
+}
+
+#[event]
+pub struct CurveBuy {
+    pub trust: Pubkey,
+    pub curve_id: [u8; 32],
+    pub buyer: Pubkey,
+    pub token_amount: u64,
+    pub cost: u64,
 }
 
 #[error_code]
@@ -202,4 +324,10 @@ pub enum UnifuturesError {
     InvalidCurveType,
     #[msg("math overflow in curve calculation")]
     MathOverflow,
+    #[msg("amount must be > 0")]
+    ZeroAmount,
+    #[msg("buy would exceed curve's max_supply")]
+    ExceedsMaxSupply,
+    #[msg("cost exceeded max_cost (slippage protection)")]
+    SlippageExceeded,
 }
