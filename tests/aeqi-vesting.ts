@@ -201,6 +201,129 @@ describe("aeqi_vesting", () => {
     expect(threw).to.eq(true);
   });
 
+  it("mark_fdv_milestone fully unlocks a pre-cliff position", async () => {
+    // Create a position entirely in the future (pre-cliff). Normally
+    // claim would fail with NothingToClaim. After mark_fdv_milestone the
+    // grant fully unlocks regardless of schedule.
+    const positionId = new Uint8Array(32);
+    positionId[0] = 0xfd;
+    positionId[1] = 0xff;
+
+    const [posPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("vesting_pos"), fakeTrust.toBuffer(), Buffer.from(positionId)],
+      program.programId,
+    );
+
+    const now = Math.floor(Date.now() / 1000);
+    const start = now + 1000;
+    const cliff = now + 2000;
+    const end = now + 5000;
+
+    await program.methods
+      .createPosition(
+        Array.from(positionId),
+        provider.wallet.publicKey,
+        new anchor.BN(7777),
+        new anchor.BN(start),
+        new anchor.BN(cliff),
+        new anchor.BN(end),
+      )
+      .accounts({
+        trust: fakeTrust,
+        moduleState: modulePda,
+        position: posPda,
+        mint,
+        grantor: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Pre-cliff claim should fail
+    let preFdvFailed = false;
+    try {
+      await program.methods
+        .claim()
+        .accounts({
+          trust: fakeTrust,
+          position: posPda,
+          vaultAuthority,
+          mint,
+          vault: vaultAta,
+          recipientTa: recipientAta,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+        })
+        .rpc();
+    } catch (e: any) {
+      preFdvFailed = true;
+      expect(e.toString()).to.match(/NothingToClaim/);
+    }
+    expect(preFdvFailed).to.eq(true);
+
+    // Top up the vault to cover the FDV-unlocked grant (the previous tests
+    // drained it; ensure 7777 is available)
+    await mintTo(
+      provider.connection,
+      (provider.wallet as anchor.Wallet).payer,
+      mint,
+      vaultAta,
+      provider.wallet.publicKey,
+      7777,
+      [],
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+    );
+
+    const recipientPre = await getAccount(provider.connection, recipientAta, undefined, TOKEN_2022_PROGRAM_ID);
+
+    // Mark FDV milestone hit
+    await program.methods
+      .markFdvMilestone()
+      .accounts({
+        position: posPda,
+        grantor: provider.wallet.publicKey,
+      })
+      .rpc();
+
+    let pos = await program.account.vestingPosition.fetch(posPda);
+    expect(pos.fdvMilestoneUnlocked).to.eq(true);
+
+    // Claim — should now succeed with full 7777 amount
+    await program.methods
+      .claim()
+      .accounts({
+        trust: fakeTrust,
+        position: posPda,
+        vaultAuthority,
+        mint,
+        vault: vaultAta,
+        recipientTa: recipientAta,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+      })
+      .rpc();
+
+    const recipientPost = await getAccount(provider.connection, recipientAta, undefined, TOKEN_2022_PROGRAM_ID);
+    expect((recipientPost.amount - recipientPre.amount).toString()).to.eq("7777");
+
+    pos = await program.account.vestingPosition.fetch(posPda);
+    expect(pos.claimedAmount.toString()).to.eq("7777");
+
+    // Re-marking should fail (one-way flag)
+    let reThrew = false;
+    try {
+      await program.methods
+        .markFdvMilestone()
+        .accounts({
+          position: posPda,
+          grantor: provider.wallet.publicKey,
+        })
+        .rpc();
+    } catch (e: any) {
+      reThrew = true;
+      expect(e.toString()).to.match(/AlreadyUnlocked/);
+    }
+    expect(reThrew).to.eq(true);
+  });
+
   it("create_position rejects pre-cliff claims (NothingToClaim)", async () => {
     const positionId = new Uint8Array(32);
     positionId[0] = 0xf2;

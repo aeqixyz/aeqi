@@ -54,11 +54,13 @@ pub mod aeqi_vesting {
         p.position_id = position_id;
         p.recipient = recipient;
         p.mint = ctx.accounts.mint.key();
+        p.grantor = ctx.accounts.grantor.key();
         p.total_amount = total_amount;
         p.claimed_amount = 0;
         p.start_time = start_time;
         p.cliff_time = cliff_time;
         p.end_time = end_time;
+        p.fdv_milestone_unlocked = false;
         p.bump = ctx.bumps.position;
 
         let m = &mut ctx.accounts.module_state;
@@ -77,13 +79,45 @@ pub mod aeqi_vesting {
         Ok(())
     }
 
+    /// Mark this vesting position as FDV-milestone-unlocked. The grantor
+    /// (typically a treasury authority or governance signer) signs to
+    /// confirm the company has hit its FDV target, which immediately
+    /// vests the entire `total_amount` regardless of the linear schedule.
+    /// One-way flag.
+    pub fn mark_fdv_milestone(ctx: Context<MarkFdvMilestone>) -> Result<()> {
+        let p = &mut ctx.accounts.position;
+        require_keys_eq!(
+            ctx.accounts.grantor.key(),
+            p.grantor,
+            VestingError::Unauthorized
+        );
+        require!(
+            !p.fdv_milestone_unlocked,
+            VestingError::AlreadyUnlocked
+        );
+        p.fdv_milestone_unlocked = true;
+        emit!(FdvMilestoneHit {
+            trust: p.trust,
+            position_id: p.position_id,
+            recipient: p.recipient,
+            total_amount: p.total_amount,
+        });
+        Ok(())
+    }
+
     /// Claim vested tokens up to the current time. Permissionless to call —
     /// anyone can crank — but tokens go to the position's recipient ATA.
+    /// If `fdv_milestone_unlocked` is set, returns the full `total_amount`
+    /// regardless of linear schedule.
     pub fn claim(ctx: Context<Claim>) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
         let p = &mut ctx.accounts.position;
 
-        let vested = vested_amount_at(p, now);
+        let vested = if p.fdv_milestone_unlocked {
+            p.total_amount
+        } else {
+            vested_amount_at(p, now)
+        };
         let claimable = vested.checked_sub(p.claimed_amount).unwrap();
         require!(claimable > 0, VestingError::NothingToClaim);
 
@@ -146,11 +180,17 @@ pub struct VestingPosition {
     pub position_id: [u8; 32],
     pub recipient: Pubkey,
     pub mint: Pubkey,
+    pub grantor: Pubkey,
     pub total_amount: u64,
     pub claimed_amount: u64,
     pub start_time: i64,
     pub cliff_time: i64,
     pub end_time: i64,
+    /// FDV milestone — when set true, vested_amount_at() short-circuits to
+    /// `total_amount`. Used for fully-vested-on-milestone-hit grants
+    /// (founder unlock when company FDV crosses a target). Mirrors EVM
+    /// `Vesting.module` FDV unlock modifier.
+    pub fdv_milestone_unlocked: bool,
     pub bump: u8,
 }
 
@@ -197,6 +237,17 @@ pub struct CreatePosition<'info> {
 }
 
 #[derive(Accounts)]
+pub struct MarkFdvMilestone<'info> {
+    #[account(
+        mut,
+        seeds = [b"vesting_pos", position.trust.as_ref(), position.position_id.as_ref()],
+        bump = position.bump,
+    )]
+    pub position: Account<'info, VestingPosition>,
+    pub grantor: Signer<'info>,
+}
+
+#[derive(Accounts)]
 pub struct Claim<'info> {
     /// CHECK: trust pda
     pub trust: UncheckedAccount<'info>,
@@ -238,6 +289,14 @@ pub struct Claimed {
     pub total_claimed: u64,
 }
 
+#[event]
+pub struct FdvMilestoneHit {
+    pub trust: Pubkey,
+    pub position_id: [u8; 32],
+    pub recipient: Pubkey,
+    pub total_amount: u64,
+}
+
 #[error_code]
 pub enum VestingError {
     #[msg("invalid schedule: start < cliff < end required")]
@@ -246,4 +305,8 @@ pub enum VestingError {
     ZeroAmount,
     #[msg("nothing to claim — fully claimed or not yet vested")]
     NothingToClaim,
+    #[msg("caller is not the grantor of this vesting position")]
+    Unauthorized,
+    #[msg("FDV milestone has already been hit on this position")]
+    AlreadyUnlocked,
 }
