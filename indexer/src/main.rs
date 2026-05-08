@@ -9,6 +9,7 @@
 //! Foundation), per `feedback_use_public_solana_rpc.md` — we run the
 //! indexer service ourselves but don't run a validator/RPC node.
 
+mod backfill;
 mod registry;
 mod sink;
 
@@ -46,6 +47,14 @@ struct Args {
     /// SQLite database path
     #[arg(long, env = "AEQI_INDEXER_DB", default_value = "./aeqi-indexer.db")]
     db: String,
+
+    /// HTTP RPC URL for backfill (getSignaturesForAddress + getTransaction)
+    #[arg(long, env = "AEQI_INDEXER_RPC", default_value = "http://127.0.0.1:9899")]
+    rpc_url: String,
+
+    /// Skip the historical backfill on startup (live tail only)
+    #[arg(long, env = "AEQI_INDEXER_SKIP_BACKFILL", default_value_t = false)]
+    skip_backfill: bool,
 }
 
 #[tokio::main]
@@ -68,6 +77,22 @@ async fn main() -> Result<()> {
 
     let sink = std::sync::Arc::new(sink::Sink::open(&args.db)?);
     info!(prior_events = sink.event_count()?, "sink opened");
+
+    // Historical backfill — replay any events that happened before the
+    // indexer started (or while it was offline). Idempotent via the sink's
+    // UNIQUE(signature, program, event_type) constraint.
+    if !args.skip_backfill {
+        let rpc = solana_client::nonblocking::rpc_client::RpcClient::new(args.rpc_url.clone());
+        for (name, pid_str) in PROGRAMS {
+            let pid = Pubkey::from_str(pid_str)?;
+            match backfill::backfill_program(&rpc, &pid, name, sink.clone()).await {
+                Ok(n) => info!(program = %name, inserted = n, "backfill complete"),
+                Err(e) => warn!(?e, program = %name, "backfill failed — continuing to live tail"),
+            }
+        }
+    } else {
+        info!("--skip-backfill set — going straight to live tail");
+    }
 
     let commitment = match args.commitment.as_str() {
         "finalized" => CommitmentConfig::finalized(),
