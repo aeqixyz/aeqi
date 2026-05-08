@@ -39,6 +39,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "aeqi-funding"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+]
+
+[[package]]
 name = "aeqi-governance"
 version = "0.1.0"
 dependencies = [

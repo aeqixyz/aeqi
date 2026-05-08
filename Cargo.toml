@@ -11,6 +11,7 @@ members = [
     "programs/aeqi-unifutures",
     "programs/aeqi-budget",
     "programs/aeqi-fund",
+    "programs/aeqi-funding",
 ]
 
 [workspace.package]

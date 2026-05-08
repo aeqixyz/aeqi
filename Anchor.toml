@@ -16,6 +16,7 @@ aeqi_vesting = "24mJEeCHs492NGCJADvfb9zWDcqoDWNCpCYC2xAE2VBs"
 aeqi_unifutures = "2AqvqotDRhQj67YGn3MaZPUoYFBUEbnEbvbLD8Q2mF4s"
 aeqi_budget = "2XVZqURv6hVL7EEMd4BL1zyJhngSiAEV2q4yCgbQjASA"
 aeqi_fund = "4QJQsnRYUyXo9EFxAayL79zAkFejjdWeKhoTXeMVK7Nv"
+aeqi_funding = "8EAVY6uosAatbwhemj1gsPB47WwwmDLzi2t7yo2b8CWV"
 
 [registry]
 url = "https://api.apr.dev"
