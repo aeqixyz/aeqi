@@ -1,0 +1,22 @@
+[package]
+name = "aeqi-budget"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "AEQI Budget module — role-bound treasury allocations + spend tracking"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "aeqi_budget"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+anchor-lang = { workspace = true }
