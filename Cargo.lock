@@ -42,6 +42,7 @@ dependencies = [
 name = "aeqi-funding"
 version = "0.1.0"
 dependencies = [
+ "aeqi-unifutures",
  "anchor-lang",
 ]
 

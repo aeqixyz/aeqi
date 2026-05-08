@@ -21,6 +21,8 @@
 //! follows once the inter-module CPI surfaces stabilize.
 
 use anchor_lang::prelude::*;
+use aeqi_unifutures::cpi::accounts::CreateCommitmentSale;
+use aeqi_unifutures::program::AeqiUnifutures;
 
 declare_id!("8EAVY6uosAatbwhemj1gsPB47WwwmDLzi2t7yo2b8CWV");
 
@@ -75,6 +77,52 @@ pub mod aeqi_funding {
             budget_id,
             asset_amount,
             target_quote,
+        });
+        Ok(())
+    }
+
+    /// Activate a CommitmentSale-kind funding request — CPIs into
+    /// `aeqi_unifutures::create_commitment_sale` with the request's params.
+    /// Sets status = Activated, primitive_id = the new sale's id.
+    /// (BondingCurve + Exit activation follow the same shape; this iteration
+    /// covers kind=0 only.)
+    pub fn activate_commitment_sale<'info>(
+        ctx: Context<'_, '_, 'info, 'info, ActivateCommitmentSale<'info>>,
+        sale_id: [u8; 32],
+        overflow_quote: u64,
+        duration_secs: i64,
+    ) -> Result<()> {
+        let r = &mut ctx.accounts.request;
+        require!(
+            r.status == RequestStatus::Pending as u8,
+            FundingError::CannotActivate
+        );
+        require!(r.kind == 0, FundingError::WrongKind);
+
+        let cpi = CreateCommitmentSale {
+            trust: ctx.accounts.trust.to_account_info(),
+            module_state: ctx.accounts.unifutures_module_state.to_account_info(),
+            sale: ctx.accounts.sale.to_account_info(),
+            creator: ctx.accounts.creator.to_account_info(),
+            system_program: ctx.accounts.system_program.to_account_info(),
+        };
+        aeqi_unifutures::cpi::create_commitment_sale(
+            CpiContext::new(ctx.accounts.aeqi_unifutures_program.to_account_info(), cpi),
+            sale_id,
+            r.asset_amount,
+            r.target_quote,
+            overflow_quote,
+            duration_secs,
+        )?;
+
+        r.status = RequestStatus::Activated as u8;
+        r.primitive_id = sale_id;
+
+        emit!(FundingRequestActivated {
+            trust: r.trust,
+            request_id: r.request_id,
+            kind: r.kind,
+            primitive_id: sale_id,
         });
         Ok(())
     }
@@ -176,6 +224,28 @@ pub struct CreateFundingRequest<'info> {
 }
 
 #[derive(Accounts)]
+pub struct ActivateCommitmentSale<'info> {
+    #[account(
+        mut,
+        seeds = [b"funding_request", request.trust.as_ref(), request.request_id.as_ref()],
+        bump = request.bump,
+    )]
+    pub request: Account<'info, FundingRequest>,
+    /// CHECK: trust pda — passed through to aeqi_unifutures CPI
+    pub trust: UncheckedAccount<'info>,
+    /// CHECK: aeqi_unifutures' module_state PDA — validated by the CPI
+    #[account(mut)]
+    pub unifutures_module_state: UncheckedAccount<'info>,
+    /// CHECK: aeqi_unifutures will init the CommitmentSale PDA
+    #[account(mut)]
+    pub sale: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub creator: Signer<'info>,
+    pub aeqi_unifutures_program: Program<'info, AeqiUnifutures>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct CancelFundingRequest<'info> {
     #[account(
         mut,
@@ -203,6 +273,14 @@ pub struct FundingRequestCancelled {
     pub request_id: [u8; 32],
 }
 
+#[event]
+pub struct FundingRequestActivated {
+    pub trust: Pubkey,
+    pub request_id: [u8; 32],
+    pub kind: u8,
+    pub primitive_id: [u8; 32],
+}
+
 #[error_code]
 pub enum FundingError {
     #[msg("kind must be 0 (CommitmentSale), 1 (BondingCurve), or 2 (Exit)")]
@@ -213,4 +291,8 @@ pub enum FundingError {
     Unauthorized,
     #[msg("request is not in Pending status — can't cancel")]
     CannotCancel,
+    #[msg("request is not in Pending status — can't activate")]
+    CannotActivate,
+    #[msg("request kind doesn't match this activation ix (kind=0 for CommitmentSale)")]
+    WrongKind,
 }
