@@ -139,6 +139,8 @@ describe("aeqi_vesting", () => {
         new anchor.BN(start),
         new anchor.BN(cliff),
         new anchor.BN(end),
+        new anchor.BN(0), // no contribution
+        PublicKey.default,
       )
       .accounts({
         trust: fakeTrust,
@@ -227,6 +229,8 @@ describe("aeqi_vesting", () => {
         new anchor.BN(start),
         new anchor.BN(cliff),
         new anchor.BN(end),
+        new anchor.BN(0),
+        PublicKey.default,
       )
       .accounts({
         trust: fakeTrust,
@@ -324,6 +328,138 @@ describe("aeqi_vesting", () => {
     expect(reThrew).to.eq(true);
   });
 
+  it("pay_contribution gates claims — recipient must burn before claiming", async () => {
+    // Position: fully-vested schedule (in the past), contribution_required = 500.
+    // Without pay_contribution: claim fails ContributionUnpaid.
+    // After pay_contribution (burns 500 of contribution_mint from recipient):
+    // claim succeeds with full vested amount.
+    const positionId = new Uint8Array(32);
+    positionId[0] = 0xc0;
+    positionId[1] = 0xde;
+
+    const [posPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("vesting_pos"), fakeTrust.toBuffer(), Buffer.from(positionId)],
+      program.programId,
+    );
+
+    const now = Math.floor(Date.now() / 1000);
+    const start = now - 1000;
+    const cliff = now - 500;
+    const end = now - 100;
+    const TOTAL = 10_000;
+    const CONTRIBUTION = 500;
+
+    // Use the same mint for asset + contribution (test wallet is mint authority).
+    await program.methods
+      .createPosition(
+        Array.from(positionId),
+        provider.wallet.publicKey,
+        new anchor.BN(TOTAL),
+        new anchor.BN(start),
+        new anchor.BN(cliff),
+        new anchor.BN(end),
+        new anchor.BN(CONTRIBUTION),
+        mint,
+      )
+      .accounts({
+        trust: fakeTrust,
+        moduleState: modulePda,
+        position: posPda,
+        mint,
+        grantor: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Top up vault to cover claim
+    await mintTo(
+      provider.connection,
+      (provider.wallet as anchor.Wallet).payer,
+      mint,
+      vaultAta,
+      provider.wallet.publicKey,
+      TOTAL,
+      [],
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+    );
+
+    // Pre-payment: claim must fail
+    let preFailed = false;
+    try {
+      await program.methods
+        .claim()
+        .accounts({
+          trust: fakeTrust,
+          position: posPda,
+          vaultAuthority,
+          mint,
+          vault: vaultAta,
+          recipientTa: recipientAta,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+        })
+        .rpc();
+    } catch (e: any) {
+      preFailed = true;
+      expect(e.toString()).to.match(/ContributionUnpaid/);
+    }
+    expect(preFailed).to.eq(true);
+
+    // Mint contribution amount to recipient
+    await mintTo(
+      provider.connection,
+      (provider.wallet as anchor.Wallet).payer,
+      mint,
+      recipientAta,
+      provider.wallet.publicKey,
+      CONTRIBUTION,
+      [],
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+    );
+
+    const recipientPre = await getAccount(provider.connection, recipientAta, undefined, TOKEN_2022_PROGRAM_ID);
+
+    // Pay contribution (burns CONTRIBUTION tokens from recipientAta)
+    await program.methods
+      .payContribution()
+      .accounts({
+        position: posPda,
+        contributionMint: mint,
+        recipientContributionTa: recipientAta,
+        recipient: provider.wallet.publicKey,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+      })
+      .rpc();
+
+    let pos = await program.account.vestingPosition.fetch(posPda);
+    expect(pos.contributionPaid).to.eq(true);
+
+    // Recipient just lost CONTRIBUTION tokens to burn
+    const recipientPostBurn = await getAccount(provider.connection, recipientAta, undefined, TOKEN_2022_PROGRAM_ID);
+    expect((recipientPre.amount - recipientPostBurn.amount).toString()).to.eq(String(CONTRIBUTION));
+
+    // Now claim should succeed and transfer full TOTAL
+    await program.methods
+      .claim()
+      .accounts({
+        trust: fakeTrust,
+        position: posPda,
+        vaultAuthority,
+        mint,
+        vault: vaultAta,
+        recipientTa: recipientAta,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+      })
+      .rpc();
+
+    const recipientPostClaim = await getAccount(provider.connection, recipientAta, undefined, TOKEN_2022_PROGRAM_ID);
+    expect((recipientPostClaim.amount - recipientPostBurn.amount).toString()).to.eq(String(TOTAL));
+
+    pos = await program.account.vestingPosition.fetch(posPda);
+    expect(pos.claimedAmount.toString()).to.eq(String(TOTAL));
+  });
+
   it("create_position rejects pre-cliff claims (NothingToClaim)", async () => {
     const positionId = new Uint8Array(32);
     positionId[0] = 0xf2;
@@ -347,6 +483,8 @@ describe("aeqi_vesting", () => {
         new anchor.BN(start),
         new anchor.BN(cliff),
         new anchor.BN(end),
+        new anchor.BN(0),
+        PublicKey.default,
       )
       .accounts({
         trust: fakeTrust,
