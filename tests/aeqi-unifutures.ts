@@ -619,6 +619,45 @@ describe("aeqi_unifutures", () => {
     expect(threw).to.eq(true);
   });
 
+  it("create_exit stores a pro-rata redemption Exit PDA", async () => {
+    const exitId = new Uint8Array(32);
+    exitId[0] = 0xe1;
+    exitId[1] = 0xee;
+
+    const [exitPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("exit"), fakeTrust.toBuffer(), Buffer.from(exitId)],
+      program.programId,
+    );
+
+    const EXIT_QUOTE = 100_000;
+    const SUPPLY_SNAPSHOT = 50_000;
+    const DURATION = 60 * 60 * 24 * 30; // 30 days
+
+    await program.methods
+      .createExit(
+        Array.from(exitId),
+        new anchor.BN(EXIT_QUOTE),
+        new anchor.BN(SUPPLY_SNAPSHOT),
+        new anchor.BN(DURATION),
+      )
+      .accounts({
+        trust: fakeTrust,
+        moduleState: modulePda,
+        exit: exitPda,
+        creator: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const e = await program.account.exit.fetch(exitPda);
+    expect(e.exitQuote.toString()).to.eq(String(EXIT_QUOTE));
+    expect(e.totalSupplySnapshot.toString()).to.eq(String(SUPPLY_SNAPSHOT));
+    expect(e.remainingProceeds.toString()).to.eq(String(EXIT_QUOTE));
+    expect(e.proceedsCollected.toString()).to.eq("0");
+    expect(e.status).to.eq(0); // Active
+    expect(e.creator.toBase58()).to.eq(provider.wallet.publicKey.toBase58());
+  });
+
   it("rejects create_curve with reserve_ratio > 100%", async () => {
     const curveId = new Uint8Array(32);
     curveId[0] = 0xed;

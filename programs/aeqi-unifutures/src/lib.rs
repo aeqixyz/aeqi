@@ -85,6 +85,50 @@ pub mod aeqi_unifutures {
         Ok(())
     }
 
+    /// Create an Exit — pro-rata redemption event. The acquirer (creator)
+    /// commits `exit_quote` upfront; existing token holders burn their
+    /// cap-table tokens to claim their pro-rata share of the proceeds pool.
+    /// Mirrors EVM `Unifutures.module.createExit`.
+    /// Settle/claim ixes follow.
+    pub fn create_exit(
+        ctx: Context<CreateExit>,
+        exit_id: [u8; 32],
+        exit_quote: u64,
+        total_supply_snapshot: u64,
+        duration_secs: i64,
+    ) -> Result<()> {
+        require!(exit_quote > 0, UnifuturesError::ZeroAmount);
+        require!(total_supply_snapshot > 0, UnifuturesError::ZeroAmount);
+        require!(duration_secs > 0, UnifuturesError::InvalidDuration);
+
+        let now = Clock::get()?.unix_timestamp;
+        let e = &mut ctx.accounts.exit;
+        e.trust = ctx.accounts.trust.key();
+        e.exit_id = exit_id;
+        e.creator = ctx.accounts.creator.key();
+        e.exit_quote = exit_quote;
+        e.total_supply_snapshot = total_supply_snapshot;
+        e.proceeds_collected = 0;
+        e.remaining_proceeds = exit_quote;
+        e.status = SaleStatus::Active as u8;
+        e.start_time = now;
+        e.end_time = now.checked_add(duration_secs).unwrap();
+        e.bump = ctx.bumps.exit;
+
+        let m = &mut ctx.accounts.module_state;
+        m.exit_count = m.exit_count.checked_add(1).unwrap();
+
+        emit!(ExitCreated {
+            trust: e.trust,
+            exit_id,
+            creator: e.creator,
+            exit_quote,
+            total_supply_snapshot,
+            end_time: e.end_time,
+        });
+        Ok(())
+    }
+
     /// Create a CommitmentSale — fixed-price pre-sale. Buyers commit quote
     /// during the active phase; on finalization, allocations are computed
     /// against the target. Mirrors EVM `Unifutures.module.createCommitmentSale`.
@@ -341,6 +385,7 @@ pub struct UnifuturesModuleState {
     pub trust: Pubkey,
     pub curve_count: u64,
     pub sale_count: u64,
+    pub exit_count: u64,
     pub bump: u8,
 }
 
@@ -362,6 +407,22 @@ pub struct CommitmentSale {
     pub overflow_quote: u64,
     pub proceeds_collected: u64,
     pub commitments_collected: u64,
+    pub status: u8,
+    pub start_time: i64,
+    pub end_time: i64,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct Exit {
+    pub trust: Pubkey,
+    pub exit_id: [u8; 32],
+    pub creator: Pubkey,
+    pub exit_quote: u64,
+    pub total_supply_snapshot: u64,
+    pub proceeds_collected: u64,
+    pub remaining_proceeds: u64,
     pub status: u8,
     pub start_time: i64,
     pub end_time: i64,
@@ -433,6 +494,30 @@ pub struct CreateCurve<'info> {
 #[derive(Accounts)]
 pub struct QuoteBuy<'info> {
     pub curve: Account<'info, BondingCurve>,
+}
+
+#[derive(Accounts)]
+#[instruction(exit_id: [u8; 32])]
+pub struct CreateExit<'info> {
+    /// CHECK: trust pda
+    pub trust: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        seeds = [b"unifutures_module", trust.key().as_ref()],
+        bump = module_state.bump,
+    )]
+    pub module_state: Account<'info, UnifuturesModuleState>,
+    #[account(
+        init,
+        payer = creator,
+        space = 8 + Exit::INIT_SPACE,
+        seeds = [b"exit", trust.key().as_ref(), exit_id.as_ref()],
+        bump,
+    )]
+    pub exit: Account<'info, Exit>,
+    #[account(mut)]
+    pub creator: Signer<'info>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -546,6 +631,16 @@ pub struct SaleCreated {
     pub asset_amount: u64,
     pub target_quote: u64,
     pub overflow_quote: u64,
+    pub end_time: i64,
+}
+
+#[event]
+pub struct ExitCreated {
+    pub trust: Pubkey,
+    pub exit_id: [u8; 32],
+    pub creator: Pubkey,
+    pub exit_quote: u64,
+    pub total_supply_snapshot: u64,
     pub end_time: i64,
 }
 
