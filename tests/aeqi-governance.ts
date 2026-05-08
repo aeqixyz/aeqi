@@ -1,14 +1,13 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { AeqiGovernance } from "../target/types/aeqi_governance";
+import { AeqiToken } from "../target/types/aeqi_token";
 import { PublicKey, Keypair } from "@solana/web3.js";
 import {
   TOKEN_2022_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
-  createMint,
   getAssociatedTokenAddressSync,
   createAssociatedTokenAccountInstruction,
-  mintTo,
 } from "@solana/spl-token";
 import { expect } from "chai";
 
@@ -557,13 +556,83 @@ describe("aeqi_governance", () => {
     expect(v.weight.toString()).to.eq("1");
   });
 
-  it("cast_vote_token reads weight from real Token-2022 balance", async () => {
-    // Fresh trust + governance config + proposal, plus a real Token-2022
-    // mint with the voter holding 1500 tokens. cast_vote_token should
-    // record weight = 1500 from the on-chain balance, not a passed param.
-
+  it("cast_vote_token reads weight from real Token-2022 balance (canonical mint)", async () => {
+    // Full token-mode flow: aeqi_token.create_mint gives the canonical mint
+    // at PDA [b"mint", trust]; aeqi_token.mint_tokens issues 1500 to voter;
+    // governance.cast_vote_token reads voter's balance + validates the mint
+    // is the canonical PDA via seeds::program = AEQI_TOKEN_ID.
+    const aeqiToken = anchor.workspace.aeqiToken as anchor.Program<AeqiToken>;
     const trustV = Keypair.generate().publicKey;
 
+    // Token module setup
+    const [tokenModuleStatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("token_module"), trustV.toBuffer()],
+      aeqiToken.programId,
+    );
+    const [mintAuthorityPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("token_authority"), trustV.toBuffer()],
+      aeqiToken.programId,
+    );
+    const [mintPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("mint"), trustV.toBuffer()],
+      aeqiToken.programId,
+    );
+
+    await aeqiToken.methods
+      .init()
+      .accounts({
+        trust: trustV,
+        moduleState: tokenModuleStatePda,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+    await aeqiToken.methods
+      .createMint(9)
+      .accounts({
+        trust: trustV,
+        moduleState: tokenModuleStatePda,
+        mintAuthority: mintAuthorityPda,
+        mint: mintPda,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const voter = provider.wallet.publicKey;
+    const voterAta = getAssociatedTokenAddressSync(
+      mintPda,
+      voter,
+      false,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+    await provider.sendAndConfirm(
+      new anchor.web3.Transaction().add(
+        createAssociatedTokenAccountInstruction(
+          voter,
+          voterAta,
+          voter,
+          mintPda,
+          TOKEN_2022_PROGRAM_ID,
+          ASSOCIATED_TOKEN_PROGRAM_ID,
+        ),
+      ),
+    );
+    await aeqiToken.methods
+      .mintTokens(new anchor.BN(1500))
+      .accounts({
+        trust: trustV,
+        moduleState: tokenModuleStatePda,
+        mintAuthority: mintAuthorityPda,
+        mint: mintPda,
+        recipientTa: voterAta,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+      })
+      .rpc();
+
+    // Governance setup
     const [moduleStatePda] = PublicKey.findProgramAddressSync(
       [Buffer.from("gov_module"), trustV.toBuffer()],
       program.programId,
@@ -578,7 +647,7 @@ describe("aeqi_governance", () => {
       })
       .rpc();
 
-    const tokenCfgId = new Uint8Array(32); // [0;32] = token mode
+    const tokenCfgId = new Uint8Array(32);
     const [cfgPda] = PublicKey.findProgramAddressSync(
       [Buffer.from("gov_config"), trustV.toBuffer(), Buffer.from(tokenCfgId)],
       program.programId,
@@ -623,50 +692,6 @@ describe("aeqi_governance", () => {
       })
       .rpc();
 
-    // Token-2022 mint setup
-    const mint = await createMint(
-      provider.connection,
-      (provider.wallet as anchor.Wallet).payer,
-      provider.wallet.publicKey,
-      null,
-      9,
-      Keypair.generate(),
-      undefined,
-      TOKEN_2022_PROGRAM_ID,
-    );
-
-    const voter = provider.wallet.publicKey;
-    const voterAta = getAssociatedTokenAddressSync(
-      mint,
-      voter,
-      false,
-      TOKEN_2022_PROGRAM_ID,
-      ASSOCIATED_TOKEN_PROGRAM_ID,
-    );
-    await provider.sendAndConfirm(
-      new anchor.web3.Transaction().add(
-        createAssociatedTokenAccountInstruction(
-          voter,
-          voterAta,
-          voter,
-          mint,
-          TOKEN_2022_PROGRAM_ID,
-          ASSOCIATED_TOKEN_PROGRAM_ID,
-        ),
-      ),
-    );
-    await mintTo(
-      provider.connection,
-      (provider.wallet as anchor.Wallet).payer,
-      mint,
-      voterAta,
-      voter,
-      1500,
-      [],
-      undefined,
-      TOKEN_2022_PROGRAM_ID,
-    );
-
     const [votePda] = PublicKey.findProgramAddressSync(
       [
         Buffer.from("vote"),
@@ -683,7 +708,7 @@ describe("aeqi_governance", () => {
         proposal: proposalPda,
         vote: votePda,
         voterTokenAccount: voterAta,
-        mint,
+        mint: mintPda,
         voter,
         systemProgram: anchor.web3.SystemProgram.programId,
       })

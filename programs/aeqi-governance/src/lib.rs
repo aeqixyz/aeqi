@@ -25,6 +25,12 @@ declare_id!("528PTeSk8M3pKMMhc5vitbcwMGUMcHMzg6G5XpX8iVBn");
 pub const AEQI_ROLE_ID: Pubkey =
     anchor_lang::pubkey!("HFqh9bPLS7EwirMsz9MpNT96SN5v2JBeKTdnUpSVyuVe");
 
+/// Hardcoded aeqi_token program ID — used to validate the cap-table mint
+/// passed to `cast_vote_token` is the canonical PDA `[b"mint", trust]`
+/// under aeqi_token, so callers can't substitute an unrelated mint.
+pub const AEQI_TOKEN_ID: Pubkey =
+    anchor_lang::pubkey!("V9WiXaeayA8KTyVAEEG1rAuPQ28G6NEwzSCmzZNZv6z");
+
 /// Same memory layout as `aeqi_role::RoleVoteCheckpoint`. Used for borsh
 /// deserialization of the cross-program account data; the `#[account]`
 /// discriminator on the original is handled by skipping the first 8 bytes.
@@ -604,11 +610,18 @@ pub struct CastVoteToken<'info> {
     )]
     pub vote: Account<'info, VoteRecord>,
     /// The voter's cap-table token account. `token::authority` constraint
-    /// enforces voter owns it; `mint` is bound by the same constraint.
-    #[account(token::authority = voter)]
+    /// enforces voter owns it; `token::mint = mint` binds it to the
+    /// canonical mint PDA below.
+    #[account(token::authority = voter, token::mint = mint)]
     pub voter_token_account: InterfaceAccount<'info, TokenAccount>,
-    /// CHECK: the cap-table mint — caller passes; mint == voter_token_account.mint
-    /// is enforced by Anchor's token_interface constraint resolver.
+    /// The canonical cap-table mint — must be the PDA `[b"mint", trust]`
+    /// under aeqi_token. Validated by `seeds::program = AEQI_TOKEN_ID`
+    /// so callers can't substitute an unrelated mint.
+    #[account(
+        seeds = [b"mint", proposal.trust.as_ref()],
+        bump,
+        seeds::program = AEQI_TOKEN_ID,
+    )]
     pub mint: InterfaceAccount<'info, Mint>,
     #[account(mut)]
     pub voter: Signer<'info>,
