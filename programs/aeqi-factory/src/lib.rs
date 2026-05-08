@@ -18,6 +18,7 @@
 use anchor_lang::prelude::*;
 use aeqi_trust::cpi::accounts::{
     Finalize as TrustFinalize, Initialize as TrustInitialize, RegisterModule as TrustRegisterModule,
+    SetBytesConfig as TrustSetBytesConfig,
 };
 use aeqi_trust::program::AeqiTrust;
 use aeqi_role::cpi::accounts::{FinalizeModule as RoleFinalize, InitModule as RoleInit};
@@ -156,6 +157,8 @@ pub mod aeqi_factory {
         role_acl: u64,
         token_acl: u64,
         gov_acl: u64,
+        token_decimals: u8,
+        token_max_supply_cap: u64,
     ) -> Result<()> {
         // 1. initialize trust
         let init_accs = TrustInitialize {
@@ -241,9 +244,32 @@ pub mod aeqi_factory {
             },
         ))?;
 
-        // 4. finalize each module — transitions Initialized → Finalized.
-        // (Module config-bytes decode flow follows when BytesConfig dispatch
-        // ships; for now finalize is a state-machine transition.)
+        // 3a. Write the per-module config blobs to TRUST's BytesConfig PDAs
+        // before each module finalize reads them. Mirrors EVM
+        // `Factory._createTRUST`'s pre-finalize setBytesConfig sweep.
+        let token_init_cfg = aeqi_token::TokenInitConfig {
+            decimals: token_decimals,
+            max_supply_cap: token_max_supply_cap,
+        };
+        let token_cfg_bytes = token_init_cfg.try_to_vec()?;
+        aeqi_trust::cpi::set_bytes_config(
+            CpiContext::new(
+                ctx.accounts.aeqi_trust_program.to_account_info(),
+                TrustSetBytesConfig {
+                    trust: ctx.accounts.trust.to_account_info(),
+                    config: ctx.accounts.token_bytes_config.to_account_info(),
+                    source_module: None,
+                    authority: ctx.accounts.authority.to_account_info(),
+                    system_program: ctx.accounts.system_program.to_account_info(),
+                },
+            ),
+            aeqi_token::TOKEN_CONFIG_KEY,
+            token_cfg_bytes,
+        )?;
+
+        // 4. finalize each module — transitions Initialized → Finalized and
+        // (for those that consume config-bytes) decodes their respective
+        // BytesConfig blob.
         aeqi_role::cpi::finalize(CpiContext::new(
             ctx.accounts.aeqi_role_program.to_account_info(),
             RoleFinalize {
@@ -256,6 +282,7 @@ pub mod aeqi_factory {
             FinalizeToken {
                 trust: ctx.accounts.trust.to_account_info(),
                 module_state: ctx.accounts.token_module_state.to_account_info(),
+                bytes_config: ctx.accounts.token_bytes_config.to_account_info(),
             },
         ))?;
         aeqi_governance::cpi::finalize(CpiContext::new(
@@ -464,6 +491,11 @@ pub struct CreateCompanyFull<'info> {
     /// CHECK: aeqi_governance::init creates this PDA.
     #[account(mut)]
     pub gov_module_state: UncheckedAccount<'info>,
+    /// CHECK: aeqi_trust::set_bytes_config init_if_needed-creates the
+    /// BytesConfig PDA at the canonical TOKEN_CONFIG_KEY seed under
+    /// aeqi_trust's program id.
+    #[account(mut)]
+    pub token_bytes_config: UncheckedAccount<'info>,
     #[account(mut)]
     pub authority: Signer<'info>,
     pub aeqi_trust_program: Program<'info, AeqiTrust>,

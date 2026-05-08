@@ -17,6 +17,42 @@ use anchor_spl::token_interface::{
 
 declare_id!("V9WiXaeayA8KTyVAEEG1rAuPQ28G6NEwzSCmzZNZv6z");
 
+/// aeqi_trust program id — used for cross-program account read of the
+/// BytesConfig PDA written by the factory before finalize.
+pub const AEQI_TRUST_ID: Pubkey =
+    anchor_lang::pubkey!("AF9cqzwiGCf2XHtLXyKJwToPaJghmEaHa9VQJ1zjoUHs");
+
+/// Stable PDA-key suffix the factory writes the token's borsh-encoded
+/// `TokenInitConfig` blob under, in trust's BytesConfig slot. Each module
+/// owns a distinct prefix byte so config-bytes PDAs never collide.
+pub const TOKEN_CONFIG_KEY: [u8; 32] = {
+    let mut k = [0u8; 32];
+    k[0] = 1;
+    k
+};
+
+/// Mirror of `aeqi_trust::BytesConfig` field layout. Borsh-deserialized from
+/// the raw account bytes after skipping the 8-byte Anchor discriminator;
+/// matches the cross-program account-read pattern used in
+/// `aeqi_governance::cast_vote_role`.
+#[derive(AnchorDeserialize, AnchorSerialize)]
+pub struct BytesConfigData {
+    pub trust: Pubkey,
+    pub key: [u8; 32],
+    pub value: Vec<u8>,
+    pub bump: u8,
+}
+
+/// Borsh-serialized config the factory writes to the trust BytesConfig slot
+/// at `TOKEN_CONFIG_KEY` before invoking `aeqi_token::finalize`. Mirrors the
+/// EVM `Token.module.finalizeModule` `abi.decode(getBytesConfig(KEY), ...)`
+/// dispatch pattern.
+#[derive(AnchorDeserialize, AnchorSerialize)]
+pub struct TokenInitConfig {
+    pub decimals: u8,
+    pub max_supply_cap: u64,
+}
+
 #[program]
 pub mod aeqi_token {
     use super::*;
@@ -38,15 +74,38 @@ pub mod aeqi_token {
     }
 
     /// Module finalize — decodes the config bytes the factory wrote into the
-    /// trust's BytesConfig slot under `TOKEN_TRUST_CONFIG_KEY`. Mirrors EVM
-    /// `Token.module.finalizeModule`. Skeleton; full decode + mint init
-    /// lands in the next iteration.
+    /// trust's BytesConfig slot under `TOKEN_CONFIG_KEY`. Mirrors EVM
+    /// `Token.module.finalizeModule`'s
+    /// `abi.decode(getBytesConfig(TOKEN_TRUST_CONFIG), (decimals, maxSupply))`
+    /// step. Cross-program account read — the BytesConfig PDA's owner is
+    /// validated against AEQI_TRUST_ID, then the 8-byte discriminator is
+    /// skipped and the bytes are borsh-deserialized into the mirror struct.
     pub fn finalize(ctx: Context<FinalizeToken>) -> Result<()> {
         let module = &mut ctx.accounts.module_state;
         require!(
             module.initialized == ModuleInitState::Initialized as u8,
             TokenError::NotInitialized
         );
+
+        let cfg_acct = &ctx.accounts.bytes_config;
+        require_keys_eq!(*cfg_acct.owner, AEQI_TRUST_ID, TokenError::InvalidConfig);
+
+        let data = cfg_acct.try_borrow_data()?;
+        require!(data.len() >= 8, TokenError::InvalidConfig);
+        let cfg = BytesConfigData::try_from_slice(&data[8..])
+            .map_err(|_| error!(TokenError::InvalidConfig))?;
+        require_keys_eq!(
+            cfg.trust,
+            ctx.accounts.trust.key(),
+            TokenError::InvalidConfig
+        );
+        require!(cfg.key == TOKEN_CONFIG_KEY, TokenError::InvalidConfig);
+
+        let init_cfg = TokenInitConfig::try_from_slice(&cfg.value)
+            .map_err(|_| error!(TokenError::InvalidConfig))?;
+
+        module.decimals = init_cfg.decimals;
+        module.max_supply_cap = init_cfg.max_supply_cap;
         module.initialized = ModuleInitState::Finalized as u8;
         Ok(())
     }
@@ -148,6 +207,11 @@ pub struct TokenModuleState {
     pub trust: Pubkey,
     pub mint: Pubkey,
     pub initialized: u8,
+    /// Mint decimals — populated by `finalize` from the BytesConfig blob.
+    pub decimals: u8,
+    /// Authoritative supply cap from `TokenInitConfig`. `mint_tokens` will
+    /// (next iteration) gate against this once minting is wired through it.
+    pub max_supply_cap: u64,
     pub bump: u8,
 }
 
@@ -187,6 +251,15 @@ pub struct FinalizeToken<'info> {
         bump = module_state.bump,
     )]
     pub module_state: Account<'info, TokenModuleState>,
+    /// CHECK: cross-program BytesConfig PDA owned by aeqi_trust. Anchor
+    /// enforces the seed derivation under the foreign program id; finalize's
+    /// body validates the account's data layout + owner.
+    #[account(
+        seeds = [b"cfg_bytes", trust.key().as_ref(), TOKEN_CONFIG_KEY.as_ref()],
+        bump,
+        seeds::program = AEQI_TRUST_ID,
+    )]
+    pub bytes_config: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
@@ -293,4 +366,6 @@ pub enum TokenError {
     MintAlreadyCreated,
     #[msg("mint account does not match the module's recorded mint")]
     MintMismatch,
+    #[msg("BytesConfig PDA missing, malformed, or wrong owner")]
+    InvalidConfig,
 }

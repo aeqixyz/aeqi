@@ -297,6 +297,15 @@ describe("aeqi_factory", () => {
       governance.programId,
     );
 
+    // BytesConfig PDA for the token module's borsh-encoded TokenInitConfig.
+    // Lives under aeqi_trust's program id; key is TOKEN_CONFIG_KEY = [1,0,...,0].
+    const tokenConfigKey = new Uint8Array(32);
+    tokenConfigKey[0] = 1;
+    const [tokenBytesConfigPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("cfg_bytes"), trustPda.toBuffer(), Buffer.from(tokenConfigKey)],
+      trust.programId,
+    );
+
     await factory.methods
       .createCompanyFull(
         Array.from(trustId),
@@ -306,6 +315,8 @@ describe("aeqi_factory", () => {
         new anchor.BN(0xff),
         new anchor.BN(0xff),
         new anchor.BN(0xff),
+        9, // token_decimals
+        new anchor.BN(1_000_000_000), // token_max_supply_cap
       )
       .accounts({
         trust: trustPda,
@@ -315,6 +326,7 @@ describe("aeqi_factory", () => {
         roleModuleState: roleModuleStatePda,
         tokenModuleState: tokenModuleStatePda,
         govModuleState: govModuleStatePda,
+        tokenBytesConfig: tokenBytesConfigPda,
         authority: provider.wallet.publicKey,
         aeqiTrustProgram: trust.programId,
         aeqiRoleProgram: role.programId,
@@ -344,6 +356,10 @@ describe("aeqi_factory", () => {
 
     const ts = await token.account.tokenModuleState.fetch(tokenModuleStatePda);
     expect(ts.trust.toBase58()).to.eq(trustPda.toBase58());
+    // BytesConfig dispatch landed: finalize decoded the blob and copied
+    // decimals + max_supply_cap onto module_state.
+    expect(ts.decimals).to.eq(9);
+    expect(ts.maxSupplyCap.toString()).to.eq("1000000000");
 
     const gs = await governance.account.governanceModuleState.fetch(govModuleStatePda);
     expect(gs.trust.toBase58()).to.eq(trustPda.toBase58());
