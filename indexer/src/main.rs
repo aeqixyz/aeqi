@@ -10,6 +10,7 @@
 //! indexer service ourselves but don't run a validator/RPC node.
 
 mod registry;
+mod sink;
 
 use anyhow::Result;
 use clap::Parser;
@@ -41,6 +42,10 @@ struct Args {
     /// Commitment level for live subscription (confirmed | finalized)
     #[arg(long, env = "AEQI_INDEXER_COMMITMENT", default_value = "confirmed")]
     commitment: String,
+
+    /// SQLite database path
+    #[arg(long, env = "AEQI_INDEXER_DB", default_value = "./aeqi-indexer.db")]
+    db: String,
 }
 
 #[tokio::main]
@@ -56,9 +61,13 @@ async fn main() -> Result<()> {
     info!(
         ws_url = %args.ws_url,
         commitment = %args.commitment,
+        db = %args.db,
         events_known = registry::event_count(),
         "starting aeqi-indexer"
     );
+
+    let sink = std::sync::Arc::new(sink::Sink::open(&args.db)?);
+    info!(prior_events = sink.event_count()?, "sink opened");
 
     let commitment = match args.commitment.as_str() {
         "finalized" => CommitmentConfig::finalized(),
@@ -75,12 +84,14 @@ async fn main() -> Result<()> {
     for (name, pid_str) in PROGRAMS {
         let pid = Pubkey::from_str(pid_str)?;
         let name = (*name).to_string();
-        info!(program = %name, program_id = %pid, "subscribing");
+        let resume_slot = sink.cursor(&name)?;
+        info!(program = %name, program_id = %pid, ?resume_slot, "subscribing");
 
         let filter = RpcTransactionLogsFilter::Mentions(vec![pid.to_string()]);
         let cfg = RpcTransactionLogsConfig { commitment: Some(commitment) };
         let (mut sub, _unsub) = client.logs_subscribe(filter, cfg).await?;
 
+        let sink_for_task = sink.clone();
         let handle = tokio::spawn(async move {
             while let Some(resp) = sub.next().await {
                 let slot = resp.context.slot;
@@ -98,14 +109,27 @@ async fn main() -> Result<()> {
                                 let payload = &bytes[8..];
                                 match registry::lookup(&pid, &bytes[..8]) {
                                     Some(meta) => {
-                                        info!(
-                                            program = %meta.program,
-                                            event = %meta.event,
+                                        let recorded = sink_for_task.record_event(
+                                            meta.program,
+                                            meta.event,
                                             slot,
-                                            sig = %resp.value.signature,
-                                            payload_bytes = payload.len(),
-                                            "anchor event"
+                                            &resp.value.signature,
+                                            rest,
                                         );
+                                        match recorded {
+                                            Ok(true) => info!(
+                                                program = %meta.program,
+                                                event = %meta.event,
+                                                slot,
+                                                sig = %resp.value.signature,
+                                                payload_bytes = payload.len(),
+                                                "anchor event recorded"
+                                            ),
+                                            Ok(false) => {
+                                                // dedup hit — replay or reorg
+                                            }
+                                            Err(e) => warn!(?e, "sink.record_event failed"),
+                                        }
                                     }
                                     None => {
                                         warn!(
@@ -122,6 +146,9 @@ async fn main() -> Result<()> {
                             Err(e) => warn!(?e, "failed to base64-decode Program data"),
                         }
                     }
+                }
+                if let Err(e) = sink_for_task.bump_cursor(&name, slot) {
+                    warn!(?e, "sink.bump_cursor failed");
                 }
             }
             warn!(program = %name, "log subscription ended");
