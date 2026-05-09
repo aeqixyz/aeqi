@@ -28,7 +28,7 @@ pub struct EventMeta {
 const EVENTS: &[(&str, &str, &[&str])] = &[
     (
         "aeqi_trust",
-        "AF9cqzwiGCf2XHtLXyKJwToPaJghmEaHa9VQJ1zjoUHs",
+        "4CtmLZSLR3t1nKa3A2XD7F2awU5WajiNMxvHCiEDoBnD",
         &[
             "TrustInitialized",
             "TrustFinalized",
@@ -39,7 +39,7 @@ const EVENTS: &[(&str, &str, &[&str])] = &[
     ),
     (
         "aeqi_factory",
-        "7rX3fnJUy7tDSpo1EGCnUhs1XnxxbsQzXXNDCTh64v6n",
+        "4VvrC3pQ2hTUNJ7i5TnYzr9xnAU2P6T5ULwbbZnJES4T",
         &[
             "CompanyCreated",
             "CompanySpawned",
@@ -49,7 +49,7 @@ const EVENTS: &[(&str, &str, &[&str])] = &[
     ),
     (
         "aeqi_role",
-        "HFqh9bPLS7EwirMsz9MpNT96SN5v2JBeKTdnUpSVyuVe",
+        "8KgcKNqW94Xonj5H3s64Cgf3NmDPMjhpL3PfxeFnDV1r",
         &[
             "RoleTypeCreated",
             "RoleCreated",
@@ -61,7 +61,7 @@ const EVENTS: &[(&str, &str, &[&str])] = &[
     ),
     (
         "aeqi_governance",
-        "528PTeSk8M3pKMMhc5vitbcwMGUMcHMzg6G5XpX8iVBn",
+        "dXXXHVt3y8PXdVtw9yGWSb67hiDa7YkyuUTfi6xRLen",
         &[
             "ConfigRegistered",
             "ProposalCreated",
@@ -71,7 +71,7 @@ const EVENTS: &[(&str, &str, &[&str])] = &[
     ),
     (
         "aeqi_token",
-        "V9WiXaeayA8KTyVAEEG1rAuPQ28G6NEwzSCmzZNZv6z",
+        "28vYmAxQVZkqGwrH28gXDYNdWBPY7dW5odeUvoAHkw8r",
         &[
             "TokenModuleInitialized",
             "MintCreated",

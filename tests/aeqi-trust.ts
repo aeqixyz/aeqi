@@ -14,6 +14,7 @@ describe("aeqi_trust", () => {
 
   let trustPda: PublicKey;
   let trustBump: number;
+  let modulePda: PublicKey;
 
   before(() => {
     [trustPda, trustBump] = PublicKey.findProgramAddressSync(
@@ -47,7 +48,7 @@ describe("aeqi_trust", () => {
 
     const dummyProgram = Keypair.generate().publicKey;
 
-    const [modulePda] = PublicKey.findProgramAddressSync(
+    [modulePda] = PublicKey.findProgramAddressSync(
       [Buffer.from("module"), trustPda.toBuffer(), Buffer.from(moduleId)],
       program.programId,
     );
@@ -112,6 +113,45 @@ describe("aeqi_trust", () => {
     } catch (e: any) {
       threw = true;
       expect(e.toString()).to.match(/NotInCreationMode/);
+    }
+    expect(threw).to.eq(true);
+  });
+
+  it("rejects post-finalize config writes from non-authority even with a high-ACL module account", async () => {
+    const attacker = Keypair.generate();
+    const sig = await provider.connection.requestAirdrop(
+      attacker.publicKey,
+      2 * anchor.web3.LAMPORTS_PER_SOL,
+    );
+    const latest = await provider.connection.getLatestBlockhash();
+    await provider.connection.confirmTransaction(
+      { signature: sig, ...latest },
+      "confirmed",
+    );
+
+    const key = new Uint8Array(32).fill(0);
+    key[0] = 0x99;
+    const [configPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("cfg_num"), trustPda.toBuffer(), Buffer.from(key)],
+      program.programId,
+    );
+
+    let threw = false;
+    try {
+      await program.methods
+        .setNumericConfig(Array.from(key), new anchor.BN(42))
+        .accounts({
+          trust: trustPda,
+          config: configPda,
+          sourceModule: modulePda,
+          authority: attacker.publicKey,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([attacker])
+        .rpc();
+    } catch (e: any) {
+      threw = true;
+      expect(e.toString()).to.match(/Unauthorized/);
     }
     expect(threw).to.eq(true);
   });

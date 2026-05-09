@@ -24,11 +24,11 @@ use std::str::FromStr;
 use tracing::{info, warn};
 
 const PROGRAMS: &[(&str, &str)] = &[
-    ("aeqi_trust", "AF9cqzwiGCf2XHtLXyKJwToPaJghmEaHa9VQJ1zjoUHs"),
-    ("aeqi_factory", "7rX3fnJUy7tDSpo1EGCnUhs1XnxxbsQzXXNDCTh64v6n"),
-    ("aeqi_role", "HFqh9bPLS7EwirMsz9MpNT96SN5v2JBeKTdnUpSVyuVe"),
-    ("aeqi_governance", "528PTeSk8M3pKMMhc5vitbcwMGUMcHMzg6G5XpX8iVBn"),
-    ("aeqi_token", "V9WiXaeayA8KTyVAEEG1rAuPQ28G6NEwzSCmzZNZv6z"),
+    ("aeqi_trust", "4CtmLZSLR3t1nKa3A2XD7F2awU5WajiNMxvHCiEDoBnD"),
+    ("aeqi_factory", "4VvrC3pQ2hTUNJ7i5TnYzr9xnAU2P6T5ULwbbZnJES4T"),
+    ("aeqi_role", "8KgcKNqW94Xonj5H3s64Cgf3NmDPMjhpL3PfxeFnDV1r"),
+    ("aeqi_governance", "dXXXHVt3y8PXdVtw9yGWSb67hiDa7YkyuUTfi6xRLen"),
+    ("aeqi_token", "28vYmAxQVZkqGwrH28gXDYNdWBPY7dW5odeUvoAHkw8r"),
     ("aeqi_treasury", "CQ7TGZFmkoZh61xgKnbjcj9Uomht38LqeihMNsY4p9KC"),
     ("aeqi_vesting", "24mJEeCHs492NGCJADvfb9zWDcqoDWNCpCYC2xAE2VBs"),
 ];

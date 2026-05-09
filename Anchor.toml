@@ -6,31 +6,36 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-aeqi_trust = "AF9cqzwiGCf2XHtLXyKJwToPaJghmEaHa9VQJ1zjoUHs"
-aeqi_factory = "7rX3fnJUy7tDSpo1EGCnUhs1XnxxbsQzXXNDCTh64v6n"
-aeqi_role = "HFqh9bPLS7EwirMsz9MpNT96SN5v2JBeKTdnUpSVyuVe"
-aeqi_governance = "528PTeSk8M3pKMMhc5vitbcwMGUMcHMzg6G5XpX8iVBn"
-aeqi_token = "V9WiXaeayA8KTyVAEEG1rAuPQ28G6NEwzSCmzZNZv6z"
-aeqi_treasury = "CQ7TGZFmkoZh61xgKnbjcj9Uomht38LqeihMNsY4p9KC"
-aeqi_vesting = "24mJEeCHs492NGCJADvfb9zWDcqoDWNCpCYC2xAE2VBs"
-aeqi_unifutures = "2AqvqotDRhQj67YGn3MaZPUoYFBUEbnEbvbLD8Q2mF4s"
 aeqi_budget = "2XVZqURv6hVL7EEMd4BL1zyJhngSiAEV2q4yCgbQjASA"
+aeqi_factory = "4VvrC3pQ2hTUNJ7i5TnYzr9xnAU2P6T5ULwbbZnJES4T"
 aeqi_fund = "4QJQsnRYUyXo9EFxAayL79zAkFejjdWeKhoTXeMVK7Nv"
 aeqi_funding = "8EAVY6uosAatbwhemj1gsPB47WwwmDLzi2t7yo2b8CWV"
+aeqi_governance = "dXXXHVt3y8PXdVtw9yGWSb67hiDa7YkyuUTfi6xRLen"
+aeqi_role = "8KgcKNqW94Xonj5H3s64Cgf3NmDPMjhpL3PfxeFnDV1r"
+aeqi_token = "28vYmAxQVZkqGwrH28gXDYNdWBPY7dW5odeUvoAHkw8r"
+aeqi_treasury = "CQ7TGZFmkoZh61xgKnbjcj9Uomht38LqeihMNsY4p9KC"
+aeqi_trust = "4CtmLZSLR3t1nKa3A2XD7F2awU5WajiNMxvHCiEDoBnD"
+aeqi_unifutures = "2AqvqotDRhQj67YGn3MaZPUoYFBUEbnEbvbLD8Q2mF4s"
+aeqi_vesting = "24mJEeCHs492NGCJADvfb9zWDcqoDWNCpCYC2xAE2VBs"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Localnet"
+cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
 test = "npx ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
 
+[test]
+startup_wait = 5000
+shutdown_wait = 2000
+upgradeable = false
+
 [test.validator]
 bind_address = "127.0.0.1"
-rpc_port = 9899
-gossip_port = 9800
 faucet_port = 9909
-# rpc_pubsub_port defaults to rpc_port + 1 = 9900 — keep faucet off that.
+gossip_port = 9800
+ledger = ".anchor/test-ledger"
+rpc_port = 9899

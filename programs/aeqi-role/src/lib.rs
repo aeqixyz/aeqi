@@ -14,7 +14,7 @@
 
 use anchor_lang::prelude::*;
 
-declare_id!("HFqh9bPLS7EwirMsz9MpNT96SN5v2JBeKTdnUpSVyuVe");
+declare_id!("8KgcKNqW94Xonj5H3s64Cgf3NmDPMjhpL3PfxeFnDV1r");
 
 pub mod errors;
 pub mod state;

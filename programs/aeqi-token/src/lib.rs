@@ -15,12 +15,12 @@ use anchor_spl::token_interface::{
     burn, mint_to, Burn, Mint, MintTo, TokenAccount, TokenInterface,
 };
 
-declare_id!("V9WiXaeayA8KTyVAEEG1rAuPQ28G6NEwzSCmzZNZv6z");
+declare_id!("28vYmAxQVZkqGwrH28gXDYNdWBPY7dW5odeUvoAHkw8r");
 
 /// aeqi_trust program id — used for cross-program account read of the
 /// BytesConfig PDA written by the factory before finalize.
 pub const AEQI_TRUST_ID: Pubkey =
-    anchor_lang::pubkey!("AF9cqzwiGCf2XHtLXyKJwToPaJghmEaHa9VQJ1zjoUHs");
+    anchor_lang::pubkey!("4CtmLZSLR3t1nKa3A2XD7F2awU5WajiNMxvHCiEDoBnD");
 
 /// Stable PDA-key suffix the factory writes the token's borsh-encoded
 /// `TokenInitConfig` blob under, in trust's BytesConfig slot. Each module

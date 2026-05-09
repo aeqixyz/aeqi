@@ -28,7 +28,7 @@ use aeqi_token::program::AeqiToken;
 use aeqi_governance::cpi::accounts::{FinalizeGovernance, InitGovernance};
 use aeqi_governance::program::AeqiGovernance;
 
-declare_id!("7rX3fnJUy7tDSpo1EGCnUhs1XnxxbsQzXXNDCTh64v6n");
+declare_id!("4VvrC3pQ2hTUNJ7i5TnYzr9xnAU2P6T5ULwbbZnJES4T");
 
 pub mod state;
 pub use state::*;

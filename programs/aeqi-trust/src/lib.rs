@@ -13,7 +13,7 @@
 
 use anchor_lang::prelude::*;
 
-declare_id!("AF9cqzwiGCf2XHtLXyKJwToPaJghmEaHa9VQJ1zjoUHs");
+declare_id!("4CtmLZSLR3t1nKa3A2XD7F2awU5WajiNMxvHCiEDoBnD");
 
 pub mod acl;
 pub mod errors;
@@ -103,22 +103,13 @@ pub mod aeqi_trust {
         let trust = &ctx.accounts.trust;
         require!(!trust.paused, AeqiTrustError::TrustPaused);
 
-        // In creation mode the TRUST authority sets ACLs directly. After
-        // finalize, the *source* module must hold SET_ACL_BETWEEN_MODULES.
-        if trust.creation_mode {
-            require_keys_eq!(
-                ctx.accounts.authority.key(),
-                trust.authority,
-                AeqiTrustError::Unauthorized
-            );
-        } else {
-            // The source module's PDA must sign and must hold the right flag.
-            let source = &ctx.accounts.source_module;
-            require!(
-                has_acl(source.trust_acl, AclFlag::SetAclBetweenModules),
-                AeqiTrustError::DeniedAccess
-            );
-        }
+        // MVP hardening: live module-signed ACL mutation is intentionally
+        // closed until the module signer model is implemented end-to-end.
+        require_keys_eq!(
+            ctx.accounts.authority.key(),
+            trust.authority,
+            AeqiTrustError::Unauthorized
+        );
 
         let edge = &mut ctx.accounts.acl_edge;
         edge.trust = trust.key();
@@ -199,8 +190,6 @@ pub mod aeqi_trust {
         gate_config_write(
             &ctx.accounts.trust,
             ctx.accounts.authority.key(),
-            ctx.accounts.source_module.as_ref().map(|m| m.trust_acl),
-            AclFlag::SetNumericConfig,
         )?;
         let cfg = &mut ctx.accounts.config;
         cfg.trust = ctx.accounts.trust.key();
@@ -219,8 +208,6 @@ pub mod aeqi_trust {
         gate_config_write(
             &ctx.accounts.trust,
             ctx.accounts.authority.key(),
-            ctx.accounts.source_module.as_ref().map(|m| m.trust_acl),
-            AclFlag::SetAddressConfig,
         )?;
         let cfg = &mut ctx.accounts.config;
         cfg.trust = ctx.accounts.trust.key();
@@ -242,8 +229,6 @@ pub mod aeqi_trust {
         gate_config_write(
             &ctx.accounts.trust,
             ctx.accounts.authority.key(),
-            ctx.accounts.source_module.as_ref().map(|m| m.trust_acl),
-            AclFlag::SetBytesConfig,
         )?;
         let cfg = &mut ctx.accounts.config;
         cfg.trust = ctx.accounts.trust.key();
@@ -256,13 +241,11 @@ pub mod aeqi_trust {
     /// Pause / unpause the TRUST. Pause blocks all mutating ops.
     pub fn set_paused(ctx: Context<SetPaused>, paused: bool) -> Result<()> {
         let trust = &mut ctx.accounts.trust;
-        let flag = if paused { AclFlag::Pause } else { AclFlag::Unpause };
-        gate_config_write(
-            trust,
+        require_keys_eq!(
             ctx.accounts.authority.key(),
-            ctx.accounts.source_module.as_ref().map(|m| m.trust_acl),
-            flag,
-        )?;
+            trust.authority,
+            AeqiTrustError::Unauthorized
+        );
         trust.paused = paused;
         emit!(TrustPauseChanged {
             trust: trust.key(),
@@ -282,18 +265,10 @@ pub mod aeqi_trust {
 fn gate_config_write(
     trust: &Account<Trust>,
     signer: Pubkey,
-    source_module_acl: Option<u64>,
-    flag: AclFlag,
 ) -> Result<()> {
     require!(!trust.paused, AeqiTrustError::TrustPaused);
-    if trust.creation_mode {
-        require_keys_eq!(signer, trust.authority, AeqiTrustError::Unauthorized);
-        Ok(())
-    } else {
-        let acl = source_module_acl.ok_or(AeqiTrustError::DeniedAccess)?;
-        require!(has_acl(acl, flag), AeqiTrustError::DeniedAccess);
-        Ok(())
-    }
+    require_keys_eq!(signer, trust.authority, AeqiTrustError::Unauthorized);
+    Ok(())
 }
 
 pub const MAX_BYTES_CONFIG: usize = 1024;
