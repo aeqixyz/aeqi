@@ -1,0 +1,22 @@
+[package]
+name = "aeqi-trust"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "AEQI core protocol — TRUST registry, ACL flags, config store, execute gateway"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "aeqi_trust"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+anchor-lang = { workspace = true, features = ["init-if-needed"] }

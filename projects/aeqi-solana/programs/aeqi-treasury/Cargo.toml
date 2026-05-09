@@ -1,0 +1,23 @@
+[package]
+name = "aeqi-treasury"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "AEQI Treasury module — USDC vault, deposits, ACL-gated withdrawals"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "aeqi_treasury"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+
+[dependencies]
+anchor-lang = { workspace = true }
+anchor-spl = { workspace = true, features = ["token_2022"] }

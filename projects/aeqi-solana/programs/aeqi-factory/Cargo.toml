@@ -1,0 +1,32 @@
+[package]
+name = "aeqi-factory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "AEQI on-chain DAO factory — template registry + multi-sig instantiation"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "aeqi_factory"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+idl-build = [
+    "anchor-lang/idl-build",
+    "aeqi-trust/idl-build",
+    "aeqi-role/idl-build",
+    "aeqi-token/idl-build",
+    "aeqi-governance/idl-build",
+]
+
+[dependencies]
+anchor-lang = { workspace = true }
+aeqi-trust = { path = "../aeqi-trust", features = ["cpi"] }
+aeqi-role = { path = "../aeqi-role", features = ["cpi"] }
+aeqi-token = { path = "../aeqi-token", features = ["cpi"] }
+aeqi-governance = { path = "../aeqi-governance", features = ["cpi"] }
